@@ -1,5 +1,7 @@
 # Tempo
 
+**Tempo is open models plus the system that runs and trains them.** It routes every question to the best free or open model, checks the answer, fixes it when it is weak, shows every step, and trains its own small open models (Tempo-Router, Tempo-Judge, Tempo-Core) from the answers that passed, all on an ordinary CPU ([plan](docs/TEMPO_MODELS.md); nothing trained yet).
+
 Tempo is a **self-routing AI platform**. You ask a question from the web app, the CLI or the API. Tempo works out what kind of question it is and picks the best free or open-source model that is available. It checks the answer, and when the answer is weak it brings in more models to fix it, merge several drafts, or split the job into parts. A small **thinking window** shows every stage live: its job, the model, the reason, the time taken and the free quota left.
 
 Tempo is also meant to be **used by other tools**: it exposes itself as an OpenAI-compatible model (`tempo/auto`), so any OpenAI client can use it by changing the base URL.
@@ -46,6 +48,23 @@ GitHub Models is not offered: GitHub retired it on 30 July 2026 ([docs](https://
 Model lists are read live from each provider (public lists without a key: OpenRouter, NVIDIA, OpenCode Zen). Every model gets a type (chat, code, vision, speech-to-text, text-to-speech, safety, embedding, reranker, decision); only chat-capable ones get chat requests. `tempo terms` shows each provider's training verdict and what its free tier may do with prompts; `tempo terms --check` re-reads the terms pages and reports quotes that changed (`pip install -e ".[terms]"` for NVIDIA's PDF).
 
 Installed Ollama models are discovered automatically at startup. The seed model list, skill priors, free limits and each provider's training terms live in [`tempo/models.yaml`](tempo/models.yaml); set `TEMPO_MODELS_FILE` to use your own copy. The server refreshes each provider's model list every 6 hours, and `tempo sync` does it on demand.
+
+### Provider terms (may outputs be training data?)
+
+From `tempo terms` (quotes re-checked on the providers' pages with `tempo terms --check`, 2026-09-28). "Yes" sources are the only ones Tempo exports as training data.
+
+| Provider | Training on outputs | Free tier's use of prompts | Tempo's use |
+|---|---|---|---|
+| Ollama (local) | by each model's licence: Apache-2.0 / MIT = yes | stays on your computer | default for private and training runs |
+| Mistral (free plan) | yes, for text outputs | may train (opt out in the console, then `TEMPO_OPTED_OUT=mistral`) | answering; terms re-read before every export |
+| Cloudflare Workers AI | by each model's licence (Cloudflare adds no limit) | not kept, not trained on | answering |
+| Groq | unclear (until confirmed in writing) | unknown | answering |
+| OpenRouter (free models) | unclear (until confirmed in writing) | treated as may log | answering; `openrouter/free` last |
+| Google AI Studio | no | may train | answering |
+| Cohere (trial) | no | may train | users' own keys only; answers only, never judges, eval or collect |
+| NVIDIA (trial) | no | may train | off; the owner's private testing only |
+| OpenCode Zen | no | per model | off; users' own keys, answering only |
+| Cerebras (trial) | unclear | unknown | off; never eval or collect |
 
 ## Using Tempo
 
@@ -181,7 +200,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 267 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 281 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .
@@ -191,6 +210,9 @@ ruff check . && ruff format --check .
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.
+- [docs/USE_CASES.md](docs/USE_CASES.md): 20 scenarios Tempo is for, what each still needs, and its roadmap phase.
+- [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).
 - [docs/COLLECT_ANYWHERE.md](docs/COLLECT_ANYWHERE.md): step-by-step `tempo collect` on a Windows computer (local open-licence models), and as a scheduled GitHub Actions job that resumes across runs.
 - [docs/RESEARCH.md](docs/RESEARCH.md): existing GitHub projects (routers, gateways, model-mixing methods), the free LLM API providers and their limits, and what to avoid.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the full design: components, request lifecycle, the staged engine, Laya, thinking-window events, the neural router, using Tempo as a skill (API / MCP / CLI), security, tech stack, the roadmap and the planned **Tempo Tune** phase.
