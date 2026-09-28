@@ -1,6 +1,6 @@
 # Status
 
-_Last updated 2026-09-28, at the end of step 4 (OpenAI API compatibility). Branch:
+_Last updated 2026-09-28, at the end of step 5 (making Tempo-server easy for other people). Branch:
 `claude/multi-model-ai-platform-o0fx9v`._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
@@ -196,6 +196,69 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   not only through `TEMPO_ENABLE_MOCK`.
 - Tests: 320 pass, lint clean.
 
+### Step 5: the owner's decisions on step 4
+
+- **Structured outputs**: `response_format` is passed to models whose provider lists structured
+  outputs (OpenRouter's `supported_parameters`, Groq's and Google's docs); every answer is still
+  validated. A provider that rejects the parameter is remembered and never sent it again.
+- **Tool follow-ups** (`TEMPO_TOOL_FOLLOWUP`, default `quick`): the text answer after a tool
+  result always gets the quick checks (empty, refusal, wrong language); the judge and fix stages
+  run only in `best` mode or when a quick check fails (`full` always judges, `off` none).
+- **Groq and Google capabilities** marked per model from their official docs, with source and
+  date (console.groq.com/docs/tool-use, /vision, /structured-outputs; ai.google.dev model page;
+  checked 2026-09-28). Models whose docs weren't clear stay unmarked (Gemma's vision flag
+  removed). A keyed sync overwrites them.
+- **Web page**: a consent switch and a two-step "Delete my data" on the Keys page.
+- **oasst2** in `tempo collect`: first user turns only, deleted/flagged/synthetic/toxic
+  messages skipped, scrubbed, Apache-2.0 on every row (57,904 of 64,592 prompts kept).
+- **Error codes**: 503 with `Retry-After` (a minute, or the next daily reset) only when no model
+  is available or every free quota is used up; 502 with the reason when models answered but
+  none gave valid JSON or a valid tool call.
+- **Scrubbing**: US Social Security numbers (`[ssn]`) and IBANs (`[iban]`, mod-97 checked).
+
+### Step 5: easy for other people
+
+- **`tempo setup`** (`tempo/setup.py`): walks through Ollama, Groq, Google, OpenRouter,
+  Cloudflare (asks the account id), Mistral, Cohere, OpenCode Zen, NVIDIA and Cerebras: where to
+  get the key, free limits with source and date, training verdict and data policy. Keys are
+  checked with the provider (`verify_key`), stored encrypted for the owner only, shown as a
+  fingerprint. Rules applied: Cerebras stays off (no key asked); NVIDIA only after confirming
+  "own private testing"; OpenCode Zen opt-in with the user's own key; Cohere only the user's own
+  key. Non-secret settings (`CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`,
+  `TEMPO_ENABLE_PROVIDERS`) go to `<data dir>/settings.env`, which refuses secret-looking names.
+  Then the live lists are read and it prints free requests a day per provider and the total.
+  The admin (`TEMPO_API_KEY`) also gets the owner's setup keys; other users never do.
+- **Quota view**: `tempo quota [--json]`, `GET /api/quota`, and a strip on the Ask page with
+  free requests left today per provider (resets in …). When every free quota is used up, local
+  Ollama models (after the cache) answer and the thinking window says so; with no local model
+  the 503 says to start Ollama or wait (Retry-After).
+- **Local first** (`TEMPO_LOCAL_FIRST=auto`, `TEMPO_LOCAL_FIRST_MAX_COMPLEXITY=0.3`): simple
+  questions go to a running Ollama model first; never in `best` or with tools/JSON/an explicit
+  model.
+- **Packaging**: `tempo-server` console command (plus `tempo`), wheel includes `tempo/data`,
+  SPDX licence metadata; the wheel installs and answers in a clean venv. `Dockerfile`
+  (python:3.12-slim, non-root uid 10001, `/data` volume, health check, `BASE` build arg for a
+  Docker Hub mirror); built and run here (627 MB, mostly LiteLLM). Workflows: `ci.yml` (tests,
+  lint, package build on every push; green on GitHub) and `docker-publish.yml` (GHCR; only on a
+  published release or a manual run, tests first, amd64 + arm64). **Nothing published.**
+- **Name checks** (2026-09-28): PyPI `tempo-server`, `tempo_server`, `temposerver` are free
+  (404); PyPI `tempo` is taken by an unrelated project. Hugging Face: no model or dataset named
+  tempo-server, user/org `tempo-server` free; one unrelated Space
+  (`kokluch/tempo-edf-mcp-server`). **Clash:** Grafana Tempo builds binaries named `tempo`,
+  `tempo-query`, `tempo-cli` and `tempo-vulture`, and its `grafana/tempo` image has 100M+ pulls,
+  so the docs and Docker use `tempo-server`; `tempo` stays as a convenience alias.
+- **docs/CONNECT.md**: Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n, LangChain (Python
+  and JS), the OpenAI SDK, which key to use, and a troubleshooting table.
+  `tests/test_connect.py` runs the OpenAI SDK against a real server with a user's Tempo key
+  (models, chat, streaming) and checks a wrong key is refused.
+- **Public demo**: `tempo record-demo` saves the engine's events for a few questions to
+  `docs/demo/recording.js`; `docs/demo/index.html` replays them (thinking window, stage dots,
+  streamed answer, final meta; speed, skip, dark mode, phone width). Recorded in demo mode and
+  labelled so on the page; works from `file://` and GitHub Pages.
+- **README quick start**: install, `tempo-server setup`, `tempo-server serve`, connect an app;
+  Docker; the name clash.
+- Tests: 344 pass, lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -226,7 +289,7 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 4 is finished; waiting for step 5 from the owner.
+Nothing. Step 5 (the last planned step) is finished; the owner decides what comes next.
 
 ## Blocked: needs key
 
@@ -250,6 +313,13 @@ server:
 | Native tool calls on real providers (Groq, OpenRouter, Mistral, Cloudflare) | keys | LiteLLM against a fake server; emulation works on any model |
 | Real vision models (catalog `inputs`, OpenRouter live; Groq/Google seeds) | keys | demo and scripted models |
 | Strict JSON reliability per real model | keys | demo and scripted models |
+| `tempo setup` key checks against real providers | a key per provider | `verify_key` monkeypatched; its HTTP checks tested with mocks earlier |
+| `tempo quota` with real limits (headers, OpenRouter `/key`) | keys | seed limits and recorded calls |
+| Local first and the used-up fallback with a real Ollama | Ollama running | scripted local model |
+| Demo re-recorded with real models | keys | recorded in demo mode |
+
+Also blocked, on the owner rather than keys: publishing the Docker image, the PyPI package and
+the GitHub Pages demo (the owner said not to publish yet).
 
 ## What to run once keys exist
 
@@ -272,7 +342,12 @@ tempo terms --check                # re-verify every quote
 tempo collect --estimate --yes-only && tempo collect --yes-only --limit 10
 tempo export-sft --out sft && tempo export-pairs --out pairs && tempo export-laya --out laya
 tempo serve & python examples/tools_and_json.py   # tools, strict JSON and an image on real models
+tempo quota                        # real limits after a few calls
+tempo record-demo                  # re-record the public demo with real models, then commit docs/demo/recording.js
 ```
+
+On the owner's own computer (not this environment), `tempo-server setup` is the way to add
+keys: they are checked and stored encrypted, only for the owner.
 
 Check that a real 429 cools the model down and falls back, that `x-ratelimit-limit-*` headers
 update the limits (`tempo models --free` shows them), and that Mistral's headers are parsed
@@ -280,37 +355,35 @@ update the limits (`tempo models --free` shows them), and that Mistral's headers
 
 ## Next
 
-- Step 5, when the owner sends it: check that "Tempo-server" is free on PyPI and Hugging Face,
-  and whether the `tempo` command clashes with Grafana Tempo's `tempo` program.
 - The owner's plan: `tempo collect --yes-only` on their computer with a local Apache-2.0 model,
   then the first exports.
 - Noticed, not started:
-  - Groq's and Google's seeded models have no `tools`/`vision` flags (their lists need a key),
-    so they get tools emulated and no images until a sync with a key fills them in.
-  - Native structured outputs (`response_format` passed to providers that support it) are not
-    used yet: JSON is asked for in the prompt and validated, which works everywhere.
-  - Tool-calling requests run as one validated stage with no judge; text answers after tool
-    results do not get the check/fix stages either.
+  - Keys in `.env` or the environment (server-wide) are used for every user of a shared server
+    when the user has no key of their own (decision 1 below); keys from `tempo setup` are
+    already owner-only.
+  - Google AI Studio's free limits in `models.yaml` cite a community list
+    (github.com/raullenchai/free-llm-api-resources); re-check them on Google's own rate-limit
+    page, which needs a signed-in console.
   - NVIDIA's model list gives no context sizes; routing assumes 8K.
-  - The web page has no switches for `no_logging` or consent yet (API and CLI have them).
-  - `oasst2` as a collect dataset; human reference answers for the data mix.
-  - A static, replayed demo page.
+  - Human reference answers for the data mix.
+  - A PyPI publish workflow (trusted publishing), if the owner wants PyPI.
 
 ## Decisions for the owner
 
-1. **Native structured outputs**: also pass `response_format` to providers that support it
-   (fewer retries), or keep prompt-plus-validation only (the same on every provider)?
-2. **Tool-calling checks**: tool calls are validated by schema but not judged. Should the text
-   answer that follows a tool result also go through the judge and fix stages (better answers,
-   more free quota used)?
-3. **Tool support flags for seeds**: mark Groq's gpt-oss and Qwen models (and Google's Gemini)
-   as native tool and vision models from the providers' docs now, with source and date, or wait
-   for live data from a keyed sync?
-4. **Consent in the web page**: add a switch and a "delete my data" button to the Keys page?
-5. **oasst2**: add OpenAssistant's `oasst2` (Apache-2.0) to `tempo collect` as the permissive
-   general-questions dataset?
-6. **Error code** when no model produces a valid tool call or JSON: 503 today (like other "no
-   model could answer" cases); OpenAI has no exact equivalent. Keep 503?
+1. **Server-wide keys on a shared server**: keys from `tempo setup` are only for the owner, but
+   keys in `.env`/the environment are also used for other users who have no key of their own.
+   Make env keys owner-only too, with an opt-in `TEMPO_SHARE_SERVER_KEYS=1`? (Recommended, since
+   "my keys are only for my own use"; it changes behaviour for existing shared servers.)
+2. **Command name**: keep `tempo-server` as the documented command and `tempo` as an alias
+   (today), or drop the `tempo` alias before 1.0 to avoid clashing with Grafana Tempo on PATH?
+3. **Reserve the names**: publish a first `tempo-server` release to PyPI and create the
+   `tempo-server` Hugging Face org soon, before someone else takes them?
+4. **Docker image size** (627 MB, mostly LiteLLM and its dependencies): fine, or look into a
+   slimmer image?
+5. **Local first**: default `auto` with complexity up to 0.3 goes to a running Ollama model.
+   Keep, lower, or make it opt-in?
+6. **Demo hosting**: GitHub Pages from `/docs` on `main` (demo at
+   `https://<owner>.github.io/Tempo-server/demo/`), or a separate `gh-pages` branch?
 
 ## How the checks were run (for the next session)
 

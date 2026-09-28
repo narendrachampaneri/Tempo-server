@@ -34,8 +34,21 @@ Dataset credits (for example MBPP's CC-BY-4.0 attribution) go in the model cards
 
 The public name is **Tempo-server**: the README, `LICENSE`, the package metadata
 (`tempo-server` on PyPI), the Docker image (`tempo-server`) and the Hugging Face placeholders
-(`<owner>/tempo-server-*`). Step 5 checks that the name is free on PyPI and Hugging Face, and
-whether the `tempo` command clashes with Grafana Tempo, whose program is also called `tempo`.
+(`<owner>/tempo-server-*`).
+
+Checked 2026-09-28 (step 5):
+
+| Where | Result |
+|---|---|
+| PyPI `tempo-server`, `tempo_server`, `temposerver` | free (404) |
+| PyPI `tempo` | taken by an unrelated project |
+| Hugging Face models and datasets named `tempo-server`; user/org `tempo-server` | free |
+| Hugging Face Spaces | one unrelated Space, `kokluch/tempo-edf-mcp-server` |
+| Grafana Tempo | its Makefile builds `tempo`, `tempo-query`, `tempo-cli` and `tempo-vulture`; the `grafana/tempo` image has over 100M pulls |
+
+So a `tempo` command can clash with Grafana Tempo on a machine that has both. Tempo-server
+installs **`tempo-server`** as its main command (the docs and the Docker image use it) and keeps
+`tempo` as a short alias. Suggested: drop the alias before 1.0 if clashes are reported (owner).
 
 ## 2. No keys in the repository
 
@@ -75,7 +88,12 @@ without an account.
 - **Local demo (works today):** `TEMPO_ENABLE_MOCK=1 tempo serve`, then open
   http://127.0.0.1:8000. The demo models show every stage, a rate-limit fallback, a fix, and
   the language check, with no keys and no network.
-- **Public demo:** a hosted demo that runs Tempo needs a server. Hugging Face Spaces' free CPU
+- **Public demo (ready):** `docs/demo/index.html` replays `docs/demo/recording.js`, made by
+  `tempo-server record-demo`. It is recorded in demo mode now and says so on the page;
+  re-record with real models (`tempo-server record-demo` with keys set) before announcing it.
+  With GitHub Pages serving `/docs` from `main`, it is at
+  `https://<owner>.github.io/Tempo-server/demo/`.
+- **Why static:** a hosted demo that runs Tempo needs a server. Hugging Face Spaces' free CPU
   Basic hardware (2 vCPU, 16 GB) now needs a paid plan for Spaces that run code (Gradio or
   Docker); only static Spaces are free (huggingface.co/docs/hub/spaces-overview, checked
   2026-09-28). So the free public demo is **a static page**: a recorded run of the thinking
@@ -102,5 +120,11 @@ without an account.
 - [ ] `tempo terms --check` clean; STATUS.md current.
 - [ ] Tests and lint green on a clean checkout (`pip install -e ".[dev]" && pytest -q`).
 - [ ] Tag `v0.x` and write release notes (what works, what needs keys, what is planned).
+- [ ] Docker image: publishing the GitHub release runs `.github/workflows/docker-publish.yml`
+      (tests first, then `ghcr.io/<owner>/tempo-server:<version>` and `latest`, amd64 and
+      arm64). Then make the package public under the repository's Packages settings.
+- [ ] PyPI: `python -m build && twine upload dist/*` from a clean checkout (or add a trusted
+      publishing workflow). Until then the README installs from GitHub.
+- [ ] GitHub Pages: Settings → Pages → Deploy from branch `main`, folder `/docs`.
 - [ ] Models, when trained: model cards and licences (TEMPO_MODELS.md §5), promotion-gate
       results attached.
