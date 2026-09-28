@@ -82,6 +82,11 @@ Source: the auto-generated list from `cheahjs/free-llm-api-resources` (the origi
 | [HF Inference Providers](https://huggingface.co/docs/inference-providers/en/index) | $0.10/month credit | Anything served by partners |
 | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) | $5/month credit | Multi-provider |
 
+> **Checked again on 2026-09-28, against the providers' own pages:**
+> - **Groq**'s free plan ([rate limits](https://console.groq.com/docs/rate-limits)) now lists these chat models: gpt-oss-120b, gpt-oss-20b, gpt-oss-safeguard-20b and qwen3.8-27b. Each has 30 req/min, 1,000 req/day, 8K tokens/min and 200K tokens/day, and the limits apply per organization, not per key. Llama 3.x and Qwen3-32B are no longer on it.
+> - **Cerebras** no longer has a permanently free tier ([rate limits and FAQ](https://inference-docs.cerebras.ai/support/rate-limits)): new accounts get $5 of credits after adding a payment method, which expire after 30 days. The trial offers gpt-oss-120b and qwen-3.8-27b at 5 req/min and 1M tokens/day.
+> - **Google AI Studio** now shows free limits only inside AI Studio, and daily quotas reset at midnight Pacific time ([rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)).
+>
 > **These lists change within weeks.** During Phase 2 (late September 2026), OpenRouter's live `/models` listing no longer included several `:free` models that were seeded in Phase 1. Tempo's registry now carries `nemotron-3-super-120b-a12b:free`, `gemma-4-31b-it:free` and `qwen3.8-27b:free`. `tempo sync` (and the server every 6 hours) reads each provider's live model list, adds new chat models, and marks seeded models that a provider stopped listing as "no longer offered", so the router skips them.
 
 Trial credits (one-time): Fireworks ($1), SambaNova ($5 / 3 months), Scaleway (1M tokens), Alibaba Model Studio (1M tokens per model), plus Baseten, Nebius, Novita, AI21, Upstage, NLP Cloud, Modal, Inference.net, Hyperbolic.

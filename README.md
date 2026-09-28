@@ -5,6 +5,8 @@ Tempo is a **self-routing AI platform**. You ask a question from the web app, th
 Tempo is also meant to be **used by other tools**: it exposes itself as an OpenAI-compatible model (`tempo/auto`), so any OpenAI client can use it by changing the base URL.
 
 > **Status: Phase 2 (Smart) is done.** The staged engine (draft → check → fix → merge/polish, with early stop and budgets), the quota manager, answer checking, cascade, mixture and decompose strategies, the embedding classifier, the semantic cache, measured skill scores, registry sync and health checks, users with their own provider keys, and the usage dashboard all work. Laya runs as the fast decision-maker in shadow mode, and every question is logged for tuning. The learned router, the MCP server and the SDK come next (see the [roadmap](docs/ARCHITECTURE.md#11-roadmap)).
+>
+> **Software only.** Everything Tempo runs works on an ordinary CPU computer or a free cloud service; nothing needs a GPU. Free notebooks (Kaggle) are used only for offline training jobs, such as fine-tuning Laya ([the rule](docs/ARCHITECTURE.md#1-design-principles)).
 
 ## Quick start
 
@@ -14,7 +16,7 @@ Requires Python 3.11+.
 python -m venv .venv && source .venv/bin/activate
 pip install -e .                       # core
 pip install -e ".[embeddings]"         # optional: embedding classifier + semantic cache (fastembed, CPU)
-pip install -e ".[laya]"               # optional: Laya decision-maker (pulls in PyTorch)
+pip install -e ".[laya]"               # optional: Laya decision-maker on CPU (PyTorch + ONNX Runtime)
 
 cp .env.example .env        # then add at least one free key, e.g. GROQ_API_KEY
 tempo models                # see which models are ready
@@ -61,6 +63,7 @@ Other commands:
 | `tempo eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
 | `tempo users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
 | `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
+| `tempo collect [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable |
 | `tempo export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
 | `tempo terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
 | `tempo laya status` / `tempo laya compare` | Laya's state per decision; Laya vs rules on held-out questions |
@@ -114,17 +117,23 @@ question ─▶ understand ─▶ plan ─▶ draft ─▶ check ─┬─ passe
 
 The full design, with the stage jobs, events and Laya details, is in [docs/ARCHITECTURE.md §4.11–4.12](docs/ARCHITECTURE.md#411-the-staged-engine-built-in-phase-2).
 
-### Tuning Laya on your own logs
+### Laya on CPU, and tuning it on your own decisions
+
+Laya runs on an ordinary CPU. In shadow mode (the default) Tempo asks it in the background, so it adds no time to an answer; only decisions you hand to Laya are waited for, within a time limit Tempo measures on your machine when Laya loads. Measured on a 4-core CPU: shadow mode costs nothing, and a taken-over decision costs about 0.4–0.8 s per stage ([docs/LAYA_CPU.md](docs/LAYA_CPU.md), which also explains why INT8 is not the default).
+
+The stock checkpoints are near chance on Tempo's decisions, so fine-tune one first. The full walk-through is in [docs/LAYA_TUNING.md](docs/LAYA_TUNING.md):
 
 ```bash
-tempo export-laya --out laya-dataset          # train.jsonl + test.jsonl + README
-# fine-tune with Laya's notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb
-export TEMPO_LAYA_MODEL=/path/to/checkpoint   # use the tuned checkpoint (still in shadow mode)
+tempo collect --estimate                      # how long, at your keys' free limits
+tempo collect                                 # public, openly licensed questions; stop and resume any time
+tempo export-laya --out laya-dataset          # train.jsonl + test.jsonl + README (licences listed)
+# fine-tune with Laya's notebook on Kaggle's free GPUs (offline; the only GPU step)
+export TEMPO_LAYA_MODEL=/path/to/checkpoint   # the tuned checkpoint, on CPU, still in shadow mode
 tempo laya compare                            # after a few hundred more questions
 export TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto"   # Laya takes over where it wins
 ```
 
-The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. Only text from providers marked `training_on_outputs: yes` in `models.yaml` is exported by default; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo terms`), and `no` is never exported. On a CPU, Laya takes 0.4–1.2 s per decision group, so it stays in shadow mode (timed-out predictions are still logged, as `late`). Taking over needs a GPU.
+The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. A row is exported only if every model that answered or judged its question belongs to a provider marked `training_on_outputs: yes`; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo terms`), and `no` is never exported.
 
 ## Settings
 
@@ -142,9 +151,11 @@ All optional; put them in `.env` or the environment.
 | `TEMPO_LAYA` | `auto` | `auto` (load if installed), `on` (also for one-shot CLI runs), `off` |
 | `TEMPO_LAYA_MODEL` | stock checkpoints | A fine-tuned Laya checkpoint (folder or Hub repo) for every decision |
 | `TEMPO_LAYA_TAKEOVER` | all `shadow` | Per decision: `shadow`, `laya` or `auto`, e.g. `should_stop=auto, task_type=laya` or `all=auto` |
-| `TEMPO_LAYA_TIMEOUT_MS` | `200` | Rules decide when Laya is slower than this |
+| `TEMPO_LAYA_TIMEOUT_MS` | `auto` | How long an answer waits for a taken-over decision; `auto` measures it on this machine at load |
 | `TEMPO_LAYA_MIN_CONFIDENCE` | `0.6` | Below this, the rules decide even after a takeover |
-| `TEMPO_LAYA_DEVICE` | auto | For example `cuda` or `cpu` |
+| `TEMPO_LAYA_BACKEND` | `torch` | `torch` (fp32), `onnx` (fp32, same answers) or `onnx-int8` (faster, but changes answers) |
+| `TEMPO_LAYA_CHECKPOINT` | `english` | Stock checkpoint: `english` or `multilingual` (2.6× faster, a different model) |
+| `TEMPO_LAYA_THREADS` | up to 4 | CPU threads for Laya |
 | `TEMPO_EMBEDDINGS` | `auto` | `off` uses keyword rules only (and turns off the semantic cache) |
 | `TEMPO_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Any fastembed model |
 | `TEMPO_CACHE` / `TEMPO_CACHE_TTL` | `1` / `86400` | Semantic cache on/off and max age in seconds |
@@ -157,7 +168,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 199 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 223 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .
