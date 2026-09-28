@@ -10,23 +10,67 @@ Tempo is also meant to be **used by other tools**: it exposes itself as an OpenA
 >
 > **Software only.** Everything Tempo runs works on an ordinary CPU computer or a free cloud service; nothing needs a GPU. Free notebooks (Kaggle) are used only for offline training jobs, such as fine-tuning Laya ([the rule](docs/ARCHITECTURE.md#1-design-principles)).
 
-## Quick start
+## Quick start (under 5 minutes)
 
-Requires Python 3.11+.
+Requires Python 3.11+ on any ordinary computer (Windows, macOS or Linux; no GPU).
+
+**1. Install** (about a minute)
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .                       # core
-pip install -e ".[embeddings]"         # optional: embedding classifier + semantic cache (fastembed, CPU)
-pip install -e ".[laya]"               # optional: Laya decision-maker on CPU (PyTorch + ONNX Runtime)
-
-cp .env.example .env        # then add at least one free key, e.g. GROQ_API_KEY
-tempo models                # see which models are ready
-tempo ask "Explain the difference between TCP and UDP"
-tempo serve                 # web app on http://127.0.0.1:8000
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install git+https://github.com/narendrachampaneri/Tempo-server   # `pip install tempo-server` once it is on PyPI
 ```
 
-No keys yet? `TEMPO_ENABLE_MOCK=1 tempo serve` runs offline demo models. One of them always fails on purpose, so you can watch the fallback happen.
+**2. Add your free keys** (2–3 minutes)
+
+```bash
+tempo-server setup
+```
+
+The wizard goes through each free provider: where to get the key, its free limits (with their
+source), and its terms. Paste a key, or press Enter to skip. Each key is checked with the
+provider, stored encrypted, and never shown again. At the end you see how many free requests a
+day you now have. One key is enough to start (Groq or Google AI Studio take a minute to create).
+If [Ollama](https://ollama.com/download) is running, local models answer simple questions to
+save your free quota, and take over when every free quota is used up.
+
+**3. Start the server**
+
+```bash
+tempo-server serve            # web app on http://127.0.0.1:8000, API on http://127.0.0.1:8000/v1
+```
+
+**4. Connect an app**: base URL `http://localhost:8000/v1`, model `tempo/auto`, any key (for
+example `local`) while it's just you. Step-by-step for Open WebUI, LibreChat, Continue, Aider,
+OpenCode, n8n and LangChain: [docs/CONNECT.md](docs/CONNECT.md).
+
+```bash
+tempo-server quota            # free requests left today, per provider
+tempo-server ask "Explain the difference between TCP and UDP"
+```
+
+No keys yet? `TEMPO_ENABLE_MOCK=1 tempo-server serve` runs offline demo models (one always fails
+on purpose, so you can watch the fallback). Or see the [recorded demo](docs/demo/index.html).
+
+**Why `tempo-server` and not `tempo`?** Both commands work, but [Grafana
+Tempo](https://github.com/grafana/tempo) also installs a program called `tempo`, so the docs use
+`tempo-server` to avoid a clash. The examples below write `tempo` for short.
+
+**Docker** (the image isn't published yet; build it once):
+
+```bash
+docker build -t tempo-server .
+docker run -it --rm -v tempo-data:/data tempo-server setup                   # your keys, in the volume
+docker run -d -p 127.0.0.1:8000:8000 -v tempo-data:/data tempo-server        # http://localhost:8000
+```
+
+Set `-e TEMPO_API_KEY=...` before exposing the port beyond your own computer. Ollama on the host
+is `-e OLLAMA_API_BASE=http://host.docker.internal:11434` (Linux: add
+`--add-host=host.docker.internal:host-gateway`).
+
+**From a clone** (for development): `pip install -e ".[dev]"`; optional extras: `.[embeddings]`
+(embedding classifier and semantic cache, CPU) and `.[laya]` (Laya on CPU). Keys can also go in
+`.env` (copy `.env.example`) instead of the vault.
 
 ### Providers (all have free tiers)
 
@@ -87,6 +131,9 @@ Other commands:
 
 | Command | What it does |
 |---|---|
+| `tempo setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
+| `tempo quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
+| `tempo record-demo [--out FILE] [-q QUESTION]` | Record questions for the static demo page ([docs/demo/](docs/demo/index.html)) |
 | `tempo models` | Which models are ready, and why the others aren't (no key, quota used up, no longer offered, …) |
 | `tempo sync` | Refresh provider model lists now and report each provider's health |
 | `tempo models --free [--json]` | Live free-model catalog: provider, model, type, context, max output, inputs, tools, limits, data policy, health, last check and status |
@@ -105,7 +152,7 @@ Other commands:
 
 `tempo serve`, then open http://127.0.0.1:8000.
 
-- **Ask:** a prompt box with a mode switch and a ⚙ settings panel for the stage, time and free-quota budgets. Each answer gets a live thinking window (auto-scrolling, collapsible) with a stage progress bar. The first draft streams right away, later stages replace it live, and a 👍/👎 under each answer is saved for tuning.
+- **Ask:** a prompt box with a mode switch and a ⚙ settings panel for the stage, time and free-quota budgets. Each answer gets a live thinking window (auto-scrolling, collapsible) with a stage progress bar. The first draft streams right away, later stages replace it live, and a 👍/👎 under each answer is saved for tuning. A strip shows the free requests left today per provider; when every free quota is used up it says so, and Tempo answers with local models and the cache (a note in the thinking window).
 - **Models:** providers and models, ready or not and why, with measured skill scores and health.
 - **Usage:** questions, pass rate, median and p95 time, average stages, free requests used, feedback, the models used, why questions stopped, free quota left today, and how often Laya agrees with the rules. Users see only their own questions.
 - **Keys:** add your own provider keys (bring your own key). A key is checked with the provider before it is saved, stored encrypted, and never sent back to the page.
@@ -175,7 +222,9 @@ The labels come from outcomes: how many stages an answer really needed, judge sc
 
 ## Settings
 
-All optional; put them in `.env` or the environment.
+All optional; put them in `.env` or the environment. `tempo setup` writes the non-secret ones it
+needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PROVIDERS`) to
+`<data dir>/settings.env`; the environment and `.env` win over it. Keys never go there.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -200,6 +249,7 @@ All optional; put them in `.env` or the environment.
 | `TEMPO_SECRET_KEY` | generated | Key-vault secret (otherwise a 0600 `secret.key` file in the data dir) |
 | `TEMPO_SYNC_INTERVAL` | `21600` | Seconds between registry syncs (`0` = off) |
 | `TEMPO_API_KEY` | none | Admin key for the API and web app |
+| `TEMPO_LOCAL_FIRST` / `TEMPO_LOCAL_FIRST_MAX_COMPLEXITY` | `auto` / `0.3` | Send simple questions (up to this complexity) to a running local Ollama model first, to save free quota; `off` to turn off. Never in `best` mode |
 | `TEMPO_TOOL_FOLLOWUP` | `quick` | Checks for text answers to tool-calling requests: `quick`, `full` (always judge) or `off` |
 | `TEMPO_MIN_PUBLIC_SHARE` / `TEMPO_MAX_SELF_SHARE` | `0.3` / `0.3` | Training data mix: at least this share from public or human data, at most this share written by an earlier Tempo-Core (exports warn) |
 | `TEMPO_ENABLE_PROVIDERS` / `TEMPO_OPTED_OUT` | none | Providers that are off by default to turn on (e.g. `nvidia`); providers whose "train on my data" setting you turned off (e.g. `mistral`) |
@@ -209,7 +259,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 320 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 344 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .
@@ -219,6 +269,8 @@ ruff check . && ruff format --check .
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/CONNECT.md](docs/CONNECT.md): connect Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n or LangChain.
+- [docs/demo/](docs/demo/index.html): a recorded session replayed in the browser (static, for GitHub Pages).
 - [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.
 - [docs/USE_CASES.md](docs/USE_CASES.md): 20 scenarios Tempo is for, what each still needs, and its roadmap phase.
 - [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).
