@@ -692,6 +692,72 @@ def _terms_gate(engine: Engine) -> set[str]:
     return failed
 
 
+def _export_writing(kind: str, out_dir: Path, test_percent: int, users: list[str] | None) -> None:
+    from tempo import sft
+
+    engine = _engine()
+    allowed = sft.DEFAULT_USERS | set(users or [])
+    stats = sft.export(
+        engine.store,
+        engine.registry,
+        out_dir,
+        kind,
+        test_percent=test_percent,
+        users=allowed,
+        unverified=_terms_gate(engine),
+    )
+    count = stats.rows if kind == "sft" else stats.pairs
+    what = "checked answers" if kind == "sft" else "preference pairs"
+    err.print(f"Wrote {count} {what} to {out_dir}/ ({dict(stats.splits)})", markup=False)
+    notes = {
+        "final answer did not pass its check": stats.skipped_not_passed,
+        "👎 from the user": stats.skipped_feedback,
+        "text from a model or provider that is not 'yes' (tempo terms)": stats.skipped_terms,
+        "asked by another user (needs their consent; --user adds one)": stats.skipped_user,
+    }
+    if kind == "pairs":
+        notes["no failed draft to pair with"] = stats.skipped_no_rejected
+    for reason, n in notes.items():
+        if n:
+            err.print(f"  left out {n}: {reason}", markup=False)
+    rep = stats.repetition
+    err.print(
+        f"  repetition: distinct word pairs {rep.get('distinct_2')}, "
+        f"repeated 4-word sequences {rep.get('repeated_4')}",
+        markup=False,
+    )
+
+
+ExportUsers = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--user",
+        help="Also include this user's questions (only with their consent). Default: the owner "
+        "and tempo collect.",
+    ),
+]
+
+
+@app.command(name="export-sft")
+def export_sft(
+    out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")],
+    test_percent: Annotated[int, typer.Option("--test-percent", help="Held-out share.")] = 10,
+    user: ExportUsers = None,
+) -> None:
+    """Export question -> checked final answer, for fine-tuning Tempo-Core (only "yes" rows)."""
+    _export_writing("sft", out_dir, test_percent, user)
+
+
+@app.command(name="export-pairs")
+def export_pairs(
+    out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")],
+    test_percent: Annotated[int, typer.Option("--test-percent", help="Held-out share.")] = 10,
+    user: ExportUsers = None,
+) -> None:
+    """Export (question, chosen = answer that passed, rejected = draft that failed) for DPO."""
+    _export_writing("pairs", out_dir, test_percent, user)
+
+
 @app.command(name="export-laya")
 def export_laya(
     out_dir: Annotated[

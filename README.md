@@ -76,6 +76,8 @@ Other commands:
 | `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
 | `tempo collect [--yes-only] [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable. `--yes-only` uses only models whose outputs may be training data (local Apache-2.0/MIT models) |
 | `tempo export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
+| `tempo export-sft --out DIR` | Question → checked final answer, for fine-tuning Tempo-Core (only "yes" rows, licence and source on each) |
+| `tempo export-pairs --out DIR` | Question, chosen (answer that passed) and rejected (draft that failed), for DPO (only "yes" rows) |
 | `tempo terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
 | `tempo laya status` / `tempo laya compare` | Laya's state per decision; Laya vs rules on held-out questions |
 
