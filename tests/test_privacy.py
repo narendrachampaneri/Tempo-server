@@ -98,3 +98,49 @@ def test_data_mix_warnings():
     notes = sft.mix_warnings(stats, 0.3, 0.3)
     assert len(notes) == 2 and "below 30%" in notes[0] and "above 30%" in notes[1]
     assert sft.mix_warnings(sft.SftStats(rows=10, public_share=0.5), 0.3, 0.3) == []
+
+
+def test_scrub_international_formats():
+    text = "SSN 123-45-6789, IBAN GB82 WEST 1234 5698 7654 32 and DE89370400440532013000."
+    clean = scrub(text)
+    assert "123-45-6789" not in clean and "[ssn]" in clean
+    assert clean.count("[iban]") == 2 and "WEST" not in clean
+    # Look-alikes stay: a wrong IBAN checksum, dates, part numbers.
+    assert "[iban]" not in scrub("GB00 WEST 1234 5698 7654 32")  # wrong checksum
+    assert scrub("Order 2026-09-28, part 123-456-7890X") == "Order 2026-09-28, part 123-456-7890X"
+    assert scrub("invalid SSN 000-12-3456") == "invalid SSN 000-12-3456"
+
+
+def test_oasst2_keeps_first_user_turns_only_and_skips_flagged_ones():
+    import gzip
+
+    from tempo.datasets import DATASETS
+
+    def row(mid, text, **extra):
+        base = {
+            "message_id": mid,
+            "parent_id": None,
+            "role": "prompter",
+            "text": text,
+            "deleted": False,
+            "review_result": True,
+            "synthetic": False,
+            "labels": {"spam": {"value": 0.0}},
+        }
+        return json.dumps({**base, **extra})
+
+    rows = [
+        row("ok", "How do volcanoes form? Mail me at a@b.com"),
+        row("reply", "An answer", role="assistant", parent_id="ok"),
+        row("later", "A follow-up", parent_id="ok"),
+        row("deleted", "Deleted text", deleted=True),
+        row("rejected", "Rejected text", review_result=False),
+        row("spam", "Buy now", labels={"spam": {"value": 0.9}}),
+        row("pii", "My address is ...", labels={"pii": {"value": 0.7}}),
+    ]
+    raw = gzip.compress("\n".join(rows).encode())
+    items = list(DATASETS["oasst2"].parse(raw))
+    assert [i.item_id for i in items] == ["ok"]
+    assert "a@b.com" not in items[0].text and "[email]" in items[0].text
+    info = DATASETS["oasst2"].info()
+    assert info["license"] == "Apache-2.0" and info["training"] is True

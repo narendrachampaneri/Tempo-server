@@ -122,6 +122,42 @@ def _dolly_translate(raw: bytes) -> Iterator[Item]:
         yield Item(str(i), f"Translate into {language}:\n{text}")
 
 
+# Labels OpenAssistant's reviewers put on messages; any of these above the threshold means the
+# message is skipped (flagged).
+OASST_FLAGS = (
+    "spam",
+    "pii",
+    "not_appropriate",
+    "hate_speech",
+    "sexual_content",
+    "violence",
+    "lang_mismatch",
+)
+OASST_FLAG_THRESHOLD = 0.3
+
+
+def _oasst2(raw: bytes) -> Iterator[Item]:
+    """OpenAssistant oasst2: questions only (the first user turn of each conversation), never
+    deleted, reviewed as fine, not synthetic, and not flagged; scrubbed of personal data."""
+    from tempo.privacy import scrub
+
+    for row in _jsonl(raw):
+        if row.get("role") != "prompter" or row.get("parent_id") is not None:
+            continue
+        if row.get("deleted") or row.get("review_result") is False or row.get("synthetic"):
+            continue
+        labels = row.get("labels") or {}
+        flagged = any(
+            (labels.get(name) or {}).get("value", 0) > OASST_FLAG_THRESHOLD for name in OASST_FLAGS
+        )
+        toxic = ((row.get("detoxify") or {}).get("toxicity") or 0) > 0.5
+        if flagged or toxic:
+            continue
+        text = scrub((row.get("text") or "").strip())
+        if text:
+            yield Item(row["message_id"], text)
+
+
 DOLLY_URL = (
     "https://huggingface.co/datasets/databricks/databricks-dolly-15k/resolve/main/"
     "databricks-dolly-15k.jsonl"
@@ -167,6 +203,19 @@ DATASETS: dict[str, Dataset] = {
             license_url="https://github.com/openai/human-eval/blob/master/LICENSE",
             personal_data="Programming exercises; no personal data.",
             parse=_humaneval,
+        ),
+        Dataset(
+            name="oasst2",
+            title="OpenAssistant oasst2: first user turns (questions only)",
+            url="https://huggingface.co/datasets/OpenAssistant/oasst2/resolve/main/"
+            "2023-11-05_oasst2_prompts.messages.jsonl.gz",
+            filename="oasst2-prompts.messages.jsonl.gz",
+            license="Apache-2.0",
+            license_url="https://huggingface.co/datasets/OpenAssistant/oasst2",
+            personal_data="Crowd-written prompts; messages flagged for personal data, spam or "
+            "abuse, deleted or rejected in review are skipped, and the rest is scrubbed.",
+            parse=_oasst2,
+            weight=3,  # general questions in many languages: the permissive replacement for Dolly
         ),
         Dataset(
             name="dolly",

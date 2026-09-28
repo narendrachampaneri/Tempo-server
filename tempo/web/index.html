@@ -206,6 +206,12 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
 /* keys */
 .key-row { display: grid; grid-template-columns: minmax(0, 12rem) 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .key-row:last-child { border-bottom: 0; }
+.data-title { margin-top: 28px; }
+.btn.danger { color: var(--bad); border-color: var(--bad); }
+.btn.danger.solid { background: var(--bad); color: #fff; }
+.switch { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+#delete-step { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; }
 .key-row .who { font-weight: 600; }
 .key-row .who small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
 .key-row form { display: flex; gap: 6px; }
@@ -324,8 +330,22 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
 
   <section id="keys" class="view page" hidden>
     <h2>Your provider keys</h2>
-    <p class="sub">Add your own free keys. Tempo then uses them for your questions, with their own free-tier limits. Keys are encrypted at rest and never shown again; only the last four characters are displayed.</p>
+    <p class="sub">Add your own free keys. Tempo then uses them for your questions, with their own free-tier limits. Keys are encrypted at rest and never shown again; only a fingerprint (not part of the key) is displayed.</p>
     <div class="table-wrap" id="key-list"></div>
+
+    <h2 class="data-title">Your data</h2>
+    <div class="table-wrap data-box" id="data-box">
+      <div class="key-row">
+        <div class="who">Use my questions to train Tempo's own models<small id="consent-note">Off by default. Personal data is removed first. You can turn it off at any time; later exports then leave your questions out.</small></div>
+        <label class="switch"><input type="checkbox" id="consent-toggle" aria-describedby="consent-note"><span>Allow</span></label>
+        <div class="key-msg" id="consent-msg" role="status"></div>
+      </div>
+      <div class="key-row">
+        <div class="who">Delete my data<small>Deletes every question you asked, with its answers and feedback. Your account and keys stay.</small></div>
+        <div id="delete-step"><button class="btn danger" type="button" id="delete-start">Delete my data…</button></div>
+        <div class="key-msg" id="delete-msg" role="status"></div>
+      </div>
+    </div>
   </section>
 
   <section id="developers" class="view page" hidden>
@@ -365,7 +385,7 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
     document.querySelectorAll(".view").forEach(v => { v.hidden = v.id !== name; });
     if (name === "models") loadModels();
     if (name === "usage") loadUsage();
-    if (name === "keys") loadKeys();
+    if (name === "keys") { loadKeys(); loadData(); }
     if (name === "ask") input.focus();
   }
   document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
@@ -751,6 +771,7 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
       small.textContent = p.has_key
         ? `Your key (${p.fingerprint})${p.verified === true ? " · verified" : p.verified === false ? " · rejected" : ""}`
         : p.server_key ? "Using the server's key" : "No key yet";
+      if (p.off_note) small.textContent += ` · off by default: ${p.off_note}`;
       who.append(small);
       const form = document.createElement("form");
       const field = document.createElement("input"); field.type = "password"; field.autocomplete = "off";
@@ -785,6 +806,48 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
       row.append(who, form, side); list.append(row);
     }
   }
+
+  // ---- your data: training consent and deletion ------------------------------
+  async function loadData() {
+    const toggle = $("#consent-toggle"), note = $("#consent-msg");
+    const r = await api("/api/consent");
+    if (!r.ok) return;
+    const data = await r.json();
+    toggle.checked = !!data.consent;
+    toggle.disabled = !!data.owner;
+    note.textContent = data.owner ? "You run this server: your questions are always yours to use." : "";
+  }
+  $("#consent-toggle").addEventListener("change", async e => {
+    const note = $("#consent-msg"), on = e.target.checked;
+    const r = await api("/api/consent", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ consent: on }) });
+    if (!r.ok) { e.target.checked = !on; note.textContent = "Could not save your choice."; return; }
+    note.textContent = on ? "Thank you: your questions may be used, with personal data removed." : "Turned off: later exports leave your questions out.";
+  });
+  function resetDelete() {
+    const step = $("#delete-step");
+    const start = document.createElement("button");
+    start.className = "btn danger"; start.type = "button"; start.id = "delete-start"; start.textContent = "Delete my data…";
+    start.addEventListener("click", confirmDelete);
+    step.replaceChildren(start);
+  }
+  function confirmDelete() {
+    // Step 2: a clear question and two buttons; nothing is deleted until "Yes, delete".
+    const step = $("#delete-step");
+    const ask = document.createElement("span"); ask.textContent = "Delete all your questions and answers? This cannot be undone.";
+    const yes = document.createElement("button"); yes.className = "btn danger solid"; yes.type = "button"; yes.textContent = "Yes, delete";
+    const no = document.createElement("button"); no.className = "btn"; no.type = "button"; no.textContent = "Cancel";
+    no.addEventListener("click", () => { $("#delete-msg").textContent = ""; resetDelete(); });
+    yes.addEventListener("click", async () => {
+      yes.disabled = true; no.disabled = true; yes.textContent = "Deleting…";
+      const r = await api("/api/data", { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      $("#delete-msg").textContent = r.ok ? `Deleted ${data.deleted_questions ?? 0} question${data.deleted_questions === 1 ? "" : "s"}.` : "Could not delete; try again.";
+      resetDelete();
+    });
+    step.replaceChildren(ask, yes, no);
+    no.focus();
+  }
+  $("#delete-start").addEventListener("click", confirmDelete);
 
   // ---- status pill + models page --------------------------------------------
   async function refreshStatus() {

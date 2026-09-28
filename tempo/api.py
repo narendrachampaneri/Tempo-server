@@ -459,6 +459,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                     if not mine or mine["verified"] is None
                     else bool(mine["verified"]),
                     "server_key": registry.is_configured(p.id),
+                    "off_note": None if registry.is_enabled(p.id) else p.disabled_note,
                 }
             )
         return {"providers": providers}

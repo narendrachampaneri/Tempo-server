@@ -44,6 +44,10 @@ def test_every_dataset_records_its_licence_and_parses():
         "mbpp": b'{"task_id": 11, "text": "Reverse a list.", '
         b'"test_list": ["assert f([1]) == [1]"]}\n',
         "humaneval": gzip.compress(b'{"task_id": "HumanEval/0", "prompt": "def f():\\n"}\n'),
+        "oasst2": gzip.compress(
+            b'{"message_id": "m1", "parent_id": null, "role": "prompter", '
+            b'"text": "How do tides work?", "deleted": false, "review_result": true}\n'
+        ),
         "dolly": b'{"instruction": "Summarize this.", "context": "Some text.", "category": "x"}\n',
         "dolly-translate": b'{"instruction": "Where is the nearest train station?", '
         b'"context": ""}\n',
