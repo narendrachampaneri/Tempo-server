@@ -22,7 +22,7 @@ from tempo.types import MODES
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Tempo: ask once, and Tempo picks the best available free or open-source model.",
+    help="Tempo-server: ask once, and Tempo picks the best available free or open-source model.",
 )
 err = Console(stderr=True, highlight=False)
 out = Console(highlight=False)
@@ -484,8 +484,7 @@ def setup(
         bool, typer.Option("--no-sync", help="Don't read the live model lists at the end.")
     ] = False,
 ) -> None:
-    """Set up free providers: where to get each key, its free limits and terms; checks and
-    stores your keys encrypted, then shows how many free requests a day you have."""
+    """Set up free providers: keys, free limits and terms; shows your free requests a day."""
     from tempo.setup import Wizard
 
     names = {n.strip().lower() for n in only.split(",") if n.strip()} if only else None

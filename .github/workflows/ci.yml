@@ -1,0 +1,23 @@
+# Tests, lint, and a package build on every push and pull request. Publishes nothing.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]" build
+      - run: ruff check . && ruff format --check .
+      - run: pytest -q
+      - name: Build the pip package (not uploaded anywhere)
+        run: python -m build

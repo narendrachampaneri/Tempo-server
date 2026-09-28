@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,13 +7,16 @@ name = "tempo-server"
 version = "0.1.0"
 description = "Tempo-server: open models plus the system that runs and trains them. Routes each question to the best free or open model, checks the answer, and runs on CPU."
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "The Tempo-server authors"}]
 classifiers = [
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Framework :: FastAPI",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+keywords = ["llm", "openai-compatible", "router", "free-tier", "ollama", "litellm"]
 requires-python = ">=3.11"
 dependencies = [
     # 1.82.7 and 1.82.8 were malicious releases (March 2026 supply-chain attack).
@@ -41,13 +44,16 @@ embeddings = ["fastembed>=0.5"]
 terms = ["pypdf>=4"]
 
 [project.scripts]
+# `tempo-server` is the main command: Grafana Tempo also installs a `tempo` program, so the short
+# name is kept only as a convenience (docs/PUBLISHING.md, "Name").
+tempo-server = "tempo.cli:main"
 tempo = "tempo.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["tempo*"]
 
 [tool.setuptools.package-data]
-tempo = ["models.yaml", "web/*"]
+tempo = ["models.yaml", "web/*", "data/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
