@@ -144,6 +144,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             return "not configured"
         if model.installed is False:
             return "not installed"
+        if model.listed is False:
+            return "no longer offered"
         return engine.health.unavailable_reason(model) or "ready"
 
     def ready_models() -> list[ModelInfo]:
@@ -355,10 +357,19 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                 "reasoning": m.reasoning,
                 "vision": m.vision,
                 "strength": m.strength,
-                "skills": m.skills,
+                "skills": {t: engine.skills.skill(m, t) for t in m.skills},
+                "measured": {
+                    t: {k: d[k] for k in ("eval_n", "live_n")}
+                    for t in m.skills
+                    if (d := engine.skills.detail(m, t))["eval_n"] or d["live_n"]
+                },
+                "source": m.source,
             }
             for m in registry.all()
         ]
+        health = {p: s.as_dict() for p, s in (engine.sync.status if engine.sync else {}).items()}
+        for provider in providers:
+            provider["health"] = health.get(provider["id"])
         return {"providers": providers, "models": models}
 
     app.include_router(v1)

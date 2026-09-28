@@ -66,6 +66,11 @@ class Registry:
     def get(self, model_id: str) -> ModelInfo | None:
         return self._models.get(model_id)
 
+    def add(self, model: ModelInfo) -> None:
+        if model.provider not in self.providers:
+            raise ValueError(f"Model {model.id} uses unknown provider {model.provider!r}")
+        self._models.setdefault(model.id, model)
+
     def is_configured(self, provider_id: str, access: Access | None = None) -> bool:
         provider = self.providers[provider_id]
         if provider.id == "mock":
@@ -160,4 +165,5 @@ def _ollama_model_from_tag(model_id: str, name: str, details: Mapping) -> ModelI
         tokens_per_sec=max(5.0, 120.0 / max(params_b, 1.0) * 3),
         skills=skills,
         installed=True,
+        source="discovered",
     )

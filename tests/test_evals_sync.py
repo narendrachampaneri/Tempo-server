@@ -1,0 +1,236 @@
+"""Measured skill scores (probe set, live judge scores, latency) and registry sync/health."""
+
+import httpx
+import pytest
+from conftest import make_engine, make_registry
+
+from tempo.evals import SkillBook, grade, load_evalset, run_evals
+from tempo.health import HealthTracker
+from tempo.registry import Registry
+from tempo.router import Router
+from tempo.store import Store
+from tempo.sync import RegistrySync, guess_model
+from tempo.types import QueryProfile
+
+
+@pytest.mark.parametrize(
+    ("answer", "rule", "expected"),
+    [
+        ("The answer is 397.8", {"number": 397.8}, 1.0),
+        ("It's 1,250.00 INR", {"number": 1250}, 1.0),
+        ("About 400", {"number": 397.8}, 0.0),
+        ("Gracias!", {"contains": ["gracias"]}, 1.0),
+        ("Thanks", {"contains": ["gracias"]}, 0.0),
+        ("It is O(log n).", {"any": ["o(log n)", "o(logn)"]}, 1.0),
+        ('```json\n{"name": "Arjun", "age": 34}\n```', {"json": {"name": "Arjun", "age": 34}}, 1.0),
+        ('{"name": "Arjun", "age": 35}', {"json": {"name": "Arjun", "age": 34}}, 0.0),
+        ("```python\ndef fizzbuzz(n):\n    return []\n```", {"python": "fizzbuzz"}, 1.0),
+        ("```python\ndef fizzbuzz(n)\n    return []\n```", {"python": "fizzbuzz"}, 0.0),
+        ("```python\nimport os\nos.system('rm -rf /')\n```", {"python": "fizzbuzz"}, 0.0),
+    ],
+)
+def test_grading_rules(answer, rule, expected):
+    assert grade(answer, rule) == expected
+
+
+def test_evalset_covers_every_task_and_every_rule_is_known():
+    items = load_evalset()
+    assert {i.task for i in items} == {
+        "chat",
+        "code",
+        "math",
+        "reasoning",
+        "writing",
+        "summarize",
+        "translate",
+        "extract",
+    }
+    for item in items:
+        assert grade("", item.grade) in (0.0, 1.0)
+
+
+def profile(task="code"):
+    return QueryProfile(
+        task=task, complexity=0.2, script="latin", needs=[], input_tokens=20, est_output_tokens=200
+    )
+
+
+def test_skillbook_blends_prior_probe_and_live_scores():
+    registry = make_registry()
+    store = Store()
+    book = SkillBook(registry, store)
+    small = registry.get("alpha/small")
+    assert book.skill(small, "code") == pytest.approx(0.5)  # prior only
+    store.save_eval("alpha/small", "code", 5, 1.0)
+    book.refresh(force=True)
+    assert book.skill(small, "code") == pytest.approx((5 * 0.5 + 5 * 1.0) / 10)
+    for _ in range(10):
+        store.add_call(model="alpha/small", task="code", status="ok", score=0.0, ms=100)
+    book.refresh(force=True)
+    detail = book.detail(small, "code")
+    assert detail["live_n"] == 10 and detail["eval_n"] == 5
+    assert detail["skill"] == pytest.approx((2.5 + 5.0 + 0.5 * 10 * 0.0) / (5 + 5 + 5))
+
+
+def test_live_latency_updates_speed_estimates():
+    registry = make_registry()
+    store = Store()
+    book = SkillBook(registry, store)
+    tiny = registry.get("local/tiny")
+    for _ in range(20):
+        store.add_call(model="local/tiny", status="ok", ms=1100, ttft_ms=100, output_tokens=100)
+    book.refresh(force=True)
+    assert tiny.ttft_ms < 800  # moved from the 800 ms prior toward the measured 100 ms
+    assert tiny.tokens_per_sec > 40  # measured 100 tokens/s against a 40 prior
+
+
+def test_router_follows_measured_skills():
+    registry = make_registry()
+    store = Store()
+    book = SkillBook(registry, store)
+    router = Router(registry, HealthTracker(), skill_of=book.skill)
+    before = [c.model.id for c in router.rank(profile(), mode="best").candidates]
+    store.save_eval("alpha/small", "code", 40, 1.0)
+    store.save_eval("alpha/strong", "code", 40, 0.1)
+    book.refresh(force=True)
+    after = [c.model.id for c in router.rank(profile(), mode="best").candidates]
+    assert after.index("alpha/small") < before.index("alpha/small")
+    assert after.index("alpha/strong") > before.index("alpha/strong")
+
+
+async def test_run_evals_grades_models_and_saves_scores():
+    def answers(messages):
+        question = messages[-1]["content"]
+        if "17%" in question:
+            return [("answer", "397.8")]
+        return [("answer", "no idea")]
+
+    engine, _ = make_engine({"*:eval": answers})
+    models = [engine.registry.get("beta/mid")]
+    seen = []
+    results = await run_evals(engine, models, tasks=["math"], on_result=seen.append)
+    assert len(results) == 1 and results[0].task == "math" and results[0].n == 5
+    assert results[0].score == pytest.approx(0.2)
+    assert seen == results
+    saved = {(r["model"], r["task"]): r for r in engine.store.eval_results()}
+    assert saved[("beta/mid", "math")]["score"] == pytest.approx(0.2)
+    assert engine.skills.detail(models[0], "math")["eval_n"] == 5
+
+
+async def test_run_evals_respects_quota_and_limit():
+    engine, backend = make_engine({"*:eval": [("answer", "x")]})
+    strong = engine.registry.get("alpha/strong")  # 20 free requests/day
+    for _ in range(20):
+        engine.quota.record(strong)
+    results = await run_evals(engine, [strong], tasks=["chat"], limit=2)
+    assert results[0].n == 0 and results[0].errors == 2
+    assert backend.calls == []
+
+
+# --- registry sync ------------------------------------------------------------------------
+
+
+def provider_lists(request: httpx.Request) -> httpx.Response:
+    url = str(request.url)
+    if "openrouter.ai" in url:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "meta-llama/llama-3.3-70b-instruct:free",
+                        "context_length": 131072,
+                        "pricing": {"prompt": "0", "completion": "0"},
+                    },
+                    {
+                        "id": "qwen/qwen3-235b-a22b:free",
+                        "context_length": 40960,
+                        "pricing": {"prompt": "0", "completion": "0"},
+                    },
+                    {
+                        "id": "openai/gpt-5",
+                        "pricing": {"prompt": "0.00001", "completion": "0.00003"},
+                    },
+                ]
+            },
+        )
+    if "api.groq.com" in url:
+        assert request.headers["authorization"] == "Bearer gk"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "llama-3.3-70b-versatile", "context_window": 131072, "active": True},
+                    {"id": "whisper-large-v3", "active": True},
+                    {"id": "moonshotai/kimi-k2-instruct", "context_window": 131072, "active": True},
+                ]
+            },
+        )
+    if "generativelanguage" in url:
+        assert request.url.params["key"] == "gm"
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "name": "models/gemini-2.5-flash",
+                        "inputTokenLimit": 1048576,
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/text-embedding-004",
+                        "supportedGenerationMethods": ["embedContent"],
+                    },
+                ]
+            },
+        )
+    if "cerebras" in url:
+        return httpx.Response(401, json={"error": "bad key"})
+    return httpx.Response(404)
+
+
+async def test_sync_adds_new_free_models_and_retires_missing_ones():
+    env = {"GROQ_API_KEY": "gk", "GEMINI_API_KEY": "gm", "CEREBRAS_API_KEY": "ck"}
+    registry = Registry.load(env=env)
+    health = HealthTracker()
+    status = await RegistrySync(registry, health, httpx.MockTransport(provider_lists)).run()
+
+    assert status["groq"].ok and status["groq"].listed == 2
+    assert "groq/moonshotai/kimi-k2-instruct" in status["groq"].added
+    assert registry.get("groq/whisper-large-v3") is None  # not a chat model
+    assert registry.get("groq/llama-3.3-70b-versatile").listed is True
+    assert registry.get("groq/openai/gpt-oss-120b").listed is False  # no longer offered
+    assert "groq/openai/gpt-oss-120b" in status["groq"].removed
+
+    added = registry.get("openrouter/qwen/qwen3-235b-a22b:free")
+    assert added is not None and added.source == "sync" and added.family == "qwen"
+    assert registry.get("openrouter/openai/gpt-5") is None  # paid: not added
+    assert registry.get("gemini/text-embedding-004") is None
+
+    assert not status["cerebras"].ok and status["cerebras"].error == "API key rejected"
+    assert (
+        health.unavailable_reason(registry.get("cerebras/llama3.1-8b")) == "provider key rejected"
+    )
+
+    router = Router(registry, health)
+    skipped = router.rank(profile("chat")).skipped
+    assert "groq/openai/gpt-oss-120b" in skipped["no longer offered"]
+
+
+async def test_sync_reports_outages_without_changing_the_registry():
+    def down(request):
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    registry = Registry.load(env={"GROQ_API_KEY": "gk"})
+    status = await RegistrySync(registry, transport=httpx.MockTransport(down)).run()
+    assert not status["groq"].ok and status["groq"].error.startswith("unreachable")
+    assert registry.get("groq/llama-3.3-70b-versatile").listed is None
+
+
+def test_guessed_priors_scale_with_size():
+    small = guess_model("tiny-llama-1b", "groq", None, 4096)
+    big = guess_model("llama-3.1-405b", "groq", None, 131072)
+    moe = guess_model("qwen3-235b-a22b", "groq", None, 32768)
+    assert small.strength < big.strength
+    assert moe.tokens_per_sec > big.tokens_per_sec  # only 22B active parameters
+    assert guess_model("qwen3-coder-30b", "groq", None, 1).skills["code"] > 0.6

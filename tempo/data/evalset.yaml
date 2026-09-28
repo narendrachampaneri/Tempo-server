@@ -1,0 +1,104 @@
+# Probe questions for measuring each model's skills (`tempo eval`).
+# Every item is graded automatically, without running any code:
+#   number    the answer contains this number (within tolerance)
+#   contains  every listed phrase appears (case-insensitive)
+#   any       at least one listed phrase appears
+#   json      the answer's JSON has these key/value pairs
+#   python    a ```python block parses and defines this function
+# Keep items short and unambiguous; add your own for the tasks your users care about.
+
+chat:
+  - q: "Reply with a one-sentence greeting that includes the word 'welcome'."
+    grade: {contains: ["welcome"]}
+  - q: "Someone says 'thank you so much!'. Reply politely in one short sentence."
+    grade: {any: ["welcome", "pleasure", "glad", "happy to help", "anytime"]}
+  - q: "In one word, what colour is a ripe banana?"
+    grade: {contains: ["yellow"]}
+  - q: "Name the capital of Japan in one word."
+    grade: {contains: ["tokyo"]}
+  - q: "What do bees make? Answer in one word."
+    grade: {contains: ["honey"]}
+
+code:
+  - q: "Write a Python function `is_palindrome(s)` that returns True if the string reads the same backwards. Reply with only a ```python code block."
+    grade: {python: "is_palindrome"}
+  - q: "Write a Python function `fizzbuzz(n)` that returns a list of strings for 1..n following FizzBuzz rules. Only a ```python block."
+    grade: {python: "fizzbuzz"}
+  - q: "Write a Python function `word_count(text)` returning a dict of word frequencies. Only a ```python block."
+    grade: {python: "word_count"}
+  - q: "In SQL, which keyword removes duplicate rows from a SELECT result? Answer with the keyword only."
+    grade: {contains: ["distinct"]}
+  - q: "What is the time complexity of binary search on a sorted array? Use big-O notation."
+    grade: {any: ["o(log n)", "o(logn)", "o(log(n))"]}
+
+math:
+  - q: "What is 17% of 2340? Give just the number."
+    grade: {number: 397.8}
+  - q: "Solve for x: 3x + 5 = 20. Give just the number."
+    grade: {number: 5}
+  - q: "What is 144 divided by 12, plus 7? Give just the number."
+    grade: {number: 19}
+  - q: "A train travels 180 km in 2.5 hours. What is its average speed in km/h? Just the number."
+    grade: {number: 72}
+  - q: "What is the sum of the interior angles of a hexagon, in degrees? Just the number."
+    grade: {number: 720}
+
+reasoning:
+  - q: "If all bloops are razzies and all razzies are lazzies, are all bloops lazzies? Answer yes or no, then one sentence why."
+    grade: {contains: ["yes"]}
+  - q: "Tom is taller than Ana. Ana is taller than Raj. Who is the shortest? Answer with the name."
+    grade: {contains: ["raj"]}
+  - q: "Which is heavier: a kilogram of feathers or a kilogram of iron? Answer briefly."
+    grade: {any: ["same", "equal", "neither", "both weigh"]}
+  - q: "I have 3 apples, eat one, then buy 5 more. How many apples do I have? Just the number."
+    grade: {number: 7}
+  - q: "Why does ice float on water? Answer in one or two sentences and mention density."
+    grade: {contains: ["dens"]}
+
+writing:
+  - q: "Write a two-line rhyming couplet about the sea. Include the word 'wave'."
+    grade: {contains: ["wave"]}
+  - q: "Write a one-sentence subject line for an email asking for a meeting next Monday. Include 'Monday'."
+    grade: {contains: ["monday"]}
+  - q: "Rewrite 'gimme the report asap' in a polite, professional tone, in one sentence. Include 'please'."
+    grade: {contains: ["please"]}
+  - q: "Write a slogan of at most eight words for a bakery. Include the word 'fresh'."
+    grade: {contains: ["fresh"]}
+  - q: "Write one sentence that uses the word 'serendipity' correctly."
+    grade: {contains: ["serendipit"]}
+
+summarize:
+  - q: "Summarize in one sentence: 'The city council met on Tuesday and voted 7-2 to build a new public library downtown, funded by a bond approved last year. Construction starts in March.' Mention the library."
+    grade: {contains: ["library"]}
+  - q: "Give the main point in under 15 words: 'Regular exercise improves heart health, mood and sleep, and reduces the risk of several chronic diseases.' Mention exercise."
+    grade: {contains: ["exercise"]}
+  - q: "TL;DR in one line: 'Our Q3 revenue grew 12% year over year, driven mainly by strong sales in Asia, while costs stayed flat.' Mention revenue."
+    grade: {contains: ["revenue"]}
+  - q: "Summarize in one sentence: 'Bees pollinate a third of the crops we eat. Pesticides and habitat loss are reducing bee populations worldwide.' Mention bees."
+    grade: {contains: ["bee"]}
+  - q: "One-sentence summary: 'The update fixes a login bug, speeds up search by 40%, and adds dark mode.' Mention dark mode."
+    grade: {contains: ["dark mode"]}
+
+translate:
+  - q: "Translate 'thank you' into Spanish. Answer with the translation only."
+    grade: {contains: ["gracias"]}
+  - q: "Translate 'good morning' into French. Translation only."
+    grade: {contains: ["bonjour"]}
+  - q: "Translate 'water' into German. One word only."
+    grade: {contains: ["wasser"]}
+  - q: "Translate 'thank you' into Hindi, in Devanagari script. Translation only."
+    grade: {any: ["धन्यवाद", "शुक्रिया"]}
+  - q: "Translate 'hello' into Japanese (any script). Translation only."
+    grade: {any: ["こんにちは", "konnichiwa", "今日は"]}
+
+extract:
+  - q: 'Extract the email address from: "Contact Priya at priya.shah@example.com for details." Reply with the address only.'
+    grade: {contains: ["priya.shah@example.com"]}
+  - q: 'Return JSON with keys "name" and "age" for: "Arjun is 34 years old." JSON only.'
+    grade: {json: {name: "Arjun", age: 34}}
+  - q: 'Return JSON with keys "city" and "country" for: "She moved to Pune, India, in 2019." JSON only.'
+    grade: {json: {city: "Pune", country: "India"}}
+  - q: 'What is the invoice total in: "Invoice 4411, dated 3 May, total due 1,250.00 INR"? Just the number.'
+    grade: {number: 1250}
+  - q: 'List the colours mentioned, comma-separated: "The flag has saffron, white and green bands."'
+    grade: {contains: ["saffron", "white", "green"]}

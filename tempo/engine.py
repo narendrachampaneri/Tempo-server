@@ -8,6 +8,7 @@ consumes the same stream, so the thinking window shows exactly what the engine d
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from tempo.analyzer import analyze
 from tempo.config import MAX_STAGES_LIMIT, Settings
 from tempo.embeddings import EmbeddingClassifier, SemanticCache, load_encoder
+from tempo.evals import SkillBook
 from tempo.events import STREAM_EVENTS, Event
 from tempo.health import HealthTracker
 from tempo.laya_decider import LayaDecider
@@ -27,12 +29,14 @@ from tempo.quota import QuotaManager
 from tempo.registry import Registry
 from tempo.router import Router, RouteResult
 from tempo.store import Store
+from tempo.sync import RegistrySync
 from tempo.types import MODES, Access, ModelInfo, QueryProfile
 
 if TYPE_CHECKING:
     from tempo.pipeline import Pipeline
 
 DEFAULT_SYSTEM_PROMPT = TEMPO_SYSTEM
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -123,7 +127,10 @@ class Engine:
         self.health = health or HealthTracker()
         self.store = store or Store(self.settings.db_path)
         self.quota = QuotaManager(registry, self.store)
-        self.router = Router(registry, self.health, self.quota)
+        self.skills = SkillBook(registry, self.store)
+        self.router = Router(registry, self.health, self.quota, skill_of=self.skills.skill)
+        self.sync: RegistrySync | None = None  # periodic model-list sync (from_settings)
+        self._maintenance: asyncio.Task[None] | None = None
         self.cache: SemanticCache | None = None  # attached in Engine.from_settings
         self.laya: LayaDecider | None = None  # attached in Engine.from_settings
         self._laya_loading: Any = None
@@ -143,6 +150,7 @@ class Engine:
 
         engine = cls(registry, backend_for, settings=settings, warm_up=litellm_backend.warm_up)
         engine.laya = LayaDecider(settings, engine.store)
+        engine.sync = RegistrySync(registry, engine.health)
         model_name = settings.embedding_model
         classifier = EmbeddingClassifier(
             lambda: load_encoder(settings.embeddings, model_name),
@@ -153,17 +161,39 @@ class Engine:
             engine.cache = SemanticCache(lambda: classifier.encoder, ttl_s=settings.cache_ttl_s)
         return engine
 
-    async def startup(self) -> None:
-        """One-time async setup: discover local Ollama models, load provider libraries, and
-        start loading Laya in the background (questions meanwhile use the rules)."""
+    async def startup(self, oneshot: bool = False) -> None:
+        """One-time async setup: discover local Ollama models and load provider libraries.
+
+        A server (``oneshot=False``) loads Laya and the embedding classifier in the background
+        (questions meanwhile use the rules) and starts the periodic registry sync. A one-shot
+        CLI run loads the classifier before answering, skips Laya unless TEMPO_LAYA=on, and
+        does not sync.
+        """
         await self.registry.discover_ollama()
+        loop = asyncio.get_running_loop()
         if self.laya is not None:
-            self._laya_loading = self.laya.start()
+            if oneshot and self.settings.laya != "on":
+                self.laya.status = "off"
+            else:
+                self._laya_loading = self.laya.start()
         if self.classifier is not None and self.classifier.status == "loading":
-            loop = asyncio.get_running_loop()
             self._classifier_loading = loop.run_in_executor(None, self.classifier.load)
+            if oneshot:
+                await self._classifier_loading
+        if not oneshot and self.sync is not None and self.settings.sync_interval_s > 0:
+            self._maintenance = asyncio.create_task(self._sync_loop())
         if self._warm_up:
             await self._warm_up()
+
+    async def _sync_loop(self) -> None:
+        """Refresh provider model lists (and check provider health) now and then."""
+        assert self.sync is not None
+        while True:
+            try:
+                await self.sync.run()
+            except Exception:  # a sync problem must never take the server down
+                log.exception("registry sync failed")
+            await asyncio.sleep(self.settings.sync_interval_s)
 
     def options(self, **overrides: Any) -> RunOptions:
         s = self.settings

@@ -149,6 +149,8 @@ class Router:
             return "provider not configured"
         if model.installed is False:
             return "not installed"
+        if model.listed is False:
+            return "no longer offered"
         if local_only and not provider.local:
             return "not local"
         if allow_providers is not None and model.provider not in set(allow_providers):

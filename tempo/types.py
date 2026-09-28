@@ -55,6 +55,9 @@ class ModelInfo(BaseModel):
     skills: dict[str, float] = Field(default_factory=dict)
     # None = unknown; False = the provider reported it is not installed (Ollama discovery).
     installed: bool | None = None
+    # None = not checked; False = the provider's model list no longer includes it.
+    listed: bool | None = None
+    source: str = "seed"  # "seed" (models.yaml), "sync" (provider list) or "discovered"
 
     def skill(self, task: str) -> float:
         return self.skills.get(task, self.strength)

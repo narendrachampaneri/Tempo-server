@@ -120,6 +120,7 @@ def env(base_url, monkeypatch):
         "OLLAMA_API_BASE": base_url,
         "TEMPO_DATA_DIR": "memory",
         "TEMPO_EMBEDDINGS": "off",
+        "TEMPO_SYNC_INTERVAL": "0",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)

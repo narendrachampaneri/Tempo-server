@@ -184,7 +184,7 @@ def ask(
     messages = [{"role": "user", "content": text}]
 
     async def main() -> RunResult:
-        await engine.startup()
+        await engine.startup(oneshot=True)
         if as_json:
             return await collect(engine.run(messages, options))
         return await _stream_answer(engine, messages, options, trace)
@@ -269,7 +269,7 @@ def chat(
 def models() -> None:
     """List models and whether each one is ready to use."""
     engine = _engine()
-    asyncio.run(engine.startup())
+    asyncio.run(engine.startup(oneshot=True))
     registry = engine.registry
 
     table = Table(title="Tempo models", title_style="bold", header_style="bold")
@@ -296,6 +296,73 @@ def models() -> None:
         for p in missing:
             env = p.key_env or p.base_env
             out.print(f"  {env:<20} {p.label:<26} {p.signup_url or ''}", markup=False)
+
+
+@app.command(name="eval")
+def eval_models(
+    model: Annotated[
+        list[str] | None, typer.Option("--model", help="Model id to measure (repeatable).")
+    ] = None,
+    task: Annotated[
+        list[str] | None, typer.Option("--task", help="Only these tasks (repeatable).")
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="Questions per task (default: all).")
+    ] = None,
+) -> None:
+    """Measure models on the probe set; the router then uses the measured skills."""
+    from tempo.evals import EvalResult, run_evals
+
+    engine = _engine()
+    asyncio.run(engine.startup(oneshot=True))
+    if model:
+        chosen = [engine.registry.get(m) for m in model]
+        missing = [m for m, c in zip(model, chosen, strict=True) if c is None]
+        if missing:
+            raise typer.BadParameter(f"unknown model(s): {', '.join(missing)}")
+        targets = [c for c in chosen if c is not None]
+    else:
+        targets = [
+            m
+            for m in engine.registry.all()
+            if engine.registry.is_configured(m.provider) and m.installed is not False
+        ]
+    if not targets:
+        err.print("No configured models to measure.", style="red")
+        raise typer.Exit(1)
+    err.print(f"Measuring {len(targets)} model(s)…", style="dim", markup=False)
+
+    def report(r: EvalResult) -> None:
+        note = f" ({r.errors} failed)" if r.errors else ""
+        err.print(f"  {r.model:<50} {r.task:<10} {r.score:.2f} on {r.n}{note}", markup=False)
+
+    results = asyncio.run(run_evals(engine, targets, task, limit, on_result=report))
+    table = Table(title="Measured skills (blended with priors)", header_style="bold")
+    table.add_column("model")
+    tasks = sorted({r.task for r in results})
+    for t in tasks:
+        table.add_column(t, justify="right")
+    for m in targets:
+        table.add_row(m.id, *(f"{engine.skills.skill(m, t):.2f}" for t in tasks))
+    out.print(table)
+
+
+@app.command()
+def sync() -> None:
+    """Refresh provider model lists now and report each provider's health."""
+    from tempo.sync import RegistrySync
+
+    engine = _engine()
+    status = asyncio.run(RegistrySync(engine.registry, engine.health).run())
+    table = Table(title="Provider sync", header_style="bold")
+    for column in ("provider", "status", "models listed", "new", "no longer listed"):
+        table.add_column(column)
+    for s in status.values():
+        state = "[green]ok[/green]" if s.ok else f"[red]{s.error}[/red]"
+        table.add_row(s.provider, state, str(s.listed), str(len(s.added)), str(len(s.removed)))
+    out.print(table)
+    if not status:
+        err.print("No providers configured.", style="dim")
 
 
 @app.command()
