@@ -491,6 +491,25 @@ def setup(
     Wizard(_engine(), out, sync=not no_sync).run(names)
 
 
+@app.command(name="record-demo")
+def record_demo(
+    out_file: Annotated[
+        Path, typer.Option("--out", help="Where to save (.js for the demo page, or .json).")
+    ] = Path("docs/demo/recording.js"),
+    question: Annotated[
+        list[str] | None, typer.Option("--question", "-q", help="Question to record (repeat).")
+    ] = None,
+) -> None:
+    """Record questions for the static demo page (docs/demo/index.html replays them)."""
+    from tempo import demo
+
+    engine = _engine()
+    recording = asyncio.run(demo.record(engine, question or demo.QUESTIONS))
+    demo.write(recording, out_file)
+    kind = "demo models" if recording["demo_mode"] else "your configured models"
+    err.print(f"Recorded {len(recording['sessions'])} questions with {kind} to {out_file}.")
+
+
 @app.command()
 def quota(
     as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
