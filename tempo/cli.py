@@ -476,6 +476,23 @@ def sync() -> None:
 
 
 @app.command()
+def setup(
+    only: Annotated[
+        str | None, typer.Option("--only", help="Providers to set up, e.g. groq,gemini.")
+    ] = None,
+    no_sync: Annotated[
+        bool, typer.Option("--no-sync", help="Don't read the live model lists at the end.")
+    ] = False,
+) -> None:
+    """Set up free providers: where to get each key, its free limits and terms; checks and
+    stores your keys encrypted, then shows how many free requests a day you have."""
+    from tempo.setup import Wizard
+
+    names = {n.strip().lower() for n in only.split(",") if n.strip()} if only else None
+    Wizard(_engine(), out, sync=not no_sync).run(names)
+
+
+@app.command()
 def quota(
     as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
 ) -> None:

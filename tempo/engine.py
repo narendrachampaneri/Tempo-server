@@ -276,8 +276,14 @@ class Engine:
             save_catalog(self.registry, status, self.settings.data_dir / CATALOG_FILE)
 
     def access_for(self, user_id: str) -> Access:
-        """The credentials a user's requests run with: their own keys, then the server's."""
-        return Access(user_id=user_id, user_keys=self.accounts.keys(user_id))
+        """The credentials a user's requests run with: their own keys, then the server's. The
+        admin (TEMPO_API_KEY holder) is the owner, so also gets the keys `tempo setup` stored."""
+        from tempo.accounts import ADMIN_USER, LOCAL_USER
+
+        keys = self.accounts.keys(user_id)
+        if user_id == ADMIN_USER:
+            keys = {**self.accounts.keys(LOCAL_USER), **keys}
+        return Access(user_id=user_id, user_keys=keys)
 
     def options(self, **overrides: Any) -> RunOptions:
         s = self.settings
