@@ -96,9 +96,7 @@ class ScriptedBackend:
         self,
         model: ModelInfo,
         messages: Sequence[Mapping[str, Any]],
-        *,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[Delta]:
         self.calls.append((model.id, [dict(m) for m in messages]))
         script = self.scripts.get(model.id, [("answer", f"Answer from {model.id}.")])

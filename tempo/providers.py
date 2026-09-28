@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, Literal, Protocol
 
 from tempo.registry import Registry
-from tempo.types import ModelInfo
+from tempo.types import Access, ModelInfo
 
 DeltaKind = Literal["answer", "reasoning"]
 Delta = tuple[DeltaKind, str]
@@ -46,6 +46,13 @@ class ProviderError(Exception):
 
 
 class ChatBackend(Protocol):
+    """Streams one completion.
+
+    ``access`` selects whose keys to use, ``meta`` is filled with what the provider reported
+    (``headers``, ``finish_reason``), and ``purpose`` names the stage job (draft, judge, fix,
+    merge, ...); real providers ignore it, test and demo backends use it to shape replies.
+    """
+
     def stream(
         self,
         model: ModelInfo,
@@ -53,6 +60,9 @@ class ChatBackend(Protocol):
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        access: Access | None = None,
+        meta: dict[str, Any] | None = None,
+        purpose: str | None = None,
     ) -> AsyncIterator[Delta]: ...
 
 
@@ -188,15 +198,19 @@ class LiteLLMBackend:
         *,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        access: Access | None = None,
+        meta: dict[str, Any] | None = None,
+        purpose: str | None = None,
     ) -> AsyncIterator[Delta]:
         litellm = _load_litellm()
+        meta = meta if meta is not None else {}
         kwargs: dict[str, Any] = {
             "model": model.id,
             "messages": list(messages),
             "stream": True,
             "timeout": self.timeout,
             "num_retries": 0,  # Tempo falls back to other models instead of retrying
-            **self.registry.credentials(model.provider),
+            **self.registry.credentials(model.provider, access),
         }
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -206,10 +220,14 @@ class LiteLLMBackend:
         splitter = ThinkTagSplitter()
         try:
             response = await litellm.acompletion(**kwargs)
+            hidden = getattr(response, "_hidden_params", None) or {}
+            meta["headers"] = hidden.get("additional_headers") or {}
             async for chunk in response:
                 choices = getattr(chunk, "choices", None) or []
                 if not choices:
                     continue
+                if choices[0].finish_reason:
+                    meta["finish_reason"] = choices[0].finish_reason
                 delta = choices[0].delta
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning:
@@ -223,4 +241,5 @@ class LiteLLMBackend:
         except ProviderError:
             raise
         except Exception as exc:
+            meta["headers"] = getattr(exc, "litellm_response_headers", None) or {}
             raise classify_exception(exc) from exc

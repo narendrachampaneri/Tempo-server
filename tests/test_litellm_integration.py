@@ -51,7 +51,8 @@ async def _chat(req: Request):
             yield f"data: {json.dumps(chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    headers = {"x-ratelimit-remaining-requests": "42", "x-ratelimit-remaining-tokens": "900"}
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
 
 
 @fake.get("/api/tags")
@@ -173,3 +174,20 @@ async def test_engine_end_to_end_falls_back_after_rate_limit(env):
     assert kinds == ["rate_limit"]
     assert result.model != "groq/openai/gpt-oss-120b"
     assert result.text
+
+
+async def test_rate_limit_headers_reach_the_quota_manager(env):
+    from tempo.quota import QuotaManager
+
+    registry = Registry.load(env=env)
+    model = registry.get("groq/llama-3.3-70b-versatile")
+    meta: dict = {}
+    backend = LiteLLMBackend(registry, timeout=10)
+    async for _ in backend.stream(model, [{"role": "user", "content": "hi"}], meta=meta):
+        pass
+    assert meta.get("finish_reason") in (None, "stop")
+    quota = QuotaManager(registry)
+    quota.observe_headers(model, "server", meta["headers"])
+    left = quota.left(model)
+    assert left.rpd == 42  # Groq's request header counts the day
+    assert left.tpm == 900

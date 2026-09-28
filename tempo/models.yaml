@@ -7,8 +7,10 @@
 # Fields:
 #   id              LiteLLM model string; also the id clients use to request this model directly
 #   strength        general capability, 0..1 (matters more for complex queries)
+#   free_rpm        free requests per minute
 #   free_rpd        free requests per day (omit for local models: unlimited)
 #   free_tpm        free tokens per minute; a single request larger than this cannot succeed
+#   free_tpd        free tokens per day
 #   ttft_ms         typical time to first token
 #   tokens_per_sec  typical output speed
 #   reasoning       model thinks before answering (better on hard problems, slower)
@@ -20,6 +22,7 @@ providers:
     key_env: GROQ_API_KEY
     base_env: GROQ_API_BASE
     signup_url: https://console.groq.com/keys
+    requests_header_window: day  # Groq's x-ratelimit-remaining-requests counts the day
   cerebras:
     label: Cerebras
     key_env: CEREBRAS_API_KEY
@@ -35,6 +38,8 @@ providers:
     key_env: OPENROUTER_API_KEY
     base_env: OPENROUTER_API_BASE
     signup_url: https://openrouter.ai/keys
+    shared_rpm: 20  # all :free models share one pool
+    shared_rpd: 50
   ollama:
     label: Ollama (local)
     base_env: OLLAMA_API_BASE
@@ -50,6 +55,7 @@ models:
     family: llama
     context_window: 131072
     strength: 0.70
+    free_rpm: 30
     free_rpd: 1000
     free_tpm: 12000
     ttft_ms: 400
@@ -62,6 +68,7 @@ models:
     family: llama
     context_window: 131072
     strength: 0.35
+    free_rpm: 30
     free_rpd: 14400
     free_tpm: 6000
     ttft_ms: 250
@@ -75,6 +82,7 @@ models:
     context_window: 131072
     strength: 0.85
     reasoning: true
+    free_rpm: 30
     free_rpd: 1000
     free_tpm: 8000
     ttft_ms: 500
@@ -88,6 +96,7 @@ models:
     context_window: 131072
     strength: 0.72
     reasoning: true
+    free_rpm: 60
     free_rpd: 1000
     free_tpm: 6000
     ttft_ms: 450
@@ -102,8 +111,10 @@ models:
     context_window: 65536
     strength: 0.85
     reasoning: true
+    free_rpm: 30
     free_rpd: 14400
     free_tpm: 60000
+    free_tpd: 1000000
     ttft_ms: 300
     tokens_per_sec: 2000
     skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
@@ -114,8 +125,10 @@ models:
     family: llama
     context_window: 8192
     strength: 0.35
+    free_rpm: 30
     free_rpd: 14400
     free_tpm: 60000
+    free_tpd: 1000000
     ttft_ms: 200
     tokens_per_sec: 2200
     skills: {chat: 0.65, code: 0.45, math: 0.35, reasoning: 0.40, writing: 0.60, summarize: 0.65, translate: 0.55, extract: 0.60}
@@ -129,6 +142,7 @@ models:
     strength: 0.85
     reasoning: true
     vision: true
+    free_rpm: 5
     free_rpd: 20
     free_tpm: 250000
     ttft_ms: 800
@@ -142,6 +156,7 @@ models:
     context_window: 131072
     strength: 0.60
     vision: true
+    free_rpm: 30
     free_rpd: 14400
     free_tpm: 15000
     ttft_ms: 600

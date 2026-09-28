@@ -30,6 +30,11 @@ class ProviderInfo(BaseModel):
     local: bool = False
     discover: bool = False
     signup_url: str | None = None
+    # Free-tier limits shared by every model of this provider (e.g. OpenRouter's :free pool).
+    shared_rpm: int | None = None
+    shared_rpd: int | None = None
+    # What the provider's x-ratelimit-remaining-requests header counts: "minute" or "day".
+    requests_header_window: Literal["minute", "day"] = "minute"
 
 
 class ModelInfo(BaseModel):
@@ -41,8 +46,10 @@ class ModelInfo(BaseModel):
     strength: float = 0.5
     reasoning: bool = False
     vision: bool = False
+    free_rpm: int | None = None
     free_rpd: int | None = None
     free_tpm: int | None = None
+    free_tpd: int | None = None
     ttft_ms: int = 800
     tokens_per_sec: float = 100.0
     skills: dict[str, float] = Field(default_factory=dict)
@@ -63,3 +70,18 @@ class QueryProfile(BaseModel):
     input_tokens: int
     est_output_tokens: int
     has_images: bool = False
+
+
+class Access(BaseModel):
+    """Whose credentials a request uses: the caller's own provider keys first, then the server's.
+
+    Only API keys can be brought by users; base URLs stay server-side so a caller cannot point
+    Tempo at internal addresses.
+    """
+
+    user_id: str = "local"
+    user_keys: dict[str, str] = Field(default_factory=dict, repr=False)
+
+    def key_id(self, provider: str) -> str:
+        """Identifies the quota bucket: each user key has its own free-tier limits."""
+        return f"user:{self.user_id}" if provider in self.user_keys else "server"

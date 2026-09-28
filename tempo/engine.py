@@ -17,8 +17,10 @@ from tempo.events import STREAM_EVENTS, Event
 from tempo.health import HealthTracker
 from tempo.mock import MockBackend
 from tempo.providers import ERROR_LABELS, ChatBackend, LiteLLMBackend, ProviderError
+from tempo.quota import QuotaManager
 from tempo.registry import Registry
 from tempo.router import Candidate, Router, RouteResult
+from tempo.store import Store
 from tempo.types import MODES, ModelInfo, QueryProfile
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -64,6 +66,7 @@ class Engine:
         backend_for: Callable[[ModelInfo], ChatBackend],
         *,
         health: HealthTracker | None = None,
+        store: Store | None = None,
         max_attempts: int = 4,
         warm_up: Callable[[], Awaitable[None]] | None = None,
         clock: Callable[[], float] = time.perf_counter,
@@ -71,7 +74,9 @@ class Engine:
         self.registry = registry
         self.backend_for = backend_for
         self.health = health or HealthTracker()
-        self.router = Router(registry, self.health)
+        self.store = store or Store()
+        self.quota = QuotaManager(registry, self.store)
+        self.router = Router(registry, self.health, self.quota)
         self.max_attempts = max_attempts
         self._warm_up = warm_up
         self._clock = clock
@@ -195,14 +200,17 @@ class Engine:
 
             call_start = self._clock()
             first_token: float | None = None
+            answer_text = ""
             streamed = False  # any answer text sent to the client
             visible = False  # any non-whitespace answer text
             try:
+                meta: dict[str, Any] = {}
                 stream = self.backend_for(model).stream(
                     model,
                     call_messages,
                     temperature=options.temperature,
                     max_tokens=options.max_tokens,
+                    meta=meta,
                 )
                 async for kind, text in stream:
                     if first_token is None:
@@ -211,6 +219,7 @@ class Engine:
                         yield ev("reasoning_delta", model=model.id, delta=text)
                         continue
                     streamed = True
+                    answer_text += text
                     visible = visible or bool(text.strip())
                     yield ev("answer_delta", model=model.id, delta=text)
                 if not visible:
@@ -218,6 +227,7 @@ class Engine:
             except ProviderError as err:
                 last_error = err
                 self.health.record_failure(model, err.kind, err.retry_after)
+                self._record_usage(model, profile, "", meta)
                 yield ev("call_error", model=model.id, kind=err.kind, message=err.message)
                 if streamed:
                     if not options.restart_on_partial_failure:
@@ -231,6 +241,7 @@ class Engine:
                 continue
 
             self.health.record_success(model)
+            self._record_usage(model, profile, answer_text, meta)
             now = self._clock()
             yield ev(
                 "call_end",
@@ -258,6 +269,13 @@ class Engine:
         self, messages: Iterable[Mapping[str, Any]], options: RunOptions | None = None
     ) -> RunResult:
         return await collect(self.run(messages, options))
+
+    def _record_usage(
+        self, model: ModelInfo, profile: QueryProfile, answer: str, meta: dict[str, Any]
+    ) -> None:
+        tokens = profile.input_tokens + len(answer) // 4
+        self.quota.record(model, "server", tokens)
+        self.quota.observe_headers(model, "server", meta.get("headers"))
 
     def _route_data(
         self, candidate: Candidate, route: RouteResult, profile: QueryProfile

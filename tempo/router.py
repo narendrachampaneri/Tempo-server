@@ -9,12 +9,15 @@ learned predictor (kNN, two-tower network, GraphRouter) behind the same interfac
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from tempo.health import HealthTracker
+from tempo.quota import QuotaLeft, QuotaManager
 from tempo.registry import Registry
-from tempo.types import ModelInfo, QueryProfile
+from tempo.types import Access, ModelInfo, QueryProfile
+
+SkillFn = Callable[[ModelInfo, str], float]
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class Candidate:
     latency_s: float
     scarcity: float
     why: str = ""
+    quota_left: QuotaLeft | None = None
 
 
 @dataclass
@@ -54,11 +58,15 @@ class RouteResult:
         return {reason: len(ids) for reason, ids in self.skipped.items()}
 
 
-def predicted_quality(model: ModelInfo, profile: QueryProfile) -> float:
-    skill = model.skill(profile.task)
+def predicted_quality(
+    model: ModelInfo, profile: QueryProfile, skill_of: SkillFn | None = None
+) -> float:
+    """Skill for this task (measured when available, else the registry prior), adjusted."""
+    skill_of = skill_of or (lambda m, task: m.skill(task))
+    skill = skill_of(model, profile.task)
     if profile.script != "latin":
         # Non-Latin input: lean on the multilingual ability measured by the translate skill.
-        skill = 0.7 * skill + 0.3 * model.skill("translate")
+        skill = 0.7 * skill + 0.3 * skill_of(model, "translate")
     c = profile.complexity
     # Easy queries depend on task skill; hard ones increasingly on raw model strength.
     quality = skill * (1 - 0.4 * c) + model.strength * 0.4 * c
@@ -72,11 +80,15 @@ def expected_latency(model: ModelInfo, profile: QueryProfile) -> float:
     return model.ttft_ms / 1000 + tokens / max(model.tokens_per_sec, 1.0)
 
 
-def scarcity(model: ModelInfo) -> float:
-    """0 = unlimited (local), ~0.17 at 14,400 requests/day, ~0.66 at 50/day."""
-    if model.free_rpd is None:
+def scarcity(model: ModelInfo, rpd_left: int | None = None) -> float:
+    """0 = unlimited (local), ~0.17 at 14,400 requests/day left, ~0.66 at 50 left, 1 at none.
+
+    Uses the requests actually left today when the quota manager knows them.
+    """
+    daily = rpd_left if rpd_left is not None else model.free_rpd
+    if daily is None:
         return 0.0
-    return min(1.0, max(0.0, 1 - math.log10(max(model.free_rpd, 1)) / 5))
+    return min(1.0, max(0.0, 1 - math.log10(max(daily, 1)) / 5))
 
 
 def _latency_penalty(seconds: float) -> float:
@@ -84,10 +96,17 @@ def _latency_penalty(seconds: float) -> float:
     return min(1.0, math.log10(1 + seconds) / math.log10(31))
 
 
-def score(model: ModelInfo, profile: QueryProfile, weights: Weights) -> Candidate:
-    quality = predicted_quality(model, profile)
+def score(
+    model: ModelInfo,
+    profile: QueryProfile,
+    weights: Weights,
+    *,
+    skill_of: SkillFn | None = None,
+    quota_left: QuotaLeft | None = None,
+) -> Candidate:
+    quality = predicted_quality(model, profile, skill_of)
     latency = expected_latency(model, profile)
-    scarce = scarcity(model)
+    scarce = scarcity(model, quota_left.rpd if quota_left else None)
     utility = (
         weights.quality * quality
         - weights.scarcity * scarce
@@ -99,13 +118,22 @@ def score(model: ModelInfo, profile: QueryProfile, weights: Weights) -> Candidat
         quality=quality,
         latency_s=round(latency, 2),
         scarcity=round(scarce, 3),
+        quota_left=quota_left,
     )
 
 
 class Router:
-    def __init__(self, registry: Registry, health: HealthTracker) -> None:
+    def __init__(
+        self,
+        registry: Registry,
+        health: HealthTracker,
+        quota: QuotaManager | None = None,
+        skill_of: SkillFn | None = None,
+    ) -> None:
         self.registry = registry
         self.health = health
+        self.quota = quota
+        self.skill_of = skill_of
 
     def skip_reason(
         self,
@@ -114,9 +142,10 @@ class Router:
         *,
         local_only: bool = False,
         allow_providers: Iterable[str] | None = None,
+        access: Access | None = None,
     ) -> str | None:
         provider = self.registry.providers[model.provider]
-        if not self.registry.is_configured(model.provider):
+        if not self.registry.is_configured(model.provider, access):
             return "provider not configured"
         if model.installed is False:
             return "not installed"
@@ -134,11 +163,29 @@ class Router:
             return "context window too small"
         if model.free_tpm is not None and needed > model.free_tpm:
             return "request exceeds free tokens/min"
+        if self.quota is not None:
+            key_id = (access or Access()).key_id(model.provider)
+            return self.quota.blocked_reason(model, key_id, tokens=needed)
         return None
 
-    def candidate(self, model: ModelInfo, profile: QueryProfile, mode: str = "auto") -> Candidate:
-        """Score one specific model (used when the caller asks for a model by name)."""
-        return score(model, profile, MODE_WEIGHTS.get(mode, MODE_WEIGHTS["auto"]))
+    def candidate(
+        self,
+        model: ModelInfo,
+        profile: QueryProfile,
+        mode: str = "auto",
+        access: Access | None = None,
+    ) -> Candidate:
+        """Score one specific model."""
+        left = None
+        if self.quota is not None:
+            left = self.quota.left(model, (access or Access()).key_id(model.provider))
+        return score(
+            model,
+            profile,
+            MODE_WEIGHTS.get(mode, MODE_WEIGHTS["auto"]),
+            skill_of=self.skill_of,
+            quota_left=left,
+        )
 
     def rank(
         self,
@@ -147,21 +194,25 @@ class Router:
         mode: str = "auto",
         allow_providers: Iterable[str] | None = None,
         local_only: bool = False,
+        access: Access | None = None,
+        exclude: Iterable[str] = (),
     ) -> RouteResult:
-        weights = MODE_WEIGHTS.get(mode, MODE_WEIGHTS["auto"])
         local_only = local_only or mode == "private"
         allowed = list(allow_providers) if allow_providers is not None else None
+        excluded = set(exclude)
 
         candidates: list[Candidate] = []
         skipped: dict[str, list[str]] = {}
         for model in self.registry.all():
+            if model.id in excluded:
+                continue
             reason = self.skip_reason(
-                model, profile, local_only=local_only, allow_providers=allowed
+                model, profile, local_only=local_only, allow_providers=allowed, access=access
             )
             if reason:
                 skipped.setdefault(reason, []).append(model.id)
                 continue
-            candidates.append(score(model, profile, weights))
+            candidates.append(self.candidate(model, profile, mode, access))
 
         candidates.sort(key=lambda c: (-c.utility, c.model.id))
         for index, candidate in enumerate(candidates):

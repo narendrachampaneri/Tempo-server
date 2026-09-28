@@ -46,9 +46,7 @@ class MockBackend:
         self,
         model: ModelInfo,
         messages: Sequence[Mapping[str, Any]],
-        *,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[Delta]:
         await asyncio.sleep(self.delay * 5)
         if model.id == "mock/flaky":

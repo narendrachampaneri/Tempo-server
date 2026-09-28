@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import yaml
 
-from tempo.types import TASKS, ModelInfo, ProviderInfo
+from tempo.types import TASKS, Access, ModelInfo, ProviderInfo
 
 log = logging.getLogger(__name__)
 
@@ -66,22 +66,26 @@ class Registry:
     def get(self, model_id: str) -> ModelInfo | None:
         return self._models.get(model_id)
 
-    def is_configured(self, provider_id: str) -> bool:
+    def is_configured(self, provider_id: str, access: Access | None = None) -> bool:
         provider = self.providers[provider_id]
         if provider.id == "mock":
             return True
         if provider.key_env:
+            if access is not None and access.user_keys.get(provider_id):
+                return True
             return bool(self._env.get(provider.key_env, "").strip())
         if provider.base_env:
             return bool(self._env.get(provider.base_env, "").strip())
         return False
 
-    def credentials(self, provider_id: str) -> dict[str, str]:
+    def credentials(self, provider_id: str, access: Access | None = None) -> dict[str, str]:
         """Keyword arguments (api_key / api_base) for calling this provider."""
         provider = self.providers[provider_id]
         creds: dict[str, str] = {}
         if provider.key_env and self._env.get(provider.key_env, "").strip():
             creds["api_key"] = self._env[provider.key_env].strip()
+        if access is not None and access.user_keys.get(provider_id):
+            creds["api_key"] = access.user_keys[provider_id]
         if provider.base_env and self._env.get(provider.base_env, "").strip():
             creds["api_base"] = self._env[provider.base_env].strip().rstrip("/")
         return creds
