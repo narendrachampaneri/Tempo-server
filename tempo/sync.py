@@ -8,6 +8,7 @@ are added with priors guessed from their name and size until `tempo eval` measur
 
 from __future__ import annotations
 
+import datetime
 import logging
 import math
 import re
@@ -83,13 +84,33 @@ class ProviderStatus:
         }
 
 
-def guess_model(model_id: str, provider: str, name: str | None, context: int | None) -> ModelInfo:
-    """Priors for a model we have never measured, from its size and family."""
+def guess_model(
+    model_id: str,
+    provider: str,
+    name: str | None,
+    context: int | None,
+    hint: str | None = None,
+    reasoning: bool | None = None,
+) -> ModelInfo:
+    """Priors for a model we have never measured, from its size and family.
+
+    ``hint`` is another name for the same weights (OpenRouter's ``hugging_face_id``), used when
+    the id itself gives no size or family. ``reasoning`` is the provider's own answer, when it
+    gives one; otherwise it is guessed from the model's name (not its organisation's).
+    """
     low = model_id.lower()
-    family = next((f for f in FAMILIES if f in low), "unknown")
-    sizes = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)b\b", low)]
+    base = low.rsplit("/", 1)[-1]
+    alt = (hint or "").lower()
+    family = next((f for f in FAMILIES if f in low), None)
+    family = family or next((f for f in FAMILIES if f in alt), None)
+    # Unknown family: the organisation is the next best guess, so the judge's "different
+    # family" rule doesn't treat every unfamiliar model as one family.
+    family = family or (low.split("/", 1)[0] if "/" in low else "unknown")
+    size_pattern = r"(\d+(?:\.\d+)?)b\b"
+    sizes = [float(x) for x in re.findall(size_pattern, low)]
+    sizes = sizes or [float(x) for x in re.findall(size_pattern, alt)]
     params = max(sizes) if sizes else 30.0
-    active = re.search(r"a(\d+(?:\.\d+)?)b\b", low)  # mixture-of-experts: active params
+    active = re.search(r"a(\d+(?:\.\d+)?)b\b", low) or re.search(r"a(\d+(?:\.\d+)?)b\b", alt)
     strength = min(0.85, max(0.2, 0.15 + 0.11 * math.log2(max(params, 1.0))))
     speed = float(active.group(1)) if active else params
     general = {"chat", "writing", "summarize"}
@@ -103,7 +124,11 @@ def guess_model(model_id: str, provider: str, name: str | None, context: int | N
         family=family,
         context_window=int(context or 8192),
         strength=round(strength, 2),
-        reasoning=any(k in low for k in ("reason", "think", "r1", "gpt-oss", "qwq")),
+        reasoning=(
+            reasoning
+            if reasoning is not None
+            else any(k in base for k in ("reason", "think", "r1", "gpt-oss", "qwq"))
+        ),
         ttft_ms=800,
         tokens_per_sec=max(30.0, 3000.0 / max(speed, 1.0)),
         skills=skills,
@@ -180,12 +205,19 @@ class RegistrySync:
             raw = str(item["id"])
             if NOT_CHAT.search(raw) or SKIP_IDS.search(raw) or item.get("active") is False:
                 continue
+            hint, reasoning = None, None
             if provider == "openrouter":
                 pricing = item.get("pricing") or {}
                 if str(pricing.get("prompt")) != "0" or str(pricing.get("completion")) != "0":
                     continue  # only free models
+                if expired(item.get("expiration_date"), self._clock()):
+                    continue
+                hint = item.get("hugging_face_id")
+                params = item.get("supported_parameters")
+                if isinstance(params, list):
+                    reasoning = "reasoning" in params
             context = item.get("context_length") or item.get("context_window")
-            model = guess_model(raw, provider, item.get("name"), context)
+            model = guess_model(raw, provider, item.get("name"), context, hint, reasoning)
             out[model.id] = model
         return out
 
@@ -213,6 +245,17 @@ class RegistrySync:
             if model.provider == provider:
                 self.health.record_failure(model, "auth")
                 break
+
+
+def expired(date: Any, now: float) -> bool:
+    """True if an ``expiration_date`` (YYYY-MM-DD, as OpenRouter lists it) is today or earlier."""
+    if not isinstance(date, str) or not date:
+        return False
+    try:
+        day = datetime.date.fromisoformat(date[:10])
+    except ValueError:
+        return False
+    return day <= datetime.datetime.fromtimestamp(now, datetime.UTC).date()
 
 
 def key_rejected(response: httpx.Response) -> bool:

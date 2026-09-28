@@ -151,6 +151,11 @@ def provider_lists(request: httpx.Request) -> httpx.Response:
                         "id": "openai/gpt-5",
                         "pricing": {"prompt": "0.00001", "completion": "0.00003"},
                     },
+                    {
+                        "id": "acme/retired:free",
+                        "pricing": {"prompt": "0", "completion": "0"},
+                        "expiration_date": "2020-01-01",
+                    },
                 ]
             },
         )
@@ -206,6 +211,7 @@ async def test_sync_adds_new_free_models_and_retires_missing_ones():
     added = registry.get("openrouter/qwen/qwen3-235b-a22b:free")
     assert added is not None and added.source == "sync" and added.family == "qwen"
     assert registry.get("openrouter/openai/gpt-5") is None  # paid: not added
+    assert registry.get("openrouter/acme/retired:free") is None  # past its expiration date
     assert registry.get("gemini/text-embedding-004") is None
 
     assert not status["cerebras"].ok and status["cerebras"].error == "API key rejected"
@@ -235,6 +241,32 @@ def test_guessed_priors_scale_with_size():
     assert small.strength < big.strength
     assert moe.tokens_per_sec > big.tokens_per_sec  # only 22B active parameters
     assert guess_model("qwen3-coder-30b", "groq", None, 1).skills["code"] > 0.6
+
+
+def test_guesses_use_the_providers_own_fields():
+    # The organisation's name ("thinkingmachines") must not make a model a reasoning model.
+    assert not guess_model("thinkingmachines/inkling:free", "openrouter", None, 1).reasoning
+    assert guess_model("vendor/plain:free", "openrouter", None, 1, reasoning=True).reasoning
+    # No size in the id: take it from the Hugging Face id.
+    hinted = guess_model(
+        "nvidia/nemotron-3.5-lightning:free",
+        "openrouter",
+        None,
+        1,
+        hint="nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
+    )
+    assert hinted.tokens_per_sec == 1000  # 3B active parameters
+    assert guess_model("acme/x:free", "openrouter", None, 1, hint="acme/Llama-8B").family == "llama"
+    assert guess_model("poolside/laguna-s-2.1:free", "openrouter", None, 1).family == "poolside"
+    assert guess_model("mystery-7b", "groq", None, 1).family == "unknown"
+
+
+def test_expired_models_are_skipped():
+    from tempo.sync import expired
+
+    now = 1_790_000_000  # 2026-09-21 UTC
+    assert expired("2026-09-01", now) and expired("2026-09-21", now)
+    assert not expired("2026-10-09", now) and not expired(None, now) and not expired("soon", now)
 
 
 async def test_a_400_that_says_the_key_is_bad_counts_as_rejected():
