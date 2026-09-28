@@ -422,7 +422,8 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
         }); break;
         case "call_start": reasoningPre = null; break;
         case "answer_reset": answer = ""; scheduleRender(); break;
-        case "done": model = ev.model; break;
+        case "answer_final": answer = ev.answer; model = ev.model; scheduleRender(); break;
+        case "done": model = ev.model || model; break;
       }
     };
 

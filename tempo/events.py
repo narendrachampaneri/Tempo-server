@@ -30,17 +30,39 @@ class Event:
         return out
 
 
-def _quota(rpd: int | None, local: bool) -> str:
-    if local:
-        return "local, unlimited"
-    if rpd is None:
-        return "no daily limit"
-    return f"{rpd:,} req/day free"
+STOP_REASONS = {
+    "passed": "answer passed its check",
+    "decided": "decided the answer is good enough",
+    "polished": "final rewrite on the last stage",
+    "unchecked": "no stage left to check the answer",
+    "cache": "answered from cache",
+    "budget_stages": "stage budget used",
+    "budget_time": "time budget reached",
+    "budget_quota": "free-quota budget used",
+}
+
+
+def _quota_note(quota: dict[str, Any] | None) -> str:
+    notes = []
+    for model, left in (quota or {}).items():
+        if left.get("rpd") is not None:
+            notes.append(f"{model} {left['rpd']:,}/day left")
+    return " · ".join(notes[:2])
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def describe(kind: str, d: dict[str, Any]) -> str | None:
     if kind == "received":
         return f"Received · mode {d.get('mode', 'auto')}"
+    if kind == "cache_hit":
+        minutes = max(1, round(d.get("age_s", 0) / 60))
+        return (
+            f"Answered from cache (similarity {d['similarity']:.2f}, {minutes} min old, "
+            f"first answered by {d['model']})"
+        )
     if kind == "analyze":
         parts = [f"Understanding: {d['task']}", f"complexity {d['complexity']:.2f}"]
         if d.get("script") and d["script"] != "latin":
@@ -48,28 +70,62 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         if d.get("needs"):
             parts.append("needs " + ", ".join(d["needs"]))
         parts.append(f"~{d['input_tokens']:,} input tokens")
+        if d.get("source") and d["source"] != "rules":
+            parts.append(f"via {d['source']}")
         return " · ".join(parts)
-    if kind == "plan":
+    if kind == "decision":
+        laya = d.get("laya")
+        if d.get("laya_status") != "ok":
+            return f"Decision {d['name']}: {d['value']} (rules) · Laya {d.get('laya_status')}" + (
+                f" after {d['laya_ms']:.0f} ms" if d.get("laya_ms") else ""
+            )
+        who = "Laya decides" if d.get("used") == "laya" else "rules decide (Laya in shadow)"
         return (
-            f"Plan: {d['strategy']} model with automatic fallback "
-            f"(up to {d['max_attempts']} tries across {d['candidates']} candidates)"
+            f"Decision {d['name']}: {d['value']} · Laya: {laya} "
+            f"(p {d.get('laya_p', 0):.2f}, {d.get('laya_ms', 0):.0f} ms) · rules: "
+            f"{d.get('rules')} · {who}"
         )
-    if kind == "route":
+    if kind == "plan":
         line = (
-            f"Routing → {d['model']} · {d['why']} · ~{d['latency_s']:.1f}s · "
-            f"{_quota(d.get('free_rpd'), d.get('local', False))}"
+            f"Plan: {d['strategy']} · up to {_plural(d['max_stages'], 'stage')} · "
+            f"{d['time_budget_s']:g}s · {_plural(d['quota_budget'], 'free request')}"
         )
-        skipped = d.get("skipped") or {}
-        if skipped:
-            total = sum(skipped.values())
-            detail = ", ".join(f"{n} {reason}" for reason, n in skipped.items())
-            line += f" (skipped {total}: {detail})"
-        return line
+        if d.get("parts"):
+            line += f" · {d['parts']} parts"
+        return line + (f" · {d['reason']}" if d.get("reason") else "")
+    if kind == "stage_start":
+        models = ", ".join(d.get("models") or []) or "no model"
+        line = f"Stage {d['stage']}/{d['max_stages']} · {d['job']} · {models}"
+        return line + (f" · {d['reason']}" if d.get("reason") else "")
+    if kind == "stage_end":
+        line = (
+            f"Stage {d['stage']} done in {d['ms'] / 1000:.1f}s · "
+            f"{_plural(d['requests_left'], 'free request')} left · {d['time_left_s']:g}s left"
+        )
+        note = _quota_note(d.get("quota"))
+        return line + (f" · {note}" if note else "")
+    if kind == "check":
+        score = d.get("best_score")
+        if score is None:
+            return "Check: nothing to grade"
+        verdict = "✓ passed" if d.get("passed") else "✗ not good enough yet"
+        issues = []
+        for result in d.get("results") or []:
+            if result.get("score") == score:
+                issues = result.get("issues") or []
+                break
+        line = f"Check: best score {score:.2f} {verdict}"
+        if d.get("judge_model"):
+            line += f" (judge {d['judge_model']})"
+        return line + (f" · {'; '.join(issues[:2])}" if issues else "")
     if kind == "call_start":
-        return f"Calling {d['model']} (attempt {d['attempt']})"
+        attempt = f" (attempt {d['attempt']})" if d.get("attempt", 1) > 1 else ""
+        return f"Calling {d['model']}{attempt}"
     if kind == "call_error":
         return f"✗ {d['model']}: {ERROR_LABELS.get(d['kind'], d['kind'])}"
     if kind == "answer_reset":
+        if str(d.get("reason", "")).startswith("replaced"):
+            return f"Replacing the shown answer with stage {d['stage']}"
         return "Discarding the partial answer"
     if kind == "fallback":
         return f"Falling back → {d['to']}"
@@ -77,10 +133,19 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         ttft = d.get("ttft_ms")
         first = f" (first token {ttft / 1000:.1f}s)" if ttft is not None else ""
         return f"Answer from {d['model']} in {d['ms'] / 1000:.1f}s{first}"
+    if kind == "budget":
+        return f"Budget: {d['detail']} · using the best answer so far"
+    if kind == "answer_final":
+        if d.get("cached"):
+            return None
+        quality = f"score {d['score']:.2f}" if d.get("score") is not None else "unchecked"
+        return f"Final answer from {d['model']} (stage {d['stage']}, {quality})"
     if kind == "done":
-        calls = d["attempts"]
-        plural = "s" if calls != 1 else ""
-        return f"Done in {d['total_ms'] / 1000:.1f}s · {calls} model call{plural}"
+        reason = STOP_REASONS.get(d.get("stop_reason") or "", d.get("stop_reason") or "")
+        return (
+            f"Done in {d['total_ms'] / 1000:.1f}s · {_plural(d['stages'], 'stage')} · "
+            f"{_plural(d['attempts'], 'model call')} · {d['requests']} free used · {reason}"
+        )
     if kind == "error":
         return f"Error: {d['message']}"
     return None

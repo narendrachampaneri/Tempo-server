@@ -70,8 +70,9 @@ def test_chat_completion_trace_and_conditions():
         "received",
         "analyze",
         "plan",
-        "route",
+        "stage_start",
     ]
+    assert body["tempo"]["stages"] >= 1 and body["tempo"]["question_id"]
     # The OpenAI endpoint does not inject Tempo's system prompt.
     assert all(m["role"] != "system" for m in backend.calls[-1][1])
 
@@ -93,7 +94,13 @@ def test_no_available_model_returns_503():
     assert r.json()["error"]["type"] == "tempo_error"
 
 
-def test_streaming_chat_completion_with_trace_chunks():
+def stream_parts(chunks):
+    content = "".join(c["choices"][0]["delta"].get("content", "") for c in chunks if c["choices"])
+    reasoning = [c["choices"][0]["delta"].get("reasoning_content") for c in chunks if c["choices"]]
+    return content, reasoning
+
+
+def test_streaming_sends_the_checked_final_answer_with_trace_chunks():
     client, _ = client_for(
         {"beta/mid": [("reasoning", "hmm"), ("answer", "Hel"), ("answer", "lo")]}
     )
@@ -104,17 +111,43 @@ def test_streaming_chat_completion_with_trace_chunks():
     payloads = sse_payloads(r.text)
     assert payloads[-1] == "[DONE]"
     chunks = payloads[:-1]
-    content = "".join(c["choices"][0]["delta"].get("content", "") for c in chunks if c["choices"])
+    content, _ = stream_parts(chunks)
     assert content == "Hello"
-    reasoning = [c["choices"][0]["delta"].get("reasoning_content") for c in chunks if c["choices"]]
-    assert "hmm" in reasoning
     trace = [c["tempo"]["event"]["type"] for c in chunks if "tempo" in c]
-    assert "route" in trace and "call_end" in trace
+    assert {"stage_start", "check", "stage_end", "answer_final"} <= set(trace)
+    # Content only arrives after the check, so the trace comes first.
+    first_content = next(i for i, c in enumerate(chunks) if c["choices"])
+    assert first_content > trace.index("check")
     finals = [c for c in chunks if c["choices"] and c["choices"][0]["finish_reason"] == "stop"]
     assert len(finals) == 1 and finals[0]["model"] == "beta/mid"
 
 
-def test_streaming_does_not_restart_after_partial_output():
+def test_one_stage_stream_is_live_and_carries_reasoning():
+    client, _ = client_for(
+        {"beta/mid": [("reasoning", "hmm"), ("answer", "Hel"), ("answer", "lo")]}
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "tempo/auto", "messages": HELLO, "stream": True, "tempo": {"max_stages": 1}},
+    )
+    content, reasoning = stream_parts(sse_payloads(r.text)[:-1])
+    assert content == "Hello" and "hmm" in reasoning
+
+
+def test_live_stream_does_not_restart_after_partial_output():
+    client, _ = client_for(
+        {"beta/mid": [("answer", "Part"), ProviderError("unavailable", "reset")]}
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        json={"model": "tempo/auto", "messages": HELLO, "stream": True, "tempo": {"max_stages": 1}},
+    )
+    payloads = sse_payloads(r.text)
+    assert payloads[-1]["error"]["type"] == "tempo_error"
+    assert "failed mid-answer" in payloads[-1]["error"]["message"]
+
+
+def test_checked_stream_recovers_from_a_mid_answer_failure():
     client, _ = client_for(
         {"beta/mid": [("answer", "Part"), ProviderError("unavailable", "reset")]}
     )
@@ -122,8 +155,17 @@ def test_streaming_does_not_restart_after_partial_output():
         "/v1/chat/completions", json={"model": "tempo/auto", "messages": HELLO, "stream": True}
     )
     payloads = sse_payloads(r.text)
-    assert payloads[-1]["error"]["type"] == "tempo_error"
-    assert "failed mid-answer" in payloads[-1]["error"]["message"]
+    assert payloads[-1] == "[DONE]"
+    content, _ = stream_parts(payloads[:-1])
+    assert "Part" not in content and content.startswith("Answer from")
+
+
+def test_stage_options_are_validated():
+    client, _ = client_for()
+    bad = {"model": "tempo/auto", "messages": HELLO, "tempo": {"max_stages": 500}}
+    assert client.post("/v1/chat/completions", json=bad).status_code == 422
+    ok = {"model": "tempo/auto", "messages": HELLO, "tempo": {"max_stages": 25}}
+    assert client.post("/v1/chat/completions", json=ok).status_code == 200
 
 
 def test_ask_endpoint_streams_trace_events():
@@ -132,8 +174,11 @@ def test_ask_endpoint_streams_trace_events():
     assert r.headers["content-type"].startswith("text/event-stream")
     events = sse_payloads(r.text)
     kinds = [e["type"] for e in events]
-    assert kinds[:4] == ["received", "analyze", "plan", "route"]
+    assert kinds[:4] == ["received", "analyze", "plan", "stage_start"]
     assert "fallback" in kinds and kinds[-1] == "done"
+    final = next(e for e in events if e["type"] == "answer_final")
+    assert final["answer"].startswith("Answer from")
+    assert final["text"].startswith("Final answer from")
     fallback = next(e for e in events if e["type"] == "fallback")
     assert fallback["text"].startswith("Falling back →")
     deltas = [e for e in events if e["type"] == "answer_delta"]
@@ -186,3 +231,20 @@ def test_official_openai_sdk_works_against_tempo():
     assert text == "Hello there"
 
     assert "tempo/auto" in [m.id for m in sdk.models.list()]
+
+
+def test_feedback_is_recorded():
+    client, _ = client_for()
+    events = sse_payloads(client.post("/api/ask", json={"prompt": "hi"}).text)
+    question_id = next(e for e in events if e["type"] == "done")["question_id"]
+    r = client.post("/api/feedback", json={"question_id": question_id, "rating": 1})
+    assert r.status_code == 200
+    engine = client.app.state.engine
+    assert engine.store.question(question_id)["feedback"] == 1
+    assert (
+        client.post("/api/feedback", json={"question_id": "nope", "rating": -1}).status_code == 404
+    )
+    assert (
+        client.post("/api/feedback", json={"question_id": question_id, "rating": 5}).status_code
+        == 422
+    )

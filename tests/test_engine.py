@@ -1,3 +1,8 @@
+"""Model-slot behaviour of the engine: fallback, streaming, errors, options.
+
+Stage logic (checks, fixes, mixing, budgets) is covered in test_pipeline.py.
+"""
+
 from conftest import make_engine, user
 
 from tempo.engine import collect
@@ -8,7 +13,7 @@ def types(result) -> list[str]:
     return [e.type for e in result.events if e.type not in ("answer_delta", "reasoning_delta")]
 
 
-async def test_happy_path_streams_answer_with_trace():
+async def test_happy_path_drafts_checks_and_finishes():
     engine, backend = make_engine()
     result = await engine.complete(user("hi"))
     assert result.error is None
@@ -18,24 +23,31 @@ async def test_happy_path_streams_answer_with_trace():
         "received",
         "analyze",
         "plan",
-        "route",
+        "stage_start",
         "call_start",
         "call_end",
+        "stage_end",
+        "stage_start",
+        "check",
+        "stage_end",
+        "answer_final",
         "done",
     ]
-    route = next(e for e in result.events if e.type == "route")
-    assert route.data["model"] == "beta/mid"
-    assert route.data["why"]
-    assert route.to_dict()["text"].startswith("Routing → beta/mid")
+    draft = next(e for e in result.events if e.type == "stage_start")
+    assert draft.data["job"] == "draft" and draft.data["models"] == ["beta/mid"]
+    assert draft.to_dict()["text"].startswith("Stage 1/3 · draft · beta/mid")
+    # An easy chat question is checked with heuristics only: no judge call.
     assert backend.called == ["beta/mid"]
+    assert result.stop_reason == "passed" and result.stages == 2
 
 
 async def test_falls_back_when_a_model_fails_before_answering():
     engine, backend = make_engine({"beta/mid": [ProviderError("rate_limit", "429", retry_after=5)]})
     result = await engine.complete(user("hi"))
     assert result.error is None
-    assert backend.called[0] == "beta/mid"
-    assert result.model == backend.called[1] != "beta/mid"
+    drafts = backend.called_for("draft")
+    assert drafts[0] == "beta/mid"
+    assert result.model == drafts[1] != "beta/mid"
     assert "call_error" in types(result) and "fallback" in types(result)
     # The failed model now cools down, so the next request routes around it.
     second = await engine.complete(user("hello again"))
@@ -51,7 +63,7 @@ async def test_auth_error_skips_other_models_from_the_same_provider():
     )
     result = await engine.complete(user("hi"), engine.options(model="alpha/strong"))
     # alpha/small would be next after beta/mid, but alpha's key was rejected.
-    assert backend.called == ["alpha/strong", "beta/mid", "local/tiny"]
+    assert backend.called_for("draft") == ["alpha/strong", "beta/mid", "local/tiny"]
     assert result.model == "local/tiny"
 
 
@@ -79,7 +91,7 @@ async def test_empty_answer_counts_as_failure():
     result = await engine.complete(user("hi"))
     call_error = next(e for e in result.events if e.type == "call_error")
     assert call_error.data["kind"] == "empty"
-    assert len(backend.called) == 2 and result.error is None
+    assert len(backend.called_for("draft")) == 2 and result.error is None
 
 
 async def test_reports_error_when_every_attempt_fails():
@@ -90,8 +102,8 @@ async def test_reports_error_when_every_attempt_fails():
     )
     result = await engine.complete(user("hi"))
     assert len(backend.called) == 3
-    assert result.error == "All 3 attempted model(s) failed (last: provider unavailable)."
-    assert result.events[-1].data["tried"] == backend.called
+    assert result.error == "Every model tried for this stage failed."
+    assert set(backend.called) <= set(result.events[-1].data["tried"])
 
 
 async def test_no_configured_provider_gives_setup_hint():
@@ -105,8 +117,8 @@ async def test_explicit_model_requests():
     engine, backend = make_engine()
     result = await engine.complete(user("hi"), engine.options(model="local/tiny"))
     assert result.model == "local/tiny"
-    route = next(e for e in result.events if e.type == "route")
-    assert route.data["why"] == "requested by caller"
+    draft = next(e for e in result.events if e.type == "stage_start")
+    assert draft.data["reason"] == "requested by caller"
 
     unknown = await engine.complete(user("hi"), engine.options(model="nope/model"))
     assert unknown.error == "Unknown model: nope/model"
@@ -147,4 +159,11 @@ async def test_trace_excludes_stream_chunks_and_has_text():
     engine, _ = make_engine()
     result = await engine.complete(user("hi"))
     assert all(e["type"] not in ("answer_delta", "reasoning_delta") for e in result.trace)
-    assert all("text" in e for e in result.trace)
+    assert all("text" in e for e in result.trace if e["type"] != "answer_final")
+
+
+async def test_options_are_clamped():
+    engine, _ = make_engine()
+    options = engine.options(max_stages=999, quota_budget=0, mode="weird", time_budget_s=0)
+    assert options.max_stages == 50 and options.quota_budget == 1
+    assert options.mode == "auto" and options.time_budget_s == 1.0

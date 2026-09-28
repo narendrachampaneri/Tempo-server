@@ -221,11 +221,17 @@ class Store:
             f"INSERT INTO stages ({columns}) VALUES ({marks})", (question_id, *encoded.values())
         )
 
-    def add_call(self, **fields: Any) -> None:
+    def add_call(self, **fields: Any) -> int:
         encoded = _encode("calls", {**fields, "created_at": time.time()})
         columns = ", ".join(encoded)
         marks = ", ".join("?" for _ in encoded)
-        self.execute(f"INSERT INTO calls ({columns}) VALUES ({marks})", tuple(encoded.values()))
+        cursor = self.execute(
+            f"INSERT INTO calls ({columns}) VALUES ({marks})", tuple(encoded.values())
+        )
+        return int(cursor.lastrowid or 0)
+
+    def set_call_score(self, call_id: int, score: float) -> None:
+        self.execute("UPDATE calls SET score = ? WHERE id = ?", (score, call_id))
 
     def set_feedback(self, question_id: str, rating: int, comment: str | None = None) -> bool:
         cursor = self.execute(

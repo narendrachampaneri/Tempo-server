@@ -50,60 +50,96 @@ def _trace(text: str, style: str = "dim") -> None:
 async def _stream_answer(
     engine: Engine, messages: list[dict[str, Any]], options: RunOptions, show_trace: bool
 ) -> RunResult:
+    """Stream the answer to stdout and the thinking window to stderr.
+
+    A later stage that replaces the draft is printed again below it; if the final answer
+    differs from what was streamed last, it is printed once more at the end.
+    """
     result = RunResult()
+    shown = ""  # text of the answer currently on screen
     reasoning_noted = False
     answer_open = False
 
+    def close_answer() -> None:
+        nonlocal answer_open
+        if answer_open:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            answer_open = False
+
     async for event in engine.run(messages, options):
-        result.events.append(event)
+        result.apply(event)
         data = event.data
         if event.type == "answer_delta":
             if not answer_open and show_trace:
                 err.rule(style="dim")
             answer_open = True
-            result.text += data["delta"]
+            shown += data["delta"]
             sys.stdout.write(data["delta"])
             sys.stdout.flush()
             continue
         if event.type == "reasoning_delta":
-            result.reasoning += data["delta"]
             if show_trace and not reasoning_noted:
                 _trace(f"{data['model']} is reasoning…")
                 reasoning_noted = True
             continue
         if event.type == "call_start":
             reasoning_noted = False
-            result.attempts = data["attempt"]
         if event.type == "answer_reset":
-            result.text = ""
-            if answer_open:
-                sys.stdout.write("\n")
-                answer_open = False
-        if event.type == "done":
-            result.model = data["model"]
-        if event.type == "error":
-            result.error = data["message"]
-            result.error_kind = data.get("kind")
+            shown = ""
+            close_answer()
+        if event.type == "answer_final" and data["answer"].strip() != shown.strip():
+            close_answer()
+            if show_trace:
+                err.rule(style="dim")
+            sys.stdout.write(data["answer"].rstrip() + "\n")
+            sys.stdout.flush()
+            shown = data["answer"]
 
         text = event.to_dict().get("text")
         if not text:
             continue
         if event.type == "error":
-            if answer_open:
-                sys.stdout.write("\n")
-                answer_open = False
+            close_answer()
             _trace(text, style="bold red")
         elif show_trace:
-            if answer_open:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
-                answer_open = False
-            _trace(text, style="yellow" if event.type in ("call_error", "fallback") else "dim")
+            close_answer()
+            warn = event.type in ("call_error", "fallback", "budget")
+            _trace(text, style="yellow" if warn else "dim")
 
-    if answer_open or (result.text and not result.text.endswith("\n")):
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+    close_answer()
     return result
+
+
+def _stage_options(
+    max_stages: int | None,
+    time_budget: float | None,
+    quota_budget: int | None,
+    strategy: str | None,
+) -> dict[str, Any]:
+    if strategy is not None and strategy not in ("single", "cascade", "mixture", "decompose"):
+        raise typer.BadParameter("strategy must be single, cascade, mixture or decompose")
+    return {
+        "max_stages": max_stages,
+        "time_budget_s": time_budget,
+        "quota_budget": quota_budget,
+        "strategy": strategy,
+    }
+
+
+StagesOption = Annotated[
+    int | None, typer.Option("--max-stages", "-s", help="Most stages for this question.")
+]
+TimeOption = Annotated[
+    float | None, typer.Option("--time-budget", help="Seconds allowed for this question.")
+]
+QuotaOption = Annotated[
+    int | None, typer.Option("--quota-budget", help="Most free provider requests to spend.")
+]
+StrategyOption = Annotated[
+    str | None,
+    typer.Option("--strategy", help="Force single, cascade, mixture or decompose."),
+]
 
 
 @app.command()
@@ -121,6 +157,10 @@ def ask(
     ] = None,
     private: PrivateOption = False,
     trace: TraceOption = True,
+    max_stages: StagesOption = None,
+    time_budget: TimeOption = None,
+    quota_budget: QuotaOption = None,
+    strategy: StrategyOption = None,
     as_json: Annotated[
         bool, typer.Option("--json", help="Print one JSON object instead of streaming.")
     ] = False,
@@ -139,6 +179,7 @@ def ask(
         allow_providers=provider or None,
         local_only=private,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
+        **_stage_options(max_stages, time_budget, quota_budget, strategy),
     )
     messages = [{"role": "user", "content": text}]
 
@@ -153,7 +194,12 @@ def ask(
         payload = {
             "answer": result.text,
             "model": result.model,
+            "question_id": result.question_id,
+            "stages": result.stages,
             "attempts": result.attempts,
+            "requests": result.requests,
+            "score": result.score,
+            "stop_reason": result.stop_reason,
             "error": result.error,
             "trace": result.trace,
         }
@@ -163,7 +209,12 @@ def ask(
 
 
 @app.command()
-def chat(mode: ModeOption = "auto", private: PrivateOption = False, trace: TraceOption = True):
+def chat(
+    mode: ModeOption = "auto",
+    private: PrivateOption = False,
+    trace: TraceOption = True,
+    max_stages: StagesOption = None,
+):
     """Interactive chat. Commands: /mode <name>, /clear, /exit."""
     engine = _engine()
     current_mode = _check_mode(mode)
@@ -199,7 +250,10 @@ def chat(mode: ModeOption = "auto", private: PrivateOption = False, trace: Trace
 
             history.append({"role": "user", "content": line})
             options = engine.options(
-                mode=current_mode, local_only=private, system_prompt=DEFAULT_SYSTEM_PROMPT
+                mode=current_mode,
+                local_only=private,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+                max_stages=max_stages,
             )
             out.print("tempo ›", style="bold cyan")
             result = await _stream_answer(engine, history, options, trace)

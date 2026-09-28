@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+import asyncio
+import json
+import re
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 import pytest
 
+from tempo.config import Settings
 from tempo.engine import Engine
 from tempo.health import HealthTracker
 from tempo.providers import Delta
@@ -20,6 +24,7 @@ def _model(model_id: str, provider: str, **kw: Any) -> ModelInfo:
         id=model_id,
         provider=provider,
         name=model_id,
+        family=provider,
         skills={t: skill for t in TASKS},
         **kw,
     )
@@ -85,12 +90,59 @@ def make_registry(env: Mapping[str, str] | None = None) -> Registry:
     return Registry(providers, models, env=ENV_ALL if env is None else env)
 
 
-class ScriptedBackend:
-    """Plays back a script per model: a list of deltas and/or an exception to raise."""
+def sleep(seconds: float) -> tuple[str, float]:
+    """Script item: wait before the next item (to simulate a slow model)."""
+    return ("sleep", seconds)
 
-    def __init__(self, scripts: dict[str, list[Any]] | None = None) -> None:
+
+def judge_reply(scores: Sequence[float] | Callable[[list[str]], list[float]]):
+    """Script for a judge: grades every candidate in the prompt."""
+
+    def reply(messages: list[dict[str, Any]]) -> list[Any]:
+        prompt = str(messages[-1]["content"])
+        candidates = re.findall(r'<candidate id="\d+">\n(.*?)\n</candidate>', prompt, re.DOTALL)
+        values = scores(candidates) if callable(scores) else list(scores)
+        grades = [
+            {"id": i, "score": values[min(i - 1, len(values) - 1)], "issues": ["needs work"]}
+            for i in range(1, len(candidates) + 1)
+        ]
+        return [("answer", json.dumps({"grades": grades}))]
+
+    return reply
+
+
+class ScriptedBackend:
+    """Plays back a script per model and purpose.
+
+    Scripts are looked up as "model:purpose", then "model" (drafts only), then "*:purpose".
+    A script is a list of deltas, exceptions to raise and sleep(...) items, or a callable that
+    takes the messages and returns such a list. Judges grade every candidate 8 by default.
+    """
+
+    def __init__(self, scripts: dict[str, Any] | None = None, judge_score: float = 8) -> None:
         self.scripts = scripts or {}
-        self.calls: list[tuple[str, list[dict[str, Any]]]] = []
+        self.judge_score = judge_score
+        self.calls: list[tuple[str, list[dict[str, Any]], str | None]] = []
+        self.active = 0
+        self.max_active = 0
+
+    def _script(self, model_id: str, purpose: str | None, messages: list[dict[str, Any]]):
+        purpose = purpose or "draft"
+        for key in (
+            f"{model_id}:{purpose}",
+            model_id if purpose == "draft" else None,
+            f"*:{purpose}",
+        ):
+            if key and key in self.scripts:
+                script = self.scripts[key]
+                return script(messages) if callable(script) else script
+        if purpose == "judge":
+            return judge_reply([self.judge_score])(messages)
+        if purpose == "split":
+            return [("answer", json.dumps({"parts": ["first part", "second part"]}))]
+        if purpose == "draft":
+            return [("answer", f"Answer from {model_id}.")]
+        return [("answer", f"{purpose.capitalize()} from {model_id}.")]
 
     async def stream(
         self,
@@ -98,29 +150,43 @@ class ScriptedBackend:
         messages: Sequence[Mapping[str, Any]],
         **kwargs: Any,
     ) -> AsyncIterator[Delta]:
-        self.calls.append((model.id, [dict(m) for m in messages]))
-        script = self.scripts.get(model.id, [("answer", f"Answer from {model.id}.")])
-        for item in script:
-            if isinstance(item, BaseException):
-                raise item
-            yield item
+        purpose = kwargs.get("purpose")
+        copied = [dict(m) for m in messages]
+        self.calls.append((model.id, copied, purpose))
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            for item in self._script(model.id, purpose, copied):
+                if isinstance(item, BaseException):
+                    raise item
+                if item[0] == "sleep":
+                    await asyncio.sleep(item[1])
+                    continue
+                yield item
+        finally:
+            self.active -= 1
 
     @property
     def called(self) -> list[str]:
-        return [model_id for model_id, _ in self.calls]
+        return [model_id for model_id, _, _ in self.calls]
+
+    def called_for(self, purpose: str) -> list[str]:
+        return [m for m, _, p in self.calls if (p or "draft") == purpose]
 
 
 def make_engine(
-    scripts: dict[str, list[Any]] | None = None,
+    scripts: dict[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
     max_attempts: int = 4,
+    judge_score: float = 8,
+    **settings: Any,
 ) -> tuple[Engine, ScriptedBackend]:
-    backend = ScriptedBackend(scripts)
+    backend = ScriptedBackend(scripts, judge_score=judge_score)
     engine = Engine(
         make_registry(env),
         lambda model: backend,
+        settings=Settings(max_attempts=max_attempts, **settings),
         health=HealthTracker(),
-        max_attempts=max_attempts,
     )
     return engine, backend
 
