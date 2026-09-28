@@ -33,6 +33,15 @@ LOCAL_USER = "local"  # the implicit user when no accounts exist and no API key 
 ADMIN_USER = "admin"  # the holder of TEMPO_API_KEY
 
 
+FINGERPRINT_PREFIX = "fp:"
+
+
+def fingerprint(api_key: str) -> str:
+    """A short one-way tag to tell stored keys apart; it reveals no part of the key."""
+    digest = hashlib.sha256(("tempo-key-fingerprint:" + api_key.strip()).encode()).hexdigest()
+    return FINGERPRINT_PREFIX + digest[:8]
+
+
 def _fernet_from_secret(secret: str) -> Fernet:
     try:
         return Fernet(secret.encode())
@@ -135,7 +144,7 @@ class Accounts:
             "VALUES (?,?,?,?,?,?) ON CONFLICT(user_id, provider) DO UPDATE SET "
             "ciphertext = excluded.ciphertext, last4 = excluded.last4, "
             "verified = excluded.verified, created_at = excluded.created_at",
-            (user_id, provider, ciphertext, api_key[-4:], verified, time.time()),
+            (user_id, provider, ciphertext, fingerprint(api_key), verified, time.time()),
         )
 
     def delete_key(self, user_id: str, provider: str) -> bool:
@@ -160,8 +169,25 @@ class Accounts:
         return out
 
     def key_info(self, user_id: str) -> list[dict[str, Any]]:
-        return self.store.query(
-            "SELECT provider, last4, verified, created_at FROM user_keys WHERE user_id = ? "
-            "ORDER BY provider",
+        """Stored keys, identified by a one-way fingerprint (no part of a key is ever shown).
+        Rows from before fingerprints kept the key's last four characters; they are upgraded."""
+        rows = self.store.query(
+            "SELECT provider, ciphertext, last4, verified, created_at FROM user_keys "
+            "WHERE user_id = ? ORDER BY provider",
             (user_id,),
         )
+        out = []
+        for row in rows:
+            tag = row.pop("last4") or ""
+            ciphertext = row.pop("ciphertext")
+            if not tag.startswith(FINGERPRINT_PREFIX):
+                try:
+                    tag = fingerprint(self.vault.decrypt(ciphertext).decode())
+                except InvalidToken:
+                    tag = "unreadable"
+                self.store.execute(
+                    "UPDATE user_keys SET last4 = ? WHERE user_id = ? AND provider = ?",
+                    (tag, user_id, row["provider"]),
+                )
+            out.append({**row, "fingerprint": tag})
+        return out

@@ -373,7 +373,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                     "free_tier": p.free_tier,
                     "free_tier_note": p.free_tier_note,
                     "has_key": mine is not None,
-                    "last4": mine["last4"] if mine else None,
+                    "fingerprint": mine["fingerprint"] if mine else None,
                     "verified": None
                     if not mine or mine["verified"] is None
                     else bool(mine["verified"]),

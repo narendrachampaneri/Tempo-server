@@ -882,6 +882,7 @@ def keys_add(
     ] = False,
 ) -> None:
     """Store your own key for a provider (entered at a hidden prompt, or piped on stdin)."""
+    from tempo.accounts import fingerprint
     from tempo.sync import verify_key
 
     engine = _engine()
@@ -907,7 +908,7 @@ def keys_add(
     note = (
         "verified" if verified else "stored (could not verify now)" if not no_verify else "stored"
     )
-    err.print(f"{info.label} key …{api_key[-4:]} {note}.", markup=False)
+    err.print(f"{info.label} key {fingerprint(api_key)} {note}.", markup=False)
 
 
 @keys_app.command("list")
@@ -923,7 +924,7 @@ def keys_list(user: UserOption = None) -> None:
         table.add_column(column)
     for row in rows:
         verified = {1: "yes", 0: "no"}.get(row["verified"], "unknown")
-        table.add_row(row["provider"], f"…{row['last4']}", verified)
+        table.add_row(row["provider"], row["fingerprint"], verified)
     out.print(table)
 
 

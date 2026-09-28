@@ -572,7 +572,7 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 
 ## 8. Security, privacy and fair use
 
-- **Key vault**: users' provider keys encrypted at rest (envelope encryption with a master key in a KMS or at least a secret outside the database). Never logged, never sent to the browser after saving.
+- **Key vault**: users' provider keys encrypted at rest (envelope encryption with a master key in a KMS or at least a secret outside the database). Never logged, never sent to the browser after saving. **As built:** a stored key is shown only as a one-way fingerprint (`fp:` and 8 hex characters of a salted SHA-256), never any part of the key.
 - **Privacy routing**: every registry entry carries `trains_on_data` / `allowed_for_end_users`; the router enforces the user's privacy choice as a hard filter.
 - **PII scrubbing** before logging traces and before sending to providers flagged as training on data.
 - **Prompt-injection hygiene**: sub-model outputs are data. The aggregator prompt fences them and tells Tempo core to ignore instructions inside them.

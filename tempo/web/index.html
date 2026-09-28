@@ -749,7 +749,7 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
       const who = document.createElement("div"); who.className = "who"; who.textContent = p.label;
       const small = document.createElement("small");
       small.textContent = p.has_key
-        ? `Your key …${p.last4}${p.verified === true ? " · verified" : p.verified === false ? " · rejected" : ""}`
+        ? `Your key (${p.fingerprint})${p.verified === true ? " · verified" : p.verified === false ? " · rejected" : ""}`
         : p.server_key ? "Using the server's key" : "No key yet";
       who.append(small);
       const form = document.createElement("form");

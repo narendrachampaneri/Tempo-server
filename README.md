@@ -179,7 +179,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 264 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 267 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .

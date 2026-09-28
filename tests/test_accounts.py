@@ -44,7 +44,8 @@ def test_accounts_users_and_keys(tmp_path):
     assert accounts.keys(user.id) == {"groq": "gsk_abcdef123456"}
     raw = str(store.query("SELECT * FROM user_keys"))
     assert "abcdef123456" not in raw
-    assert accounts.key_info(user.id)[0]["last4"] == "3456"
+    info = accounts.key_info(user.id)[0]
+    assert info["fingerprint"].startswith("fp:") and "3456" not in info["fingerprint"]
     assert accounts.list_users()[0]["keys"] == 1
     assert accounts.delete_user("asha") and not store.query("SELECT * FROM user_keys")
 
@@ -96,7 +97,8 @@ def test_key_endpoints_store_verify_and_never_return_the_key(monkeypatch):
     listing = client.get("/api/keys").json()
     assert "alpha-key-00001234" not in str(listing)
     alpha = next(p for p in listing["providers"] if p["provider"] == "alpha")
-    assert alpha["has_key"] and alpha["last4"] == "1234" and alpha["verified"] is True
+    assert alpha["has_key"] and alpha["fingerprint"].startswith("fp:") and alpha["verified"] is True
+    assert "last4" not in alpha and "1234" not in str(alpha)
     assert [p["provider"] for p in listing["providers"]] == ["alpha", "beta"]
 
     assert client.delete("/api/keys/alpha").status_code == 200
@@ -170,7 +172,7 @@ def test_cli_users_and_keys(tmp_path, monkeypatch):
     stored = runner.invoke(app, ["keys", "add", "groq", "--no-verify"], input="gsk_test_98765\n")
     assert stored.exit_code == 0, stored.output
     listed = runner.invoke(app, ["keys", "list"])
-    assert "…8765" in listed.stdout and "gsk_test_98765" not in listed.stdout
+    assert "fp:" in listed.stdout and "8765" not in listed.stdout  # no part of the key
     assert runner.invoke(app, ["keys", "remove", "groq"]).exit_code == 0
     assert runner.invoke(app, ["keys", "add", "nope", "--no-verify"], input="x\n").exit_code != 0
     assert "lina" in runner.invoke(app, ["users", "list"]).stdout
@@ -185,3 +187,18 @@ def test_usage_shows_users_only_their_own_questions():
     usage_b = client.get("/api/usage", headers={"Authorization": f"Bearer {b}"}).json()
     assert usage_a["scope"] == usage_b["scope"] == "mine"
     assert usage_a["questions"] == 1 and usage_b["questions"] == 0 and usage_b["models"] == []
+
+
+def test_old_rows_with_last_four_characters_are_upgraded_to_fingerprints(tmp_path):
+    from tempo.accounts import Accounts, fingerprint, load_vault_key
+    from tempo.store import Store
+
+    store = Store(tmp_path / "t.db")
+    accounts = Accounts(store, load_vault_key("s3cret-passphrase", None))
+    user, _ = accounts.create_user("old")
+    accounts.set_key(user.id, "groq", "gsk_old_key_4321")
+    store.execute("UPDATE user_keys SET last4 = '4321'")  # as stored before fingerprints
+    info = accounts.key_info(user.id)[0]
+    assert info["fingerprint"] == fingerprint("gsk_old_key_4321")
+    rows = store.query("SELECT last4 FROM user_keys")
+    assert rows == [{"last4": fingerprint("gsk_old_key_4321")}]

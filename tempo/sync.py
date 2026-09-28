@@ -745,9 +745,17 @@ async def verify_key(
     api_key: str,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> bool | None:
-    """Check a provider key by listing models with it: True ok, False rejected, None unknown."""
+    """Check a provider key by listing models with it: True ok, False rejected, None unknown.
+
+    A public list accepts any key, so it proves nothing: OpenRouter is checked with its
+    ``/key`` endpoint instead, and the other public-list providers report unknown."""
     base = registry.providers[provider].base_env and registry.credentials(provider).get("api_base")
-    url = f"{base}/models" if base else RegistrySync(registry).list_url(provider)
+    if provider == "openrouter":
+        url = f"{base or MODEL_LISTS['openrouter'].removesuffix('/models')}/key"
+    elif provider in PUBLIC_LISTS:
+        return None
+    else:
+        url = f"{base}/models" if base else RegistrySync(registry).list_url(provider)
     if url is None:
         return None
     headers = auth_headers(provider, api_key)
