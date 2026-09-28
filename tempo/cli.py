@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -365,6 +366,119 @@ def sync() -> None:
     out.print(table)
     if not status:
         err.print("No providers configured.", style="dim")
+
+
+@app.command(name="export-laya")
+def export_laya(
+    out_dir: Annotated[
+        Path, typer.Option("--out", "-o", help="Folder to write train.jsonl / test.jsonl to.")
+    ] = Path("laya-dataset"),
+    test_percent: Annotated[
+        int, typer.Option("--test-percent", help="Share of questions held out for testing.")
+    ] = 10,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict", help="Only use outputs from providers marked allowed."),
+    ] = False,
+) -> None:
+    """Export logged decisions as a dataset for Laya's official fine-tuning notebook."""
+    from tempo.tuning import export
+
+    engine = _engine()
+    stats = export(engine.store, engine.registry, out_dir, test_percent=test_percent, strict=strict)
+    err.print(
+        f"Wrote {stats.rows} rows ({stats.decisions} labelled decisions from "
+        f"{stats.questions} questions) to {out_dir}/",
+        markup=False,
+    )
+    for workflow, count in sorted(stats.by_workflow.items()):
+        err.print(f"  {workflow}: {count}", markup=False)
+    if stats.skipped_terms:
+        err.print(f"Left out {stats.skipped_terms} rows because of provider terms.", markup=False)
+    if stats.unknown_terms_providers:
+        providers = ", ".join(sorted(stats.unknown_terms_providers))
+        err.print(
+            f"Terms not recorded for: {providers}. Check them before training "
+            "(set training_on_outputs in models.yaml).",
+            style="yellow",
+            markup=False,
+        )
+    err.print(f"See {out_dir}/README.md for how to load it in the notebook.", markup=False)
+
+
+laya_app = typer.Typer(help="Laya, the fast decision-maker: status and comparison with rules.")
+app.add_typer(laya_app, name="laya")
+
+
+@laya_app.command("status")
+def laya_status() -> None:
+    """Show whether Laya is installed, which decisions it controls, and logged predictions."""
+    import importlib.util
+
+    from tempo.config import LAYA_DECISIONS
+
+    engine = _engine()
+    installed = importlib.util.find_spec("laya") is not None
+    err.print(f"Laya package installed: {'yes' if installed else 'no'}", markup=False)
+    err.print(f"TEMPO_LAYA: {engine.settings.laya}", markup=False)
+    counts = {
+        r["name"]: r
+        for r in engine.store.query(
+            "SELECT name, COUNT(*) AS n, SUM(laya_status IN ('ok','late')) AS predicted, "
+            "SUM(used = 'laya') AS decided FROM decisions GROUP BY name"
+        )
+    }
+    table = Table(header_style="bold")
+    for column in ("decision", "mode", "logged", "Laya predicted", "Laya decided"):
+        table.add_column(column)
+    for name in LAYA_DECISIONS:
+        row = counts.get(name, {})
+        table.add_row(
+            name,
+            engine.settings.laya_mode(name),
+            str(row.get("n", 0)),
+            str(row.get("predicted") or 0),
+            str(row.get("decided") or 0),
+        )
+    out.print(table)
+
+
+@laya_app.command("compare")
+def laya_compare(
+    test_percent: Annotated[
+        int, typer.Option("--test-percent", help="Must match the export split.")
+    ] = 10,
+) -> None:
+    """Score Laya and the rules against outcome labels on held-out questions. Decisions set
+    to "auto" in TEMPO_LAYA_TAKEOVER switch to Laya once it wins here on 50+ rows."""
+    from tempo.laya_decider import MIN_COMPARE_ROWS
+    from tempo.tuning import compare
+
+    engine = _engine()
+    results = compare(engine.store, engine.registry, test_percent=test_percent)
+    table = Table(title="Laya vs rules on held-out questions", header_style="bold")
+    for column in ("decision", "rows", "Laya", "rules", "verdict"):
+        table.add_column(column)
+    winners = []
+    for r in results:
+        if r.n == 0:
+            verdict = "no data yet"
+        elif r.n < MIN_COMPARE_ROWS:
+            verdict = f"need {MIN_COMPARE_ROWS}+ rows"
+        elif r.laya_wins:
+            verdict = "[green]Laya better[/green]"
+            winners.append(r.decision)
+        else:
+            verdict = "rules better"
+        table.add_row(
+            r.decision, str(r.n), f"{r.laya_accuracy:.2f}", f"{r.rules_accuracy:.2f}", verdict
+        )
+    out.print(table)
+    if winners:
+        err.print(
+            "Hand these to Laya with TEMPO_LAYA_TAKEOVER=" + ",".join(f"{w}=auto" for w in winners),
+            markup=False,
+        )
 
 
 users_app = typer.Typer(help="Tempo users: each gets an API key for the web app and API.")

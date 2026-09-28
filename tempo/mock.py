@@ -18,7 +18,7 @@ from tempo.analyzer import message_text
 from tempo.providers import Delta, ProviderError
 from tempo.types import TASKS, ModelInfo, ProviderInfo
 
-MOCK_PROVIDER = ProviderInfo(id="mock", label="Mock (offline demo)")
+MOCK_PROVIDER = ProviderInfo(id="mock", label="Mock (offline demo)", training_on_outputs="allowed")
 IMPROVED = "improved"
 
 

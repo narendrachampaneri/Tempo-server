@@ -35,6 +35,10 @@ class ProviderInfo(BaseModel):
     shared_rpd: int | None = None
     # What the provider's x-ratelimit-remaining-requests header counts: "minute" or "day".
     requests_header_window: Literal["minute", "day"] = "minute"
+    # May outputs from this provider's models be used to train other models? Check the
+    # provider's terms and each model's licence before setting "allowed"; exports and Tempo
+    # Tune only use outputs marked allowed (or unknown, with a warning, unless --strict).
+    training_on_outputs: Literal["allowed", "disallowed", "unknown"] = "unknown"
 
 
 class ModelInfo(BaseModel):

@@ -313,7 +313,11 @@ class LayaDecider:
                 final_value=json.dumps(value),
                 laya_state=state,
                 laya_question=question,
-                context={"mode": mode, "job": context.get("job"), "mapping": mapping or None},
+                context={
+                    "mode": mode,
+                    **{k: v for k, v in context.items() if k != "shortlist"},
+                    "mapping": mapping or None,
+                },
             )
             if call.status == "timeout" and call.future is not None:
                 call.future.add_done_callback(

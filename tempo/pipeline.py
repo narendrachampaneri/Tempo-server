@@ -592,12 +592,22 @@ class Pipeline:
             best = self.best()
             assert best is not None and best.check is not None
             rules_level = quality_level(best.check.score)
-            level = await self.e.decide(self, "quality", self.stage, rules_level)
+            threshold = PASS_THRESHOLD.get(self.o.mode, PASS_THRESHOLD["auto"])
+            heuristic = best.check.heuristic_score or 0.0
+            baseline = {  # what the heuristics alone would decide (for `tempo laya compare`)
+                "heuristic_level": quality_level(heuristic),
+                "heuristic_passed": heuristic >= threshold and not best.check.hard_fail,
+                "judged": best.check.judge_score is not None,
+                "answer_model": best.model,
+                "judge_model": best.check.judge_model,
+            }
+            level = await self.e.decide(self, "quality", self.stage, rules_level, **baseline)
             if level != rules_level:  # Laya has taken over grading
                 best.check.score = level / 4
-                threshold = PASS_THRESHOLD.get(self.o.mode, PASS_THRESHOLD["auto"])
                 best.check.passed = best.check.score >= threshold and not best.check.hard_fail
-            stop = await self.e.decide(self, "should_stop", self.stage, best.check.passed)
+            stop = await self.e.decide(
+                self, "should_stop", self.stage, best.check.passed, **baseline
+            )
             # Never stop on an answer that failed a hard check (empty, refusal, broken JSON...).
             stop = bool(stop) and not best.check.hard_fail
             if stop:

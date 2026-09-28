@@ -41,6 +41,7 @@ class CheckResult:
     hard_fail: bool = False
     judge_score: float | None = None  # 0-10 as the judge gave it
     judge_model: str | None = None
+    heuristic_score: float | None = None  # what the heuristics alone would have scored
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +51,7 @@ class CheckResult:
             "hard_fail": self.hard_fail,
             "judge_score": self.judge_score,
             "judge_model": self.judge_model,
+            "heuristic_score": self.heuristic_score,
         }
 
 
@@ -167,6 +169,7 @@ def combine(
         hard_fail=heuristics.hard_fail,
         judge_score=judge_score,
         judge_model=judge_model,
+        heuristic_score=round(heuristics.score * NO_JUDGE_CAP, 3),
     )
 
 
