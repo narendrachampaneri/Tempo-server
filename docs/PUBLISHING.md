@@ -1,4 +1,4 @@
-# Publishing Tempo
+# Publishing Tempo-server
 
 _Step 3, 2026-09-28. A checklist for making the repository and Tempo's models public. The owner
 decides the items marked **owner**._
@@ -20,15 +20,22 @@ box, and every model card.
 | **Apache-2.0** | Matches Laya (Apache-2.0), which Tempo-Router and Tempo-Judge build on; an explicit patent grant; common for ML projects | Longer; changed files must carry a notice |
 | **MIT** | Short and simple; matches MIT base models such as Phi-4-mini | No explicit patent grant |
 
-Recommendation: **Apache-2.0**, for one licence across the code and the Laya-based models.
-Either way:
+**Chosen: Apache-2.0** (owner, step 4). `LICENSE` carries "Copyright 2026 The Tempo-server
+authors", `NOTICE` credits Laya, and `pyproject.toml` declares Apache-2.0. Also:
 
 - add a `LICENSE` file with the chosen text and the copyright holder's name;
 - models inherit their base model's licence (TEMPO_MODELS.md §5), which each model card states;
 - datasets are published only where every row's licence allows it; CC-BY-SA rows (Dolly) make
   a published dataset share-alike.
 
-No `LICENSE` file is added until the owner chooses.
+Dataset credits (for example MBPP's CC-BY-4.0 attribution) go in the model cards.
+
+## Name
+
+The public name is **Tempo-server**: the README, `LICENSE`, the package metadata
+(`tempo-server` on PyPI), the Docker image (`tempo-server`) and the Hugging Face placeholders
+(`<owner>/tempo-server-*`). Step 5 checks that the name is free on PyPI and Hugging Face, and
+whether the `tempo` command clashes with Grafana Tempo, whose program is also called `tempo`.
 
 ## 2. No keys in the repository
 
@@ -88,7 +95,7 @@ without an account.
 
 ## 7. Before the first public release
 
-- [ ] Owner chooses the licence; add `LICENSE`.
+- [x] Licence: Apache-2.0, `LICENSE` and `NOTICE` added (step 4).
 - [ ] Secret scanning on; history scanned.
 - [ ] README: the one-line description, quick start, the terms table, links to USE_CASES.md and
       TEMPO_MODELS.md.

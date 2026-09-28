@@ -120,6 +120,11 @@ class Settings:
 
     # Provider model-list sync and listing-based health checks; 0 disables.
     sync_interval_s: float = 6 * 3600
+    # Training data mix (owner, step 4: starting values; the collapse check and the promotion
+    # gate guide changes). At least this share of each training set from public or human
+    # data, and at most this share of answers written by an earlier Tempo-Core.
+    min_public_share: float = 0.3
+    max_self_share: float = 0.3
 
     @property
     def db_path(self) -> Path | None:
@@ -167,4 +172,6 @@ class Settings:
             cache_ttl_s=float(env.get("TEMPO_CACHE_TTL") or 24 * 3600),
             secret_key=env.get("TEMPO_SECRET_KEY") or None,
             sync_interval_s=float(env.get("TEMPO_SYNC_INTERVAL") or 6 * 3600),
+            min_public_share=float(env.get("TEMPO_MIN_PUBLIC_SHARE") or 0.3),
+            max_self_share=float(env.get("TEMPO_MAX_SELF_SHARE") or 0.3),
         )

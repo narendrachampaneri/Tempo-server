@@ -90,6 +90,10 @@ class AskRequest(StageOptions):
     allow_providers: list[str] | None = None
 
 
+class ConsentRequest(BaseModel):
+    consent: bool
+
+
 class KeyRequest(BaseModel):
     api_key: str = Field(min_length=8, max_length=500, repr=False)
     verify: bool = True
@@ -396,6 +400,27 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         if engine.registry.providers[provider].byok_only:
             await engine.refresh_provider(provider, req.api_key)
         return {"ok": True, "provider": provider, "verified": verified}
+
+    @api.get("/consent")
+    async def get_consent(request: Request) -> dict[str, Any]:
+        """Whether this user's questions may be used as training data (off by default)."""
+        user_id = request.state.user_id
+        owner = user_id in (LOCAL_USER, ADMIN_USER)
+        return {"consent": owner or engine.accounts.consent(user_id), "owner": owner}
+
+    @api.put("/consent")
+    async def put_consent(req: ConsentRequest, request: Request) -> dict[str, Any]:
+        """Opt in to training use, or withdraw (later exports leave the questions out)."""
+        user_id = request.state.user_id
+        if user_id in (LOCAL_USER, ADMIN_USER):
+            raise APIError(400, "The owner's questions are always usable.", code="owner")
+        engine.accounts.set_consent(user_id, req.consent)
+        return {"consent": req.consent}
+
+    @api.delete("/data")
+    async def delete_data(request: Request) -> dict[str, Any]:
+        """Delete every logged question of the caller (answers, decisions, feedback)."""
+        return {"deleted_questions": engine.accounts.delete_data(request.state.user_id)}
 
     @api.delete("/keys/{provider}")
     async def delete_key(provider: str, request: Request) -> dict[str, Any]:

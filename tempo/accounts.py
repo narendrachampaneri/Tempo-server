@@ -127,6 +127,7 @@ class Accounts:
         if user is None:
             return False
         self.store.execute("DELETE FROM user_keys WHERE user_id = ?", (user.id,))
+        self.store.execute("DELETE FROM training_consent WHERE user_id = ?", (user.id,))
         self.store.execute("DELETE FROM users WHERE id = ?", (user.id,))
         return True
 
@@ -167,6 +168,49 @@ class Accounts:
                     row["provider"],
                 )
         return out
+
+    # --- training consent and data deletion -------------------------------------------
+
+    def set_consent(self, user_id: str, consent: bool) -> None:
+        """Opt in to (or withdraw from) having one's questions used as training data. Off by
+        default; every change is logged. Withdrawing keeps the user's questions out of every
+        later export (files already exported cannot be recalled)."""
+        now = time.time()
+        self.store.execute(
+            "INSERT INTO training_consent (user_id, consent, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET consent = excluded.consent, "
+            "updated_at = excluded.updated_at",
+            (user_id, int(consent), now),
+        )
+        self.store.execute(
+            "INSERT INTO consent_log (user_id, consent, at) VALUES (?,?,?)",
+            (user_id, int(consent), now),
+        )
+
+    def consent(self, user_id: str) -> bool:
+        rows = self.store.query(
+            "SELECT consent FROM training_consent WHERE user_id = ?", (user_id,)
+        )
+        return bool(rows and rows[0]["consent"])
+
+    def consented_users(self) -> set[str]:
+        rows = self.store.query("SELECT user_id FROM training_consent WHERE consent = 1")
+        return {row["user_id"] for row in rows}
+
+    def delete_data(self, user_id: str) -> int:
+        """Delete everything logged for a user's questions (answers, decisions, stages, calls,
+        feedback). Returns how many questions were deleted. Keys and the account stay."""
+        ids = [
+            row["id"]
+            for row in self.store.query("SELECT id FROM questions WHERE user_id = ?", (user_id,))
+        ]
+        for start in range(0, len(ids), 500):
+            chunk = ids[start : start + 500]
+            marks = ",".join("?" for _ in chunk)
+            for table in ("decisions", "stages", "calls"):
+                self.store.execute(f"DELETE FROM {table} WHERE question_id IN ({marks})", chunk)
+            self.store.execute(f"DELETE FROM questions WHERE id IN ({marks})", chunk)
+        return len(ids)
 
     def key_info(self, user_id: str) -> list[dict[str, Any]]:
         """Stored keys, identified by a one-way fingerprint (no part of a key is ever shown).

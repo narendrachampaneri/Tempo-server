@@ -714,11 +714,14 @@ gate, collapse protection, release) is in [TEMPO_MODELS.md](./TEMPO_MODELS.md).
 
 - **Only checked, "yes" data**: an exported row needs every model that wrote or graded its text
   to be "yes" (`tempo terms`), carries its source and licences, and is left out after a 👎.
+  Other users' questions are used only if they opted in (`tempo users consent`, off by
+  default, can be withdrawn; `tempo users forget` deletes a user's data), text from Tempo's own
+  traffic is scrubbed of personal data, and Dolly (CC-BY-SA) goes only to test splits.
   The terms of hosted "yes" providers are re-read before every export.
-- **Promotion gate**: a new version replaces the old one only if it wins on a fixed held-out set
-  (the exports' test split, the same questions in every export) with no drop on any task type,
-  runs fast enough on a 4-core CPU, and is not more repetitive; otherwise the old one stays and
-  the reason is logged.
+- **Promotion gate, per task type**: a new version takes over a task type only if that type has
+  at least 30 questions in the fixed held-out set (the exports' test split) and does not get
+  worse; other task types keep the old version. It must also run fast enough on a 4-core CPU
+  and not be more repetitive; otherwise the old version stays and the reason is logged.
 - **Collapse protection**: only checked answers; at least 30% public or human data in every
   run; at most 30% of answers written by an earlier Tempo-Core; a repetition check between
   versions (`tempo export-sft` reports it).

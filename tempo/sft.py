@@ -26,13 +26,15 @@ from pathlib import Path
 from typing import Any
 
 from tempo.datasets import dataset_info
+from tempo.privacy import scrub, scrub_value
 from tempo.registry import Registry
 from tempo.store import Store
 from tempo.tuning import OWN_TRAFFIC, _licence, _loads, _split, _terms
 
 # Whose questions may become training data without asking: `tempo collect` (public datasets)
-# and the owner (the local user and the TEMPO_API_KEY admin). Other users' questions need
-# their consent first (roadmap Phase 3), so they are left out unless the owner says otherwise.
+# and the owner (the local user and the TEMPO_API_KEY admin). Other users' questions are used
+# only if that user opted in (`tempo users consent`, off by default, can be withdrawn); text from
+# Tempo's own traffic is scrubbed of personal data first (tempo/privacy.py).
 DEFAULT_USERS = frozenset({"collect", "local", "admin"})
 ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
 
@@ -51,6 +53,8 @@ class SftStats:
     sources: Counter[str] = field(default_factory=Counter)  # dataset (or tempo-traffic) -> rows
     splits: Counter[str] = field(default_factory=Counter)
     repetition: dict[str, float] = field(default_factory=dict)
+    public_share: float = 0.0  # training rows whose question came from a public dataset
+    self_share: float = 0.0  # training rows whose answer an earlier Tempo-Core wrote
 
 
 @dataclass
@@ -177,8 +181,11 @@ def build(
             stats.skipped_terms += 1
             continue
         source = dataset_info(origins.get(qid)) or dict(OWN_TRAFFIC)
-        split = _split(qid, test_percent)
-        prompt = _prompt(q)
+        # Datasets kept out of training (Dolly, CC-BY-SA) only ever go to the test split.
+        split = _split(qid, test_percent) if source.get("training", True) else "test"
+        own = source["dataset"] == OWN_TRAFFIC["dataset"]
+        prompt = scrub_value(_prompt(q)) if own else _prompt(q)
+        chosen_text = scrub(chosen.text) if own else chosen.text
         common = {
             "question_id": qid,
             "split": split,
@@ -190,7 +197,7 @@ def build(
         sft.append(
             {
                 "id": f"{qid}_sft",
-                "messages": [*prompt, {"role": "assistant", "content": chosen.text}],
+                "messages": [*prompt, {"role": "assistant", "content": chosen_text}],
                 "answer_model": chosen.model,
                 "score": chosen.check.get("score"),
                 **common,
@@ -218,8 +225,10 @@ def build(
             {
                 "id": f"{qid}_pair",
                 "prompt": prompt,
-                "chosen": [{"role": "assistant", "content": chosen.text}],
-                "rejected": [{"role": "assistant", "content": rejected.text}],
+                "chosen": [{"role": "assistant", "content": chosen_text}],
+                "rejected": [
+                    {"role": "assistant", "content": scrub(rejected.text) if own else rejected.text}
+                ],
                 "chosen_model": chosen.model,
                 "rejected_model": rejected.model,
                 "chosen_score": chosen.check.get("score"),
@@ -230,7 +239,32 @@ def build(
         )
         stats.pairs += 1
     stats.repetition = repetition([r["messages"][-1]["content"] for r in sft])
+    train = [r for r in sft if r["split"] == "train"]
+    if train:
+        stats.public_share = round(
+            sum(r["source"]["dataset"] != OWN_TRAFFIC["dataset"] for r in train) / len(train), 3
+        )
+        stats.self_share = round(
+            sum("tempo-core" in (r["answer_model"] or "") for r in train) / len(train), 3
+        )
     return sft, pairs, stats
+
+
+def mix_warnings(stats: SftStats, min_public: float, max_self: float) -> list[str]:
+    """The data-mix settings (TEMPO_MIN_PUBLIC_SHARE, TEMPO_MAX_SELF_SHARE) as warnings: an
+    export is still written, but training on it should wait until the mix is right."""
+    notes = []
+    if stats.rows and stats.public_share < min_public:
+        notes.append(
+            f"public or human data is {stats.public_share:.0%} of training rows, below "
+            f"{min_public:.0%}: add public data (tempo collect) before training"
+        )
+    if stats.self_share > max_self:
+        notes.append(
+            f"answers written by an earlier Tempo-Core are {stats.self_share:.0%} of training "
+            f"rows, above {max_self:.0%}: keep more answers from other models"
+        )
+    return notes
 
 
 README = """# Tempo {kind} dataset
@@ -248,6 +282,12 @@ Exported by `tempo export-{kind}` on {date}. Nothing in it was trained yet.
   with a 👎 are left out.
 - Repetition of the answers (compare between versions to catch model collapse):
   distinct word pairs {distinct_2}, repeated 4-word sequences {repeated_4}.
+- Data mix of the training rows: {public_share} from public datasets (target at least
+  {min_public}), {self_share} written by an earlier Tempo-Core (at most {max_self}).
+- Personal data (emails, phone numbers, card, Aadhaar and PAN numbers, IP addresses) is
+  replaced by placeholders in text from Tempo's own traffic. Other users' questions appear only
+  if they opted in.
+- Dolly (CC-BY-SA) rows are in `test.jsonl` only, never in training.
 
 ## Where the questions came from
 
@@ -294,6 +334,8 @@ def export(
     test_percent: int = 10,
     users: frozenset[str] | set[str] = DEFAULT_USERS,
     unverified: frozenset[str] | set[str] = frozenset(),
+    min_public: float = 0.3,
+    max_self: float = 0.3,
 ) -> SftStats:
     """Write ``kind`` ("sft" or "pairs") rows to ``out_dir`` with a README."""
     import time
@@ -317,6 +359,10 @@ def export(
             format=formats[kind],
             distinct_2=stats.repetition.get("distinct_2"),
             repeated_4=stats.repetition.get("repeated_4"),
+            public_share=f"{stats.public_share:.0%}",
+            self_share=f"{stats.self_share:.0%}",
+            min_public=f"{min_public:.0%}",
+            max_self=f"{max_self:.0%}",
             sources=_sources(rows),
         ),
         encoding="utf-8",

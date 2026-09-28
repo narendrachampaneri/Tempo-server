@@ -57,14 +57,18 @@ class Dataset:
     personal_data: str  # what the dataset's own documentation says
     parse: Callable[[bytes], Iterator[Item]]
     weight: int = 1  # share of the interleaved order
+    # False: its rows go only to the held-out test split of every export, never to training
+    # (owner's decision, step 4: Dolly's CC-BY-SA licence).
+    training: bool = True
 
-    def info(self) -> dict[str, str]:
+    def info(self) -> dict[str, Any]:
         return {
             "dataset": self.name,
             "title": self.title,
             "license": self.license,
             "license_url": self.license_url,
             "url": self.url,
+            "training": self.training,
         }
 
 
@@ -174,6 +178,7 @@ DATASETS: dict[str, Dataset] = {
             personal_data=DOLLY_PRIVACY,
             parse=_dolly,
             weight=3,  # covers chat, reasoning, writing, summarizing and extraction
+            training=False,  # test only
         ),
         Dataset(
             name="dolly-translate",
@@ -184,12 +189,13 @@ DATASETS: dict[str, Dataset] = {
             license_url=DOLLY_LICENSE,
             personal_data=DOLLY_PRIVACY,
             parse=_dolly_translate,
+            training=False,  # test only
         ),
     ]
 }
 
 
-def dataset_info(name: str | None) -> dict[str, str] | None:
+def dataset_info(name: str | None) -> dict[str, Any] | None:
     dataset = DATASETS.get(name or "")
     return dataset.info() if dataset else None
 

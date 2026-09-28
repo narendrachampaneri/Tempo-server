@@ -1,0 +1,8 @@
+Tempo-server
+Copyright 2026 The Tempo-server authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Tempo-server uses Laya (convaiinnovations/laya), licensed under the Apache License,
+Version 2.0. Datasets used by `tempo collect` keep their own licences; each exported row
+names its dataset and licence, and model cards carry the dataset credits.

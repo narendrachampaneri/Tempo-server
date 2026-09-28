@@ -33,6 +33,7 @@ from typing import Any
 from tempo.checks import PASS_THRESHOLD
 from tempo.datasets import dataset_info
 from tempo.laya_decider import ASSESS_QUESTIONS, PLAN_QUESTIONS, STOCK_CHECKPOINT, budget_level
+from tempo.privacy import scrub_value
 from tempo.registry import Registry
 from tempo.store import Store
 
@@ -327,6 +328,7 @@ def build_rows(
     include_unclear: bool = False,
     check_terms: bool = True,
     unverified: frozenset[str] | set[str] = frozenset(),
+    users: frozenset[str] | set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], ExportStats]:
     """Typed-decision rows from the log. Rows containing text written by a model whose
     provider's terms say "no" are left out, and so are "unclear" ones unless
@@ -337,6 +339,7 @@ def build_rows(
         for q in store.query(
             "SELECT * FROM questions WHERE error IS NULL AND final_answer IS NOT NULL"
         )
+        if users is None or q["user_id"] in users
     }
     decisions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for d in store.query("SELECT * FROM decisions ORDER BY id"):
@@ -387,6 +390,8 @@ def build_rows(
             origin = dataset_info(origins.get(question_id))
             # Every row says where its question came from and under which licence.
             factors["source"] = origin or OWN_TRAFFIC
+            if origin is None:
+                state = scrub_value(state)  # Tempo's own traffic: no personal data exported
             for d in items:
                 context = _loads(d["context"], {}) or {}
                 if group == "assess":
@@ -432,11 +437,13 @@ def build_rows(
             }
             row_id = f"{question_id}_{group}_{stage}" + (f"_{job}" if job else "")
             workflow = f"tempo_{group}"
+            test_only = origin is not None and not origin.get("training", True)
             rows.append(
                 {
                     "id": row_id,
                     "workflow": workflow,
-                    "split": _split(question_id, test_percent),
+                    # Datasets kept out of training (Dolly) only ever go to the test split.
+                    "split": "test" if test_only else _split(question_id, test_percent),
                     "state": json.dumps(state, ensure_ascii=False),
                     "questions": json.dumps(q_defs, ensure_ascii=False),
                     "gold": json.dumps(gold, ensure_ascii=False),
@@ -531,6 +538,7 @@ def export(
     test_percent: int = 10,
     include_unclear: bool = False,
     unverified: frozenset[str] | set[str] = frozenset(),
+    users: frozenset[str] | set[str] | None = None,
 ) -> ExportStats:
     rows, stats = build_rows(
         store,
@@ -538,6 +546,7 @@ def export(
         test_percent=test_percent,
         include_unclear=include_unclear,
         unverified=unverified,
+        users=users,
     )
     stats.unverified_providers = set(unverified)
     out_dir.mkdir(parents=True, exist_ok=True)

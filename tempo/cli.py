@@ -692,19 +692,28 @@ def _terms_gate(engine: Engine) -> set[str]:
     return failed
 
 
-def _export_writing(kind: str, out_dir: Path, test_percent: int, users: list[str] | None) -> None:
+def _training_users(engine: Engine) -> set[str]:
+    """The owner, tempo collect, and users who opted in to training (`tempo users consent`)."""
+    from tempo.sft import DEFAULT_USERS
+
+    return set(DEFAULT_USERS) | engine.accounts.consented_users()
+
+
+def _export_writing(kind: str, out_dir: Path, test_percent: int) -> None:
     from tempo import sft
 
     engine = _engine()
-    allowed = sft.DEFAULT_USERS | set(users or [])
+    settings = engine.settings
     stats = sft.export(
         engine.store,
         engine.registry,
         out_dir,
         kind,
         test_percent=test_percent,
-        users=allowed,
+        users=_training_users(engine),
         unverified=_terms_gate(engine),
+        min_public=settings.min_public_share,
+        max_self=settings.max_self_share,
     )
     count = stats.rows if kind == "sft" else stats.pairs
     what = "checked answers" if kind == "sft" else "preference pairs"
@@ -713,7 +722,7 @@ def _export_writing(kind: str, out_dir: Path, test_percent: int, users: list[str
         "final answer did not pass its check": stats.skipped_not_passed,
         "👎 from the user": stats.skipped_feedback,
         "text from a model or provider that is not 'yes' (tempo terms)": stats.skipped_terms,
-        "asked by another user (needs their consent; --user adds one)": stats.skipped_user,
+        "asked by a user who has not opted in (tempo users consent)": stats.skipped_user,
     }
     if kind == "pairs":
         notes["no failed draft to pair with"] = stats.skipped_no_rejected
@@ -726,36 +735,26 @@ def _export_writing(kind: str, out_dir: Path, test_percent: int, users: list[str
         f"repeated 4-word sequences {rep.get('repeated_4')}",
         markup=False,
     )
-
-
-ExportUsers = Annotated[
-    list[str] | None,
-    typer.Option(
-        "--user",
-        help="Also include this user's questions (only with their consent). Default: the owner "
-        "and tempo collect.",
-    ),
-]
+    for note in sft.mix_warnings(stats, settings.min_public_share, settings.max_self_share):
+        err.print(f"  warning: {note}", style="yellow", markup=False)
 
 
 @app.command(name="export-sft")
 def export_sft(
     out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")],
     test_percent: Annotated[int, typer.Option("--test-percent", help="Held-out share.")] = 10,
-    user: ExportUsers = None,
 ) -> None:
     """Export question -> checked final answer, for fine-tuning Tempo-Core (only "yes" rows)."""
-    _export_writing("sft", out_dir, test_percent, user)
+    _export_writing("sft", out_dir, test_percent)
 
 
 @app.command(name="export-pairs")
 def export_pairs(
     out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")],
     test_percent: Annotated[int, typer.Option("--test-percent", help="Held-out share.")] = 10,
-    user: ExportUsers = None,
 ) -> None:
     """Export (question, chosen = answer that passed, rejected = draft that failed) for DPO."""
-    _export_writing("pairs", out_dir, test_percent, user)
+    _export_writing("pairs", out_dir, test_percent)
 
 
 @app.command(name="export-laya")
@@ -786,6 +785,7 @@ def export_laya(
         test_percent=test_percent,
         include_unclear=include_unclear,
         unverified=_terms_gate(engine),
+        users=_training_users(engine),
     )
     err.print(
         f"Wrote {stats.rows} rows ({stats.decisions} labelled decisions from "
@@ -950,6 +950,40 @@ def users_remove(name: Annotated[str, typer.Argument(help="User name.")]) -> Non
     if not _engine().accounts.delete_user(name):
         raise typer.BadParameter(f"no user named {name!r}")
     err.print(f"Removed {name}.", markup=False)
+
+
+@users_app.command("consent")
+def users_consent(
+    name: Annotated[str, typer.Argument(help="User name.")],
+    on: Annotated[
+        bool, typer.Option("--on/--off", help="Opt in to training use, or withdraw.")
+    ] = True,
+) -> None:
+    """Record a user's choice: may their questions be used as training data? Off by default;
+    withdrawing keeps them out of every later export."""
+    engine = _engine()
+    user = engine.accounts.find(name)
+    if user is None:
+        raise typer.BadParameter(f"no user named {name!r}")
+    engine.accounts.set_consent(user.id, on)
+    state = "opted in to" if on else "withdrawn from"
+    err.print(f"{name} has {state} training use of their questions.", markup=False)
+
+
+@users_app.command("forget")
+def users_forget(
+    name: Annotated[str, typer.Argument(help="User name.")],
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask to confirm.")] = False,
+) -> None:
+    """Delete everything logged for a user's questions (answers, decisions, feedback)."""
+    engine = _engine()
+    user = engine.accounts.find(name)
+    if user is None:
+        raise typer.BadParameter(f"no user named {name!r}")
+    if not yes and not typer.confirm(f"Delete every logged question of {name}?"):
+        raise typer.Exit(1)
+    count = engine.accounts.delete_data(user.id)
+    err.print(f"Deleted {count} logged questions of {name}.", markup=False)
 
 
 UserOption = Annotated[

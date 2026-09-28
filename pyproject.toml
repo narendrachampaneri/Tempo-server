@@ -5,8 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tempo-server"
 version = "0.1.0"
-description = "Tempo: routes each question to the best available free or open-source LLM."
+description = "Tempo-server: open models plus the system that runs and trains them. Routes each question to the best free or open model, checks the answer, and runs on CPU."
 readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [{name = "The Tempo-server authors"}]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 requires-python = ">=3.11"
 dependencies = [
     # 1.82.7 and 1.82.8 were malicious releases (March 2026 supply-chain attack).

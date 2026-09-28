@@ -108,6 +108,17 @@ CREATE TABLE IF NOT EXISTS users (
     api_key_hash TEXT UNIQUE NOT NULL,
     created_at REAL
 );
+CREATE TABLE IF NOT EXISTS training_consent (
+    user_id TEXT PRIMARY KEY,
+    consent INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS consent_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    consent INTEGER NOT NULL,
+    at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS user_keys (
     user_id TEXT NOT NULL,
     provider TEXT NOT NULL,

@@ -21,7 +21,11 @@ Qwen3-1.7B (2.0B parameters) and Qwen3-4B, Apache-2.0; IBM Granite 3.3 2B Instru
 SmolLM3-3B, Apache-2.0; Phi-4-mini-instruct (3.8B), MIT. Gemma 3 1B uses the Gemma licence
 (not Apache or MIT), so it is not a candidate. **First choice: Qwen3-1.7B** (small enough for
 a 4-core CPU at a usable speed, multilingual), with Granite 3.3 2B as the second family for
-comparison.
+comparison (owner's decision, step 4).
+
+**4B option** (Qwen3-4B, or Phi-4-mini): trained the same way, then measured on 4 CPU threads.
+It is offered only if it reaches **at least 8 tokens a second** on 4 threads and **wins on the
+held-out set** against the 1.7B model (per task type, §3); otherwise only the 1.7B model ships.
 
 ---
 
@@ -102,14 +106,17 @@ both on CPU.
 - **Graded the same way for both versions**: rule grades (numbers, JSON, code parses or passes
   its tests), the checker's heuristics, and a judge from another family that sees both answers
   in random order.
-- **Rule**: promote only if the new version **wins overall** (more wins than losses on paired
-  questions, with a 95% bootstrap interval of the score difference above zero) **and has no
-  drop on any task type** (chat, code, maths, reasoning, writing, summarize, translate, extract;
-  per task, the mean score may not be lower than the old version's). A task with too few
-  held-out questions to measure (fewer than 30) blocks promotion instead of passing it.
-  Also required: CPU speed on a 4-core machine, and the repetition check (§4).
-- **Otherwise the old version stays**, and the reason is logged: which tasks dropped, by how
-  much, the win/loss counts and the repetition numbers. The log lives next to the model files
+- **Rule, per task type** (owner's decision, step 4): the task types are chat, code, maths,
+  reasoning, writing, summarize, translate and extract. For each task type, the new version is
+  used **only if** that type has **at least 30 held-out questions** and the new version's mean
+  score **is not lower** than the old one's; every other task type keeps the old version.
+  Tempo routes per task type, so one release can serve new and old versions side by side. A
+  version is released at all only if it wins overall on the task types it takes over (more wins
+  than losses on paired questions, with a 95% bootstrap interval of the score difference above
+  zero), runs fast enough on a 4-core CPU, and passes the repetition check (§4).
+- **Otherwise the old version stays** (for that task type, or entirely), and the reason is
+  logged: which tasks dropped or had too few questions, by how much, the win/loss counts and the
+  repetition numbers. The log lives next to the model files
   (`PROMOTIONS.md` per model) and in the release notes, so a rejected version is never lost.
 - The same gate applies to Tempo-Router and Tempo-Judge, with `tempo laya compare`'s agreement
   with outcomes as the score (per decision, like per task).
@@ -125,11 +132,17 @@ every run:
    human-written answers in openly licensed datasets (for example GSM8K's worked solutions,
    MIT; MBPP's reference code, CC-BY-4.0; OpenAssistant conversations, Apache-2.0) and from
    answers the owner gave a 👍. Their licences are recorded on every row like the rest.
-   (Datasets under CC-BY-SA, such as Dolly, make a published dataset share-alike, so they stay
-   out of Tempo-Core's training data unless the owner decides otherwise.)
+   **Dolly (CC-BY-SA-3.0) is kept out of every training export** (Tempo-Core, Tempo-Router and
+   Tempo-Judge): its rows go to the held-out test split only (owner's decision, step 4). As a
+   permissive replacement for general questions, OpenAssistant's `oasst2` (Apache-2.0 on its
+   Hugging Face page, checked 2026-09-28) is proposed.
 3. **Where the answers came from**: answers written by an earlier Tempo-Core version may make up
    at most 30% of a run; the rest come from other models and from people. Each row records its
    writing model, so the share is counted, not guessed.
+
+Both numbers are settings, `TEMPO_MIN_PUBLIC_SHARE=0.3` and `TEMPO_MAX_SELF_SHARE=0.3`, as
+starting values; `tempo export-sft` reports the mix and warns when it is off. The collapse check
+(below) and the promotion gate (§3) guide any change.
 4. **Repetition check between versions**: `tempo export-sft` already reports two measures of
    the answers (the share of distinct word pairs, and the share of 4-word sequences repeated
    within an answer). On the held-out questions, a new version may not be more repetitive than
@@ -137,12 +150,15 @@ every run:
 
 ## 5. Release plan
 
-- **Where**: Hugging Face model repositories under the owner's account (for example
-  `<owner>/tempo-router`, `<owner>/tempo-judge`, `<owner>/tempo-core-1.7b-gguf`), each with a
-  model card.
+- **Where**: Hugging Face model repositories under the owner's account, named after the
+  project, Tempo-server (placeholders until the account exists: `<owner>/tempo-server-router`,
+  `<owner>/tempo-server-judge`, `<owner>/tempo-server-core-1.7b-gguf`), each with a model card.
 - **Licences**: Tempo-Router and Tempo-Judge inherit Laya's Apache-2.0. Tempo-Core inherits its
   base model's licence (Apache-2.0 for Qwen3, MIT for Phi-4-mini). The training data's licences
   are listed in the card; data under share-alike licences is kept out (§4).
+- **Dataset credits** go in each model card: every dataset used, its licence and the
+  attribution it requires, for example "MBPP (Mostly Basic Python Problems) by Google Research,
+  licensed under CC BY 4.0", and GSM8K and HumanEval by OpenAI under MIT.
 - **Model card**: base model and licence; what it is for and not for; training data summary
   (sources, licences, counts, the "yes" rule and the date terms were checked); training method
   and settings; held-out results against the previous version and against the free APIs it
@@ -165,4 +181,4 @@ every run:
 | Tempo-Core SFT | 2k+ checked "yes" answers, plus the public share |
 | Tempo-Core DPO | 1k+ pairs (questions whose draft failed and a later answer passed) |
 | GRPO | the WebAssembly sandbox (Phase 3) for code rewards |
-| Release | the owner's licence choice for the code ([PUBLISHING.md](./PUBLISHING.md)) and a Hugging Face account |
+| Release | the code licence (Apache-2.0, chosen in step 4) and a Hugging Face account |
