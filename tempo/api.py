@@ -16,9 +16,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from tempo import __version__
+from tempo.accounts import ADMIN_USER, LOCAL_USER
 from tempo.config import MAX_STAGES_LIMIT, Settings
 from tempo.engine import DEFAULT_SYSTEM_PROMPT, Engine, RunOptions
 from tempo.events import STREAM_EVENTS
+from tempo.sync import verify_key
 from tempo.types import MODES, Access, ModelInfo
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -88,6 +90,11 @@ class AskRequest(StageOptions):
     allow_providers: list[str] | None = None
 
 
+class KeyRequest(BaseModel):
+    api_key: str = Field(min_length=8, max_length=500, repr=False)
+    verify: bool = True
+
+
 class FeedbackRequest(BaseModel):
     question_id: str = Field(min_length=1, max_length=64)
     rating: Literal[1, -1]
@@ -127,20 +134,28 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
     async def _api_error(_: Request, exc: APIError) -> JSONResponse:
         return JSONResponse(exc.body(), status_code=exc.status)
 
-    def require_key(authorization: str | None = Header(default=None)) -> None:
-        if not settings.api_key:
-            return
+    def require_key(request: Request, authorization: str | None = Header(default=None)) -> None:
+        """Identify the caller. TEMPO_API_KEY is the admin; users have their own keys; with
+        neither configured the server runs in single-user local mode without auth."""
         token = (authorization or "").removeprefix("Bearer ").strip()
-        if not hmac.compare_digest(token.encode(), settings.api_key.encode()):
+        if settings.api_key and hmac.compare_digest(token.encode(), settings.api_key.encode()):
+            request.state.user_id, request.state.user_name = ADMIN_USER, ADMIN_USER
+            return
+        user = engine.accounts.authenticate(token) if token else None
+        if user is not None:
+            request.state.user_id, request.state.user_name = user.id, user.name
+            return
+        if settings.api_key or engine.accounts.has_users():
             raise APIError(401, "Invalid or missing API key.", code="invalid_api_key")
+        request.state.user_id, request.state.user_name = LOCAL_USER, LOCAL_USER
 
     def access_for(request: Request) -> Access:
-        return Access()
+        return engine.access_for(getattr(request.state, "user_id", LOCAL_USER))
 
     app.state.access_for = access_for
 
-    def model_status(model: ModelInfo) -> str:
-        if not engine.registry.is_configured(model.provider):
+    def model_status(model: ModelInfo, access: Access | None = None) -> str:
+        if not engine.registry.is_configured(model.provider, access):
             return "not configured"
         if model.installed is False:
             return "not installed"
@@ -148,8 +163,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             return "no longer offered"
         return engine.health.unavailable_reason(model) or "ready"
 
-    def ready_models() -> list[ModelInfo]:
-        return [m for m in engine.registry.all() if model_status(m) == "ready"]
+    def ready_models(access: Access | None = None) -> list[ModelInfo]:
+        return [m for m in engine.registry.all() if model_status(m, access) == "ready"]
 
     def resolve_model(name: str) -> tuple[str, str | None]:
         """Map an OpenAI ``model`` field to (mode, explicit model id)."""
@@ -178,14 +193,14 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
     v1 = APIRouter(prefix="/v1", dependencies=[Depends(require_key)])
 
     @v1.get("/models")
-    async def list_models() -> dict[str, Any]:
+    async def list_models(access: AccessDep) -> dict[str, Any]:
         virtual = [
             {"id": f"tempo/{mode}", "object": "model", "created": 0, "owned_by": "tempo"}
             for mode in MODES
         ]
         concrete = [
             {"id": m.id, "object": "model", "created": 0, "owned_by": m.provider}
-            for m in ready_models()
+            for m in ready_models(access)
         ]
         return {"object": "list", "data": virtual + concrete}
 
@@ -325,19 +340,72 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         return StreamingResponse(stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
     @api.post("/feedback")
-    async def feedback(req: FeedbackRequest) -> dict[str, Any]:
-        if not engine.store.set_feedback(req.question_id, req.rating, req.comment):
+    async def feedback(req: FeedbackRequest, request: Request) -> dict[str, Any]:
+        question = engine.store.question(req.question_id)
+        owner = request.state.user_id
+        if question is None or (owner != ADMIN_USER and question["user_id"] != owner):
             raise APIError(404, "Unknown question id.", code="question_not_found")
+        engine.store.set_feedback(req.question_id, req.rating, req.comment)
+        return {"ok": True}
+
+    @api.get("/me")
+    async def me(request: Request) -> dict[str, Any]:
+        user_id = request.state.user_id
+        mode = "local" if user_id == LOCAL_USER else "admin" if user_id == ADMIN_USER else "user"
+        return {"user": request.state.user_name, "mode": mode}
+
+    @api.get("/keys")
+    async def list_keys(request: Request) -> dict[str, Any]:
+        stored = {k["provider"]: k for k in engine.accounts.key_info(request.state.user_id)}
+        registry = engine.registry
+        providers = []
+        for p in registry.providers.values():
+            if not p.key_env:
+                continue  # local providers and demo models take no key
+            mine = stored.get(p.id)
+            providers.append(
+                {
+                    "provider": p.id,
+                    "label": p.label,
+                    "signup_url": p.signup_url,
+                    "has_key": mine is not None,
+                    "last4": mine["last4"] if mine else None,
+                    "verified": None
+                    if not mine or mine["verified"] is None
+                    else bool(mine["verified"]),
+                    "server_key": registry.is_configured(p.id),
+                }
+            )
+        return {"providers": providers}
+
+    @api.put("/keys/{provider}")
+    async def put_key(provider: str, req: KeyRequest, request: Request) -> dict[str, Any]:
+        info = engine.registry.providers.get(provider)
+        if info is None or not info.key_env:
+            raise APIError(404, f"Unknown provider {provider!r}.", code="provider_not_found")
+        verified = None
+        if req.verify:
+            verified = await verify_key(engine.registry, provider, req.api_key.strip())
+            if verified is False:
+                raise APIError(400, f"{info.label} rejected this key.", code="key_rejected")
+        engine.accounts.set_key(request.state.user_id, provider, req.api_key, verified)
+        return {"ok": True, "provider": provider, "verified": verified}
+
+    @api.delete("/keys/{provider}")
+    async def delete_key(provider: str, request: Request) -> dict[str, Any]:
+        if not engine.accounts.delete_key(request.state.user_id, provider):
+            raise APIError(404, f"No stored key for {provider!r}.", code="key_not_found")
         return {"ok": True}
 
     @api.get("/models")
-    async def models() -> dict[str, Any]:
+    async def models(access: AccessDep) -> dict[str, Any]:
         registry = engine.registry
         providers = [
             {
                 "id": p.id,
                 "label": p.label,
-                "configured": registry.is_configured(p.id),
+                "configured": registry.is_configured(p.id, access),
+                "own_key": p.id in access.user_keys,
                 "local": p.local,
                 "env": p.key_env or p.base_env,
                 "signup_url": p.signup_url,
@@ -350,7 +418,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                 "name": m.name,
                 "provider": m.provider,
                 "family": m.family,
-                "status": model_status(m),
+                "status": model_status(m, access),
                 "context_window": m.context_window,
                 "free_rpd": m.free_rpd,
                 "local": registry.providers[m.provider].local,

@@ -179,6 +179,7 @@ def ask(
         allow_providers=provider or None,
         local_only=private,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
+        access=engine.access_for("local"),
         **_stage_options(max_stages, time_budget, quota_budget, strategy),
     )
     messages = [{"role": "user", "content": text}]
@@ -254,6 +255,7 @@ def chat(
                 local_only=private,
                 system_prompt=DEFAULT_SYSTEM_PROMPT,
                 max_stages=max_stages,
+                access=engine.access_for("local"),
             )
             out.print("tempo ›", style="bold cyan")
             result = await _stream_answer(engine, history, options, trace)
@@ -363,6 +365,133 @@ def sync() -> None:
     out.print(table)
     if not status:
         err.print("No providers configured.", style="dim")
+
+
+users_app = typer.Typer(help="Tempo users: each gets an API key for the web app and API.")
+keys_app = typer.Typer(help="Your own provider keys, stored encrypted (bring your own key).")
+app.add_typer(users_app, name="users")
+app.add_typer(keys_app, name="keys")
+
+
+@users_app.command("add")
+def users_add(name: Annotated[str, typer.Argument(help="User name.")]) -> None:
+    """Create a user and print their Tempo API key (shown once)."""
+    engine = _engine()
+    try:
+        user, api_key = engine.accounts.create_user(name)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    err.print(f"Created user {user.name}. Their API key (shown only now):", markup=False)
+    out.print(api_key, markup=False)
+    err.print(
+        "Once any user exists, the API and web app require a key (Authorization: Bearer <key>).",
+        style="dim",
+        markup=False,
+    )
+
+
+@users_app.command("list")
+def users_list() -> None:
+    """List users and how many provider keys each has stored."""
+    rows = _engine().accounts.list_users()
+    if not rows:
+        err.print("No users: the server runs in single-user local mode.", style="dim")
+        return
+    table = Table(header_style="bold")
+    table.add_column("user")
+    table.add_column("provider keys", justify="right")
+    for row in rows:
+        table.add_row(row["name"], str(row["keys"]))
+    out.print(table)
+
+
+@users_app.command("remove")
+def users_remove(name: Annotated[str, typer.Argument(help="User name.")]) -> None:
+    """Delete a user and their stored provider keys."""
+    if not _engine().accounts.delete_user(name):
+        raise typer.BadParameter(f"no user named {name!r}")
+    err.print(f"Removed {name}.", markup=False)
+
+
+UserOption = Annotated[
+    str | None, typer.Option("--user", help="Whose keys (default: the local user).")
+]
+
+
+def _user_id(engine: Engine, name: str | None) -> str:
+    from tempo.accounts import LOCAL_USER
+
+    if not name or name == LOCAL_USER:
+        return LOCAL_USER
+    user = engine.accounts.find(name)
+    if user is None:
+        raise typer.BadParameter(f"no user named {name!r}")
+    return user.id
+
+
+@keys_app.command("add")
+def keys_add(
+    provider: Annotated[str, typer.Argument(help="Provider id, e.g. groq.")],
+    user: UserOption = None,
+    no_verify: Annotated[
+        bool, typer.Option("--no-verify", help="Store without checking it with the provider.")
+    ] = False,
+) -> None:
+    """Store your own key for a provider (entered at a hidden prompt, or piped on stdin)."""
+    from tempo.sync import verify_key
+
+    engine = _engine()
+    info = engine.registry.providers.get(provider)
+    if info is None or not info.key_env:
+        keyed = ", ".join(p.id for p in engine.registry.providers.values() if p.key_env)
+        raise typer.BadParameter(f"unknown provider; use one of: {keyed}")
+    if sys.stdin.isatty():
+        import getpass
+
+        api_key = getpass.getpass(f"{info.label} API key (hidden): ").strip()
+    else:
+        api_key = sys.stdin.readline().strip()
+    if not api_key:
+        raise typer.BadParameter("no key given")
+    verified = None
+    if not no_verify:
+        verified = asyncio.run(verify_key(engine.registry, provider, api_key))
+        if verified is False:
+            err.print(f"{info.label} rejected this key; nothing stored.", style="red")
+            raise typer.Exit(1)
+    engine.accounts.set_key(_user_id(engine, user), provider, api_key, verified)
+    note = (
+        "verified" if verified else "stored (could not verify now)" if not no_verify else "stored"
+    )
+    err.print(f"{info.label} key …{api_key[-4:]} {note}.", markup=False)
+
+
+@keys_app.command("list")
+def keys_list(user: UserOption = None) -> None:
+    """Show which providers have a stored key (last four characters only)."""
+    engine = _engine()
+    rows = engine.accounts.key_info(_user_id(engine, user))
+    if not rows:
+        err.print("No keys stored. Add one with: tempo keys add groq", style="dim")
+        return
+    table = Table(header_style="bold")
+    for column in ("provider", "key", "verified"):
+        table.add_column(column)
+    for row in rows:
+        verified = {1: "yes", 0: "no"}.get(row["verified"], "unknown")
+        table.add_row(row["provider"], f"…{row['last4']}", verified)
+    out.print(table)
+
+
+@keys_app.command("remove")
+def keys_remove(
+    provider: Annotated[str, typer.Argument(help="Provider id.")], user: UserOption = None
+) -> None:
+    """Delete a stored provider key."""
+    engine = _engine()
+    if not engine.accounts.delete_key(_user_id(engine, user), provider):
+        raise typer.BadParameter(f"no stored key for {provider!r}")
+    err.print(f"Removed the {provider} key.", markup=False)
 
 
 @app.command()

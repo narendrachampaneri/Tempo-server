@@ -123,6 +123,7 @@ class ScriptedBackend:
         self.scripts = scripts or {}
         self.judge_score = judge_score
         self.calls: list[tuple[str, list[dict[str, Any]], str | None]] = []
+        self.accesses: list[Any] = []
         self.active = 0
         self.max_active = 0
 
@@ -153,6 +154,7 @@ class ScriptedBackend:
         purpose = kwargs.get("purpose")
         copied = [dict(m) for m in messages]
         self.calls.append((model.id, copied, purpose))
+        self.accesses.append(kwargs.get("access"))
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:

@@ -216,3 +216,29 @@ class RegistrySync:
             if model.provider == provider:
                 self.health.record_failure(model, "auth")
                 break
+
+
+async def verify_key(
+    registry: Registry,
+    provider: str,
+    api_key: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> bool | None:
+    """Check a provider key by listing models with it: True ok, False rejected, None unknown."""
+    base = registry.credentials(provider).get("api_base") or DEFAULT_BASES.get(provider)
+    if base is None:
+        return None
+    headers: dict[str, str] = {}
+    params: dict[str, str] = {}
+    if provider == "gemini":
+        params["key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
+            response = await client.get(f"{base}/models", headers=headers, params=params)
+    except httpx.HTTPError:
+        return None
+    if response.status_code in (401, 403):
+        return False
+    return True if response.status_code < 400 else None

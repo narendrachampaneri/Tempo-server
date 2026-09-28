@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mappin
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from tempo.accounts import Accounts, load_vault_key
 from tempo.analyzer import analyze
 from tempo.config import MAX_STAGES_LIMIT, Settings
 from tempo.embeddings import EmbeddingClassifier, SemanticCache, load_encoder
@@ -127,6 +128,9 @@ class Engine:
         self.health = health or HealthTracker()
         self.store = store or Store(self.settings.db_path)
         self.quota = QuotaManager(registry, self.store)
+        self.accounts = Accounts(
+            self.store, load_vault_key(self.settings.secret_key, self.settings.data_dir)
+        )
         self.skills = SkillBook(registry, self.store)
         self.router = Router(registry, self.health, self.quota, skill_of=self.skills.skill)
         self.sync: RegistrySync | None = None  # periodic model-list sync (from_settings)
@@ -194,6 +198,10 @@ class Engine:
             except Exception:  # a sync problem must never take the server down
                 log.exception("registry sync failed")
             await asyncio.sleep(self.settings.sync_interval_s)
+
+    def access_for(self, user_id: str) -> Access:
+        """The credentials a user's requests run with: their own keys, then the server's."""
+        return Access(user_id=user_id, user_keys=self.accounts.keys(user_id))
 
     def options(self, **overrides: Any) -> RunOptions:
         s = self.settings
