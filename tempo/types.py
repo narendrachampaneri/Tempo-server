@@ -129,6 +129,7 @@ class ModelInfo(BaseModel):
     name: str
     family: str = "unknown"
     context_window: int = 8192
+    context_known: bool = True  # False: the provider did not say (8192 is a cautious guess)
     strength: float = 0.5
     reasoning: bool = False
     vision: bool = False

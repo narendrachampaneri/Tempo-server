@@ -55,6 +55,7 @@ Installed Ollama models are discovered automatically at startup. The seed model 
 tempo ask "What is 17% of 2,340?"                 # thinking window on stderr, answer on stdout
 tempo ask --mode best "Prove that √2 is irrational"
 tempo ask --private "Summarize this" < notes.txt  # local models only
+tempo ask --no-logging "Summarize this" < notes.txt  # never a free tier that may log or train on prompts
 tempo ask -s 20 --time-budget 300 "Plan a 5-part course on SQL, with exercises"  # big job
 tempo ask --strategy mixture "Compare REST and GraphQL for a mobile app"
 tempo ask --json "hi"                              # one JSON object with answer + trace
@@ -69,6 +70,7 @@ Other commands:
 |---|---|
 | `tempo models` | Which models are ready, and why the others aren't (no key, quota used up, no longer offered, …) |
 | `tempo sync` | Refresh provider model lists now and report each provider's health |
+| `tempo models --free [--json]` | Live free-model catalog: provider, model, type, context, max output, inputs, tools, limits, data policy, health, last check and status |
 | `tempo eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
 | `tempo users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
 | `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
@@ -103,7 +105,7 @@ print(reply.choices[0].message.content)
 print(reply.tempo["trace"])  # thinking-window events
 ```
 
-- **Conditions** go in the `tempo` field: `mode`, `privacy` (`"local_only"`), `allow_providers`, `trace`, `max_stages` (1–50), `time_budget_s`, `quota_budget`, `max_parallel`, `strategy` (`single`, `cascade`, `mixture`, `decompose`).
+- **Conditions** go in the `tempo` field: `mode`, `privacy` (`"local_only"`, or `"no_logging"`: never a model whose free tier may log or train on prompts), `allow_providers`, `trace`, `max_stages` (1–50), `time_budget_s`, `quota_budget`, `max_parallel`, `strategy` (`single`, `cascade`, `mixture`, `decompose`).
 - **Streaming** works (`stream=True`). OpenAI clients can't take back text, so a multi-stage question streams the checked final answer. With `max_stages: 1` it streams live from the model. Trace events arrive as chunks with empty `choices`, and model reasoning arrives as `delta.reasoning_content`.
 - `POST /api/ask` streams every engine event as server-sent events, including live drafts and `answer_reset` when a later stage replaces a draft. The web app uses it. `POST /api/feedback` records 👍/👎, and `GET /api/usage?hours=24` returns the dashboard numbers.
 - **Auth:** with no users and no `TEMPO_API_KEY`, the server is open (local mode). Once a user exists, every `/v1/*` and `/api/*` request needs `Authorization: Bearer <their Tempo key>` (the web app asks for it). `TEMPO_API_KEY` is an admin key that sees everything.
@@ -177,7 +179,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 229 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 264 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .

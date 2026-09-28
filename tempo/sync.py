@@ -199,6 +199,7 @@ def guess_model(
         "name": name or model_id,
         "family": family,
         "context_window": int(context or 8192),
+        "context_known": bool(context),
         "strength": round(strength, 2),
         "reasoning": (
             reasoning
@@ -645,6 +646,7 @@ LIVE_FIELDS = frozenset(
 CATALOG_FILE = "catalog.json"
 # Per-model fields a sync learns (seeds keep their hand-written priors otherwise).
 SAVED_FIELDS = LIVE_FIELDS | {
+    "context_known",
     "listed",
     "endpoints",
     "endpoint_status",

@@ -29,6 +29,13 @@ out = Console(highlight=False)
 
 ModeOption = Annotated[str, typer.Option("--mode", "-m", help=f"Routing mode: {', '.join(MODES)}.")]
 PrivateOption = Annotated[bool, typer.Option("--private", help="Only use local models (Ollama).")]
+NoLoggingOption = Annotated[
+    bool,
+    typer.Option(
+        "--no-logging",
+        help="Never use models whose free tier may log or train on prompts (tempo terms).",
+    ),
+]
 TraceOption = Annotated[
     bool, typer.Option("--trace/--no-trace", help="Show the thinking window on stderr.")
 ]
@@ -157,6 +164,7 @@ def ask(
         typer.Option("--provider", "-p", help="Only use these providers (repeatable)."),
     ] = None,
     private: PrivateOption = False,
+    no_logging: NoLoggingOption = False,
     trace: TraceOption = True,
     max_stages: StagesOption = None,
     time_budget: TimeOption = None,
@@ -179,6 +187,7 @@ def ask(
         model=model,
         allow_providers=provider or None,
         local_only=private,
+        no_logging=no_logging,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         access=engine.access_for("local"),
         **_stage_options(max_stages, time_budget, quota_budget, strategy),
@@ -214,6 +223,7 @@ def ask(
 def chat(
     mode: ModeOption = "auto",
     private: PrivateOption = False,
+    no_logging: NoLoggingOption = False,
     trace: TraceOption = True,
     max_stages: StagesOption = None,
 ):
@@ -254,6 +264,7 @@ def chat(
             options = engine.options(
                 mode=current_mode,
                 local_only=private,
+                no_logging=no_logging,
                 system_prompt=DEFAULT_SYSTEM_PROMPT,
                 max_stages=max_stages,
                 access=engine.access_for("local"),
@@ -268,18 +279,94 @@ def chat(
     asyncio.run(main())
 
 
+def _free_catalog(engine: Engine, as_json: bool, everything: bool) -> None:
+    from tempo import catalog
+    from tempo.sync import RegistrySync
+
+    status = asyncio.run(RegistrySync(engine.registry, engine.health).run())
+    engine.save_catalog(status)
+    checked = {p: s.checked_at for p, s in status.items()}
+    found = catalog.rows(engine.registry, engine.health, checked, everything)
+    if as_json:
+        out.print_json(
+            data={"providers": {p: s.as_dict() for p, s in status.items()}, "models": found}
+        )
+        return
+    table = Table(title="Free models (live)", title_style="bold", header_style="bold")
+    columns = (
+        "provider",
+        "model",
+        "type",
+        "context",
+        "max out",
+        "inputs",
+        "tools",
+        "limits",
+        "data policy",
+        "health",
+        "checked",
+        "status",
+    )
+    for column in columns:
+        table.add_column(column, overflow="fold")
+    for r in found:
+        policy = f"[red]{r['data_policy']}[/red]" if r["flagged"] else r["data_policy"]
+        name = r["model"].removeprefix(r["provider"] + "/")
+        tags = [t for t in ("preview" if r["preview"] else "", r["domain"] or "") if t]
+        table.add_row(
+            r["provider"],
+            name + (f" [dim]({', '.join(tags)})[/dim]" if tags else ""),
+            r["type"],
+            f"{r['context']:,}" if r["context"] else "?",
+            f"{r['max_output']:,}" if r["max_output"] else "-",
+            ",".join(r["inputs"]),
+            {True: "yes", False: "no", None: "-"}[r["tools"]],
+            r["limits"],
+            policy,
+            r["health"],
+            catalog.when_text(r["last_check"]),
+            r["status"],
+        )
+    out.print(table)
+    for p, s in sorted(status.items()):
+        state = "[green]ok[/green]" if s.ok else f"[red]{s.error}[/red]"
+        out.print(f"{p}: {state} · {s.listed} listed", highlight=False)
+    counts: dict[str, int] = {}
+    for r in found:
+        if r["type"] in ("chat", "code", "vision"):
+            counts[r["provider"]] = counts.get(r["provider"], 0) + 1
+    summary = ", ".join(f"{p} {n}" for p, n in sorted(counts.items()))
+    out.print(f"Chat-capable free models: {sum(counts.values())} ({summary})", markup=False)
+
+
 @app.command()
-def models() -> None:
+def models(
+    free: Annotated[
+        bool,
+        typer.Option("--free", help="Live free-model catalog: read every provider's list now."),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="With --free: print JSON.")] = False,
+    everything: Annotated[
+        bool, typer.Option("--all", help="With --free: include expired and delisted models.")
+    ] = False,
+) -> None:
     """List models and whether each one is ready to use."""
     engine = _engine()
     asyncio.run(engine.startup(oneshot=True))
+    if free:
+        _free_catalog(engine, as_json, everything)
+        return
     registry = engine.registry
 
     table = Table(title="Tempo models", title_style="bold", header_style="bold")
     for column in ("status", "model", "provider", "free / day", "context", "strength"):
         table.add_column(column)
     for m in sorted(registry.all(), key=lambda m: (m.provider, m.id)):
-        if not registry.is_configured(m.provider):
+        if not m.chat_capable:
+            continue  # speech, safety, embedding...: `tempo models --free` lists them
+        if not registry.is_enabled(m.provider):
+            status = "[dim]off by default[/dim]"
+        elif not registry.is_configured(m.provider):
             status = "[dim]not configured[/dim]"
         elif m.installed is False:
             status = "[dim]not installed[/dim]"
@@ -305,12 +392,19 @@ def models() -> None:
         if p.free_tier == "trial" and p.free_tier_note:
             out.print(f"{p.label}: {p.free_tier_note}", style="yellow", markup=False)
 
-    missing = [p for p in registry.providers.values() if not registry.is_configured(p.id)]
+    missing = [
+        p
+        for p in registry.providers.values()
+        if not registry.is_configured(p.id) and p.enabled and not p.byok_only
+    ]
     if missing:
         out.print("\nTo enable more providers, set these (free) in your environment or .env:")
         for p in missing:
             env = p.key_env or p.base_env
             out.print(f"  {env:<20} {p.label:<26} {p.signup_url or ''}", markup=False)
+    for p in registry.providers.values():
+        if not p.enabled and p.disabled_note:
+            out.print(f"{p.label}: {p.disabled_note}", style="dim", markup=False)
 
 
 @app.command(name="eval")

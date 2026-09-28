@@ -273,3 +273,44 @@ async def test_terms_check_finds_quotes_and_reports_changes():
     down = httpx.MockTransport(lambda r: httpx.Response(503))
     [result] = await check(registry, down)
     assert result.status == "unreachable"
+
+
+async def test_free_catalog_rows():
+    from tempo import catalog
+
+    registry, status, _ = await synced()
+    found = catalog.rows(registry, checked={p: s.checked_at for p, s in status.items()})
+    by_id = {r["model"]: r for r in found}
+    command = by_id["cohere/command-a-03-2025"]
+    assert command["limits"] == "20/min · 1,000/month shared"
+    assert command["data_policy"] == "may-train" and command["flagged"]
+    assert command["status"] == "ready" and command["last_check"]
+    assert by_id["nvidia/nvidia/nemotron-3-super-120b-a12b"]["context"] is None  # not listed
+    assert by_id["cloudflare/@cf/openai/whisper"]["status"] == "ready (not chat)"
+    assert "cloudflare/@cf/old/model" not in by_id  # expired
+    assert by_id["opencode/big-pickle"]["status"] == "your own key"
+
+
+def test_models_free_cli_reads_lists_and_saves_the_catalog(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from tempo.cli import app
+
+    def offline(request):  # the CLI reads the lists live; here from the mocks
+        return handler([])(request)
+
+    real = httpx.AsyncClient.__init__
+
+    def patched(self, *args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(offline)
+        real(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched)
+    for key, value in KEYS.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("TEMPO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TEMPO_EMBEDDINGS", "off")
+    result = CliRunner().invoke(app, ["models", "--free", "--json"])
+    assert result.exit_code == 0, result.stdout
+    assert '"cohere/command-a-03-2025"' in result.stdout
+    assert (tmp_path / "catalog.json").exists()

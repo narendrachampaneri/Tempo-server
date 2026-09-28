@@ -64,7 +64,7 @@ class TempoOptions(StageOptions):
     """Tempo-specific request options ("conditions"), sent as the ``tempo`` field."""
 
     mode: str | None = None
-    privacy: Literal["default", "local_only"] = "default"
+    privacy: Literal["default", "local_only", "no_logging"] = "default"
     allow_providers: list[str] | None = None
     trace: bool = False
 
@@ -86,7 +86,7 @@ class AskRequest(StageOptions):
     messages: list[dict[str, Any]] | None = None
     mode: str = "auto"
     model: str | None = None
-    privacy: Literal["default", "local_only"] = "default"
+    privacy: Literal["default", "local_only", "no_logging"] = "default"
     allow_providers: list[str] | None = None
 
 
@@ -215,6 +215,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             model=explicit,
             allow_providers=req.tempo.allow_providers,
             local_only=req.tempo.privacy == "local_only",
+            no_logging=req.tempo.privacy == "no_logging",
             temperature=req.temperature,
             max_tokens=req.max_completion_tokens or req.max_tokens,
             access=access,
@@ -328,6 +329,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             model=req.model or None,
             allow_providers=req.allow_providers,
             local_only=req.privacy == "local_only",
+            no_logging=req.privacy == "no_logging",
             system_prompt=DEFAULT_SYSTEM_PROMPT,
             access=access,
             **req.stage_overrides(),
