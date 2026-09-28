@@ -1,10 +1,21 @@
-# Tempo model registry (Phase 1 seed).
+# Tempo model registry (seed list).
 #
-# Skill scores are rough 0..1 priors that the rule-based router uses until Phase 2
-# replaces them with measured eval results. Free-tier limits come from
-# docs/RESEARCH.md (September 2026) and change often.
+# Skill scores are rough 0..1 priors. `tempo eval` measures real scores per task and the
+# router blends them in (see tempo/evals.py); `tempo sync` adds models that providers list
+# and flags seeds they no longer offer. Free-tier limits come from docs/RESEARCH.md
+# (September 2026) and change often; x-ratelimit headers correct them at run time.
 #
-# Fields:
+# Provider fields:
+#   key_env / base_env       environment variables holding the API key / base URL
+#   shared_rpm / shared_rpd  free limits shared by all of the provider's models
+#   requests_header_window   what x-ratelimit-remaining-requests counts: minute or day
+#   training_on_outputs      may this provider's outputs train other models?
+#                            allowed | disallowed | unknown. Read the provider's terms and
+#                            each model's licence before changing it. `tempo export-laya`
+#                            (and the planned Tempo Tune) never trains on "disallowed"
+#                            text and skips "unknown" with --strict.
+#
+# Model fields:
 #   id              LiteLLM model string; also the id clients use to request this model directly
 #   strength        general capability, 0..1 (matters more for complex queries)
 #   free_rpm        free requests per minute
@@ -23,16 +34,19 @@ providers:
     base_env: GROQ_API_BASE
     signup_url: https://console.groq.com/keys
     requests_header_window: day  # Groq's x-ratelimit-remaining-requests counts the day
+    training_on_outputs: unknown  # not reviewed yet
   cerebras:
     label: Cerebras
     key_env: CEREBRAS_API_KEY
     base_env: CEREBRAS_API_BASE
     signup_url: https://cloud.cerebras.ai
+    training_on_outputs: unknown  # not reviewed yet
   gemini:
     label: Google AI Studio
     key_env: GEMINI_API_KEY
     base_env: GEMINI_API_BASE
     signup_url: https://aistudio.google.com/apikey
+    training_on_outputs: unknown  # not reviewed yet
   openrouter:
     label: OpenRouter (free models)
     key_env: OPENROUTER_API_KEY
@@ -40,12 +54,14 @@ providers:
     signup_url: https://openrouter.ai/keys
     shared_rpm: 20  # all :free models share one pool
     shared_rpd: 50
+    training_on_outputs: unknown  # not reviewed yet
   ollama:
     label: Ollama (local)
     base_env: OLLAMA_API_BASE
     local: true
     discover: true
     signup_url: https://ollama.com/download
+    training_on_outputs: unknown  # not reviewed yet
 
 models:
   # --- Groq -------------------------------------------------------------------
