@@ -206,9 +206,10 @@ async def test_sync_adds_new_free_models_and_retires_missing_ones():
     health = HealthTracker()
     status = await RegistrySync(registry, health, httpx.MockTransport(provider_lists)).run()
 
-    assert status["groq"].ok and status["groq"].listed == 2
+    assert status["groq"].ok and status["groq"].listed == 3
     assert "groq/moonshotai/kimi-k2-instruct" in status["groq"].added
-    assert registry.get("groq/whisper-large-v3") is None  # not a chat model
+    # Registered by type; the router never sends it a chat request.
+    assert registry.get("groq/whisper-large-v3").type == "speech-to-text"
     assert registry.get("groq/qwen/qwen3.8-27b").listed is True
     assert registry.get("groq/openai/gpt-oss-120b").listed is False  # no longer offered
     assert "groq/openai/gpt-oss-120b" in status["groq"].removed
@@ -217,7 +218,7 @@ async def test_sync_adds_new_free_models_and_retires_missing_ones():
     assert added is not None and added.source == "sync" and added.family == "qwen"
     assert registry.get("openrouter/openai/gpt-5") is None  # paid: not added
     assert registry.get("openrouter/acme/retired:free") is None  # past its expiration date
-    assert registry.get("gemini/text-embedding-004") is None
+    assert registry.get("gemini/text-embedding-004").type == "embedding"
 
     assert not status["cerebras"].ok and status["cerebras"].error == "API key rejected"
     assert (
@@ -285,3 +286,105 @@ async def test_a_400_that_says_the_key_is_bad_counts_as_rejected():
     status = await RegistrySync(registry, health, httpx.MockTransport(google)).run()
     assert status["gemini"].error == "API key rejected"
     assert await verify_key(registry, "gemini", "bad", httpx.MockTransport(google)) is False
+
+
+# :free models that existed with no endpoints on 2026-09-28 (owner's test case).
+NO_ENDPOINTS = [
+    "openai/gpt-oss-120b:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-coder:free",
+    "qwen/qwen3.6-plus:free",
+    "z-ai/glm-4.5-air:free",
+    "deepseek/deepseek-r1-0528:free",
+]
+FREE = {"prompt": "0", "completion": "0"}
+
+
+def openrouter_live(calls: list[str]):
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        calls.append(url)
+        if url.endswith("/api/v1/models"):
+            data = [{"id": m, "pricing": FREE, "context_length": 131072} for m in NO_ENDPOINTS]
+            data += [
+                {"id": "good/model:free", "pricing": FREE, "context_length": 65536},
+                {"id": "flaky/model:free", "pricing": FREE},
+                {"id": "down/model:free", "pricing": FREE},
+                {"id": "nosuffix/model", "pricing": FREE},  # free without the :free suffix
+                {"id": "openrouter/free", "pricing": FREE},
+                {"id": "stealth/secret", "pricing": FREE},
+                {"id": "vendor/model-fin:free", "pricing": FREE},
+                {"id": "meta-llama/llama-guard-4-12b:free", "pricing": FREE},
+                {"id": "paid/model", "pricing": {"prompt": "0.000001", "completion": "0"}},
+            ]
+            return httpx.Response(200, json={"data": data})
+        if url.endswith("/endpoints"):
+            model = url.split("/api/v1/models/", 1)[1].removesuffix("/endpoints")
+            if model in NO_ENDPOINTS:
+                endpoints = []
+            elif model == "flaky/model:free":
+                endpoints = [{"status": 0, "uptime_last_30m": 91.2, "pricing": FREE}]
+            elif model == "down/model:free":
+                endpoints = [{"status": -2, "uptime_last_30m": 99.0}]
+            else:
+                endpoints = [{"status": 0, "uptime_last_30m": 99.9, "max_completion_tokens": 8192}]
+            return httpx.Response(200, json={"data": {"id": model, "endpoints": endpoints}})
+        return httpx.Response(404)
+
+    return handler
+
+
+async def test_openrouter_free_models_are_checked_against_their_endpoints():
+    calls: list[str] = []
+    # The list and endpoints are public; the key (a placeholder) only lets the router route.
+    registry = Registry.load(env={"OPENROUTER_API_KEY": "placeholder-key"})
+    clock = [1_790_000_000.0]
+    sync = RegistrySync(
+        registry, transport=httpx.MockTransport(openrouter_live(calls)), clock=lambda: clock[0]
+    )
+    status = await sync.run()
+    assert status["openrouter"].ok
+    ids = {m.id for m in registry.all()}
+    assert "openrouter/paid/model" not in ids
+    assert registry.get("openrouter/nosuffix/model") is not None
+
+    router = Router(registry, HealthTracker())
+    route = router.rank(profile("chat"))
+    usable = [c.model.id for c in route.candidates]
+    for model in NO_ENDPOINTS:  # listed, but nothing serves them: never routed to
+        assert registry.get(f"openrouter/{model}").endpoints == 0
+        assert f"openrouter/{model}" in route.skipped["no endpoints serving it"]
+    assert usable[-1] == "openrouter/openrouter/free"  # only as the very last fallback
+    assert registry.get("openrouter/openrouter/free").fallback_only
+    assert registry.get("openrouter/good/model:free").max_output == 8192
+    assert registry.get("openrouter/flaky/model:free").degraded  # 91% < 95%
+    assert registry.get("openrouter/down/model:free").degraded  # status below 0
+    assert usable.index("openrouter/good/model:free") < usable.index("openrouter/flaky/model:free")
+    secret = registry.get("openrouter/stealth/secret")
+    assert secret.preview and secret.data_policy == "may-log"
+    assert registry.get("openrouter/vendor/model-fin:free").domain == "finance"
+    assert registry.get("openrouter/meta-llama/llama-guard-4-12b:free").type == "safety"
+
+    # At most every 15 minutes: an immediate re-run reads no endpoints again.
+    before = sum(u.endswith("/endpoints") for u in calls)
+    await sync.run()
+    assert sum(u.endswith("/endpoints") for u in calls) == before
+    clock[0] += 15 * 60
+    await sync.run()
+    assert sum(u.endswith("/endpoints") for u in calls) > before
+
+
+async def test_openrouter_key_reports_the_live_free_daily_limit():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/key"):
+            assert request.headers["authorization"] == "Bearer placeholder-key"
+            data = {"free_model_daily_requests": {"used": 3, "limit": 1000, "remaining": 997}}
+            return httpx.Response(200, json={"data": data})
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+
+    registry = Registry.load(env={"OPENROUTER_API_KEY": "placeholder-key"})
+    await RegistrySync(registry, transport=httpx.MockTransport(handler)).run()
+    provider = registry.providers["openrouter"]
+    assert provider.shared_rpd == 1000 and provider.limits_source.startswith("live:")

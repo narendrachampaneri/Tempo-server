@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
@@ -199,12 +200,19 @@ class Engine:
     async def _sync_loop(self) -> None:
         """Refresh provider model lists (and check provider health) now and then."""
         assert self.sync is not None
+        from tempo.sync import HEALTH_EVERY_S
+
+        last_full = -math.inf
         while True:
             try:
-                await self.sync.run()
+                if time.monotonic() - last_full >= self.settings.sync_interval_s:
+                    await self.sync.run()
+                    last_full = time.monotonic()
+                else:  # between full syncs: OpenRouter endpoint health only
+                    await self.sync.check_openrouter_health()
             except Exception:  # a sync problem must never take the server down
                 log.exception("registry sync failed")
-            await asyncio.sleep(self.settings.sync_interval_s)
+            await asyncio.sleep(min(self.settings.sync_interval_s, HEALTH_EVERY_S))
 
     def access_for(self, user_id: str) -> Access:
         """The credentials a user's requests run with: their own keys, then the server's."""
