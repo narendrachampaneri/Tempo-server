@@ -1,7 +1,7 @@
 # Status
 
-_Last updated 2026-09-28, at the end of step 2 (live free-model catalog and new providers).
-Branch: `claude/multi-model-ai-platform-o0fx9v`._
+_Last updated 2026-09-28, at the end of step 3 (Tempo's own models and publishing docs; plan
+and data only, nothing trained). Branch: `claude/multi-model-ai-platform-o0fx9v`._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -97,6 +97,56 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   changes: stage events, fallback after the demo rate limit, cool-down, fixes, and the language
   check on Gujarati and Hindi (the English-only demo models now correctly fail it).
 
+### Step 3: the owner's decisions on step 2
+
+- **NVIDIA**: off by default and owner-only (`owner_only`): the local user or the admin may turn
+  it on for private testing; other users and demo mode are refused. Never in collect or exports.
+- **Cohere**: only users' own trial keys (`byok_only`); it only answers: never the judge, never
+  eval, collect or exports (`blocked_for: [eval, collect, judge, export]`). Its model list is
+  read with a user's key when they add it and at each sync.
+- **Mistral**: text outputs are "yes" (terms 3.3 restrict image outputs only; quote and link
+  kept). Flagged "may-train" until the owner opts out in the console and sets
+  `TEMPO_OPTED_OUT=mistral`; then "may-log" (no written zero-retention), and only for requests
+  on the server's key.
+- **Cloudflare**: its Service-Specific Terms (last updated 2026-09-28) say "you retain all
+  applicable intellectual property or other proprietary rights in Inputs and Outputs" and defer
+  to each model's terms, so `licence_decides`: Apache-2.0/MIT models are "yes", others follow
+  their licence, unknown licences stay "unclear". Licences are read from Cloudflare's list.
+- **Space Bunny**: Zen's version is no longer flagged (Zen states zero retention) and is marked
+  "maker not disclosed"; OpenRouter's stealth version stays "may-log".
+- **OpenRouter**: every free model is "may-log" unless a model's provider has a written
+  no-retention policy, recorded with its source (a test enforces the source).
+- **Zen**: off by default (`TEMPO_ENABLE_PROVIDERS=opencode`), users' own keys, answering only;
+  never eval, collect or exports.
+- **Terms before every export**: `tempo export-laya`, `export-sft` and `export-pairs` first
+  re-read the terms of hosted "yes" providers that appear in the log; a provider whose quotes
+  changed or whose page can't be read is left out of that export, with the reason printed.
+- **GitHub Actions collect job**: not activated (owner: first a local run with an Apache-2.0
+  model). The example stays in docs/examples.
+
+### Step 3: Tempo's own models and publishing (plan and data only)
+
+- **ARCHITECTURE.md §14 "Tempo models"** and **[TEMPO_MODELS.md](./TEMPO_MODELS.md)**:
+  Tempo-Router and Tempo-Judge (Laya, Apache-2.0), Tempo-Core (a 1–4B Apache-2.0/MIT model;
+  first choice Qwen3-1.7B, licences checked on Hugging Face), Tempo Tune add-ons. Training plan
+  per model (LoRA/QLoRA SFT, then DPO on pairs, later GRPO with rewards from maths and sandboxed
+  code checks) on a free Kaggle notebook, with estimates to be measured; shipped as GGUF Q4_K_M
+  (Tempo-Core) or Laya checkpoints (PyTorch fp32). Promotion gate, model-collapse protection
+  and the Hugging Face release plan.
+- **`tempo export-sft`** (conversation → the final answer that passed its check) and
+  **`tempo export-pairs`** (chosen = that answer, rejected = an earlier answer that failed,
+  hard failures first), in TRL's formats. Only "yes" rows, the licence and source on every row,
+  no 👎, only the owner's and `tempo collect`'s questions by default (`--user` adds a consenting
+  user), the same held-out split as every export, and a repetition measure for the collapse
+  check. 7 tests.
+- **[USE_CASES.md](./USE_CASES.md)**: the 20 scenarios, each with an example, what Tempo still
+  needs and its roadmap phase.
+- **[PUBLISHING.md](./PUBLISHING.md)**, **CONTRIBUTING.md**, **SECURITY.md**, **examples/**
+  (tested against demo mode), and the README now opens with "open models plus the system that
+  runs and trains them" and carries the provider terms table. A scan of every tracked file
+  found no keys.
+- Tests: 281 pass, lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -112,22 +162,22 @@ Sante (OpenRouter, health).
 
 ## Terms verdicts (may outputs be training data?)
 
-| Provider | Verdict | Data policy (free tier) | Notes |
+| Provider | Verdict | Data policy (free tier) | Tempo's use |
 |---|---|---|---|
-| Groq | unclear | unknown | until Groq confirms in writing |
-| OpenRouter | unclear | unknown (stealth: may-log) | until OpenRouter confirms in writing |
+| Ollama (local) | per model licence (Apache-2.0 / MIT: yes) | ok | default for private and training runs |
+| Mistral | **yes** (text outputs) | may-train until opted out (`TEMPO_OPTED_OUT`), then may-log | answering; terms re-read before exports |
+| Cloudflare | per model licence (Cloudflare adds no limit) | ok (does not train or keep) | answering |
+| Groq | unclear (until confirmed in writing) | unknown | answering |
+| OpenRouter | unclear (until confirmed in writing) | may-log (all free models) | answering; `openrouter/free` last |
 | Cerebras | unclear | unknown | off; never eval or collect |
-| Google AI Studio | no | may-train | "develop models that compete" |
-| Cloudflare | unclear | ok (does not train or keep) | outputs are yours; each model's licence applies |
-| NVIDIA | no | may-train | trial: testing and evaluation only; off by default |
-| Cohere | no | may-train | no competing product; no benchmarking (blocked for eval) |
-| Mistral | unclear | may-train (opt-out) | only image outputs are restricted |
-| OpenCode Zen | no | per model | "develop artificial intelligence models that compete" |
-| Ollama (local) | per model licence | ok | Apache-2.0 / MIT: yes |
+| Google AI Studio | no | may-train | answering |
+| NVIDIA | no | may-train | off; owner's private testing only |
+| Cohere | no | may-train | users' own keys; answers only |
+| OpenCode Zen | no | per model | off; users' own keys; answering only |
 
 ## In progress
 
-Nothing. Step 2 is finished; waiting for step 3 from the owner.
+Nothing. Step 3 is finished; waiting for step 4 from the owner.
 
 ## Blocked: needs key
 
@@ -138,10 +188,11 @@ server:
 |---|---|---|
 | Real answers from Groq, Google, OpenRouter | `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY` | mock models; fake OpenAI-style server |
 | Cloudflare Workers AI list and calls | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | mocked `/ai/models/search`; OpenAI-compatible route on a fake server |
-| Cohere list, monthly counting, calls | `COHERE_API_KEY` | mocked `/v1/models`, quota tests |
+| Cohere list, monthly counting, calls | a user's own trial key (`tempo keys add cohere --user NAME`) | mocked `/v1/models`, quota tests |
 | Mistral list and header limits | `MISTRAL_API_KEY` | mocked `/v1/models`, header tests |
-| NVIDIA calls (list is live already) | `NVIDIA_API_KEY` + `TEMPO_ENABLE_PROVIDERS=nvidia` | mocks |
-| OpenCode Zen calls (list is live already) | a user's own key (`tempo keys add opencode --user NAME`) | mocks |
+| NVIDIA calls (list is live already) | `NVIDIA_API_KEY` + `TEMPO_ENABLE_PROVIDERS=nvidia`, owner only | mocks |
+| OpenCode Zen calls (list is live already) | `TEMPO_ENABLE_PROVIDERS=opencode` + a user's own key | mocks |
+| `tempo export-sft` / `export-pairs` with real data | "yes" answers in the log: Ollama with an Apache-2.0/MIT model, or Mistral | the scripted test engine |
 | OpenRouter live free daily limit (`/api/v1/key`) | `OPENROUTER_API_KEY` | mock |
 | Live limits from `x-ratelimit-limit-*` headers | any key | header tests |
 | `tempo eval` on real models | any key (never Cerebras or Cohere) | mock models |
@@ -162,11 +213,12 @@ tempo ask "A train travels 240 km in 3 hours, then 180 km in 2 hours. What is it
 tempo ask "ગુજરાતની રાજધાની કઈ છે?"
 tempo ask --provider cloudflare "Write a haiku about rain"   # a few real calls per new provider
 tempo ask --provider mistral "Summarise the water cycle in two sentences"
-tempo ask --provider cohere "hello"   # counts against 1,000 calls a month
-tempo eval --task math --limit 2   # never uses Cerebras or Cohere (blocked in code)
+tempo keys add cohere --user NAME  # a user's own trial key; Cohere then answers for that user
+tempo eval --task math --limit 2   # never uses Cerebras, Cohere or Zen (blocked in code)
 tempo terms --check                # re-verify every quote
 # With Ollama and an Apache-2.0 model (qwen3:8b, granite3.3:8b):
 tempo collect --estimate --yes-only && tempo collect --yes-only --limit 10
+tempo export-sft --out sft && tempo export-pairs --out pairs && tempo export-laya --out laya
 ```
 
 Check that a real 429 cools the model down and falls back, that `x-ratelimit-limit-*` headers
@@ -175,33 +227,36 @@ update the limits (`tempo models --free` shows them), and that Mistral's headers
 
 ## Next
 
-- Step 3, when the owner sends it.
+- Step 4, when the owner sends it.
+- The owner's plan: run `tempo collect --yes-only` on their own computer with a local
+  Apache-2.0 model (docs/COLLECT_ANYWHERE.md), then the first exports.
 - Noticed, not started:
   - NVIDIA's model list gives no context sizes; the catalog shows "?" and routing assumes 8K.
   - The web page has no switch for privacy `no_logging` yet (API and CLI do).
-  - Language check: Latin-script languages other than the seven above are not told apart.
+  - Language check: Latin-script languages other than the seven covered are not told apart.
+  - The collapse plan needs human reference answers from open datasets; `tempo collect` stores
+    questions only today (TEMPO_MODELS.md §4).
+  - A static, replayed demo page for publishing (PUBLISHING.md §5).
 
 ## Decisions for the owner
 
-1. **NVIDIA** is off by default because its trial terms say "internal testing and evaluation
-   purposes, not in production". Keep it off, or turn it on for your own testing?
-2. **Cohere** trial keys are "evaluation keys", and Cohere's terms forbid benchmarking, so it is
-   blocked for `tempo eval` and `tempo collect`. Should Tempo serve users with it at all?
-3. **Mistral**'s terms restrict only image outputs, so its text outputs could count as "yes".
-   It stays "unclear" under your rule until you decide. Its free plan also trains on prompts
-   unless you opt out in the console (recommended).
-4. **Cloudflare** says outputs are yours and each model's licence applies. Should open-licence
-   models on Cloudflare (Apache-2.0/MIT) count as "yes", like local ones?
-5. **Space Bunny** (Zen) is flagged "may-log" because it is a stealth model (your rule), though
-   Zen says it follows zero retention. Keep the flag?
-6. **OpenRouter free models** have no recorded data policy ("unknown"), so `no_logging`
-   requests may still use them. Treat all OpenRouter free models as "may-log"?
-7. **OpenCode Zen's terms** also forbid "automatically or programmatically extracts data or
-   Output". Tempo only calls it with a user's own key, as an API client; confirm that is fine.
-8. **GitHub Actions job**: activate it (copy to `.github/workflows/`)? It needs a private repo
-   and your keys as secrets; GitHub asks that Actions be used for the project's own software
-   work.
-9. **GitHub Models** is retired; nothing to decide unless it returns.
+1. **Code licence**: Apache-2.0 (matches Laya; recommended) or MIT. No `LICENSE` file is added
+   until you choose.
+2. **Tempo-Core base model**: Qwen3-1.7B (Apache-2.0, first choice) with Granite 3.3 2B
+   (Apache-2.0) as the second family, or a 3–4B model (Qwen3-4B, SmolLM3-3B, Phi-4-mini, MIT)
+   if CPU speed allows?
+3. **Other users' questions in training data**: left out by default (they need consent,
+   Phase 3). Keep that, or add a consent setting now?
+4. **Share-alike data**: Dolly (CC-BY-SA-3.0) questions are collected; keep CC-BY-SA rows out of
+   Tempo-Core's training data (the plan's default), or accept share-alike for the datasets?
+5. **Public-data share**: at least 30% human or public data per run, and at most 30% answers
+   written by an earlier Tempo-Core. Keep these numbers?
+6. **Promotion gate**: at least 30 held-out questions per task type, else promotion is blocked.
+   Keep, or allow promotion on the tasks that have enough?
+7. **Public demo**: free Hugging Face Spaces now run only static pages, so the plan is a
+   replayed recording. Is that enough, or should a free CPU host be found for a live demo?
+8. **Hugging Face account** and repository names for the models, when there is something to
+   release.
 
 ## How the checks were run (for the next session)
 
