@@ -5,7 +5,9 @@ import json
 import socket
 import threading
 import time
+from contextlib import contextmanager
 
+import httpx
 import pytest
 import uvicorn
 from openai import OpenAI
@@ -42,17 +44,9 @@ PERSON = {
 IMAGE = "data:image/png;base64,iVBORw0KGgo="
 
 
-@pytest.fixture(scope="module")
-def sdk(tmp_path_factory):
-    settings = Settings(
-        enable_mock=True,
-        data_dir=None,
-        embeddings="off",
-        laya="off",
-        sync_interval_s=0,
-        cache=False,
-    )
-    engine = Engine.from_settings(settings)
+@contextmanager
+def running(engine, settings):
+    """A real uvicorn server on a free local port; yields its /v1 base URL."""
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -66,12 +60,35 @@ def sdk(tmp_path_factory):
     while not server.started and time.time() < deadline:
         time.sleep(0.05)
     assert server.started
-    import httpx
+    try:
+        yield f"http://127.0.0.1:{port}/v1"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
+
+def demo_settings(**overrides):
+    values = dict(
+        enable_mock=True,
+        data_dir=None,
+        embeddings="off",
+        laya="off",
+        sync_interval_s=0,
+        cache=False,
+    )
+    return Settings(**{**values, **overrides})
+
+
+def client(base_url, api_key="unused"):
     http = httpx.Client(trust_env=False, timeout=60)  # straight to localhost, no proxy
-    yield OpenAI(base_url=f"http://127.0.0.1:{port}/v1", api_key="unused", http_client=http)
-    server.should_exit = True
-    thread.join(timeout=5)
+    return OpenAI(base_url=base_url, api_key=api_key, http_client=http)
+
+
+@pytest.fixture(scope="module")
+def sdk():
+    settings = demo_settings()
+    with running(Engine.from_settings(settings), settings) as base_url:
+        yield client(base_url)
 
 
 def test_chat_and_streaming(sdk):
