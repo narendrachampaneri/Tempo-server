@@ -36,6 +36,18 @@ async def _chat(req: Request):
         )
     if model == "openai/gpt-oss-20b":
         return JSONResponse({"error": {"message": "Invalid API Key"}}, status_code=401)
+    if body.get("tools"):
+        seen[-1]["tools"] = [t["function"]["name"] for t in body["tools"]]
+        return StreamingResponse(_tool_stream(model), media_type="text/event-stream")
+    images = [
+        part
+        for m in body["messages"]
+        if isinstance(m.get("content"), list)
+        for part in m["content"]
+        if part.get("type") == "image_url"
+    ]
+    if images:
+        seen[-1]["image"] = images[0]["image_url"]["url"]
     pieces = ["<thi", "nk>Plan.</th", "ink>\n\n", "Hello ", "from ", model]
 
     async def gen():
@@ -53,6 +65,36 @@ async def _chat(req: Request):
 
     headers = {"x-ratelimit-remaining-requests": "42", "x-ratelimit-remaining-tokens": "900"}
     return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+async def _tool_stream(model):
+    """An OpenAI-style streamed tool call: id and name first, the arguments in fragments."""
+    deltas = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": "call_abc",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": ""},
+                }
+            ],
+        },
+        {"tool_calls": [{"index": 0, "function": {"arguments": '{"city": '}}]},
+        {"tool_calls": [{"index": 0, "function": {"arguments": '"Paris"}'}}]},
+    ]
+    for i, delta in enumerate(deltas):
+        finish = "tool_calls" if i == len(deltas) - 1 else None
+        chunk = {
+            "id": "c",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+    yield "data: [DONE]\n\n"
 
 
 @fake.get("/api/tags")
@@ -216,3 +258,36 @@ async def test_openai_compatible_provider_route(env, base_url):
     deltas = await _collect(LiteLLMBackend(registry, timeout=10), model.id, registry)
     assert "".join(t for k, t in deltas if k == "answer") == "Hello from @cf/meta/llama-x"
     assert seen[-1] == {"model": "@cf/meta/llama-x", "auth": "Bearer placeholder-key"}
+
+
+async def test_native_tool_calls_stream_through_litellm(env):
+    registry = Registry.load(env=env)
+    model = registry.get("groq/qwen/qwen3.8-27b")
+    tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+    deltas = []
+    async for delta in LiteLLMBackend(registry, timeout=10).stream(
+        model, [{"role": "user", "content": "weather?"}], tools=tools
+    ):
+        deltas.append(delta)
+    assert seen[-1]["tools"] == ["get_weather"]
+    [(kind, payload)] = [d for d in deltas if d[0] == "tool_calls"]
+    calls = json.loads(payload)
+    assert calls[0]["id"] == "call_abc"
+    assert calls[0]["function"] == {"name": "get_weather", "arguments": '{"city": "Paris"}'}
+
+
+async def test_images_reach_the_provider_unchanged(env):
+    registry = Registry.load(env=env)
+    url = "data:image/png;base64,iVBORw0KGgo="
+    message = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What is this?"},
+            {"type": "image_url", "image_url": {"url": url}},
+        ],
+    }
+    async for _ in LiteLLMBackend(registry, timeout=10).stream(
+        registry.get("groq/qwen/qwen3.8-27b"), [message]
+    ):
+        pass
+    assert seen[-1]["image"] == url

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, Literal, Protocol
@@ -10,7 +11,8 @@ from typing import Any, Literal, Protocol
 from tempo.registry import Registry
 from tempo.types import Access, ModelInfo
 
-DeltaKind = Literal["answer", "reasoning"]
+# "tool_calls" carries the complete OpenAI tool calls as a JSON list, once, at the end.
+DeltaKind = Literal["answer", "reasoning", "tool_calls"]
 Delta = tuple[DeltaKind, str]
 
 ErrorKind = Literal[
@@ -22,6 +24,7 @@ ErrorKind = Literal[
     "context",
     "bad_request",
     "empty",
+    "invalid",
     "unknown",
 ]
 
@@ -34,6 +37,7 @@ ERROR_LABELS: dict[str, str] = {
     "context": "input too long for this model",
     "bad_request": "request rejected",
     "empty": "returned an empty answer",
+    "invalid": "reply did not match the request (tool call or JSON schema)",
     "unknown": "failed",
 }
 
@@ -64,6 +68,9 @@ class ChatBackend(Protocol):
         access: Access | None = None,
         meta: dict[str, Any] | None = None,
         purpose: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        parallel_tool_calls: bool | None = None,
     ) -> AsyncIterator[Delta]: ...
 
 
@@ -183,6 +190,25 @@ def _retry_after(exc: BaseException) -> float | None:
     return None
 
 
+def _add_tool_piece(calls: dict[int, dict[str, Any]], piece: Any) -> None:
+    """Join a streamed tool-call piece (id and name first, arguments in fragments) into calls."""
+    get = piece.get if isinstance(piece, dict) else lambda k, d=None: getattr(piece, k, d)
+    index = get("index", None)
+    index = len(calls) if index is None else int(index)
+    call = calls.setdefault(
+        index, {"id": None, "type": "function", "function": {"name": "", "arguments": ""}}
+    )
+    if get("id", None):
+        call["id"] = get("id")
+    fn = get("function", None)
+    if fn is not None:
+        fget = fn.get if isinstance(fn, dict) else lambda k, d=None: getattr(fn, k, d)
+        if fget("name", None):
+            call["function"]["name"] = fget("name")
+        if fget("arguments", None):
+            call["function"]["arguments"] += fget("arguments")
+
+
 def _load_litellm() -> Any:
     import litellm
 
@@ -213,6 +239,9 @@ class LiteLLMBackend:
         access: Access | None = None,
         meta: dict[str, Any] | None = None,
         purpose: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any = None,
+        parallel_tool_calls: bool | None = None,
     ) -> AsyncIterator[Delta]:
         litellm = _load_litellm()
         meta = meta if meta is not None else {}
@@ -228,8 +257,15 @@ class LiteLLMBackend:
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
+        if tools:  # only for models with native tool support; the others get them emulated
+            kwargs["tools"] = tools
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+            if parallel_tool_calls is not None:
+                kwargs["parallel_tool_calls"] = parallel_tool_calls
 
         splitter = ThinkTagSplitter()
+        calls: dict[int, dict[str, Any]] = {}  # streamed tool-call pieces, by index
         try:
             response = await litellm.acompletion(**kwargs)
             hidden = getattr(response, "_hidden_params", None) or {}
@@ -248,8 +284,12 @@ class LiteLLMBackend:
                 if content:
                     for item in splitter.feed(content):
                         yield item
+                for piece in getattr(delta, "tool_calls", None) or []:
+                    _add_tool_piece(calls, piece)
             for item in splitter.flush():
                 yield item
+            if calls:
+                yield ("tool_calls", json.dumps([calls[i] for i in sorted(calls)]))
         except ProviderError:
             raise
         except Exception as exc:

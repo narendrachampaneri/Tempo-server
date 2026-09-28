@@ -106,7 +106,10 @@ def run_heuristics(
     question: str,
     answer: str,
     finish_reason: str | None = None,
+    structured: bool = False,
 ) -> Heuristics:
+    """``structured``: the answer is JSON the caller asked for (response_format), already
+    validated, so prose checks (language, code blocks, length) don't apply."""
     h = Heuristics()
     text = answer.strip()
     if not text:
@@ -125,6 +128,8 @@ def run_heuristics(
         except ValueError:
             h.fail("asked for JSON but the answer has no valid JSON")
 
+    if structured:
+        return h
     if profile.task == "code":
         blocks = [(lang.lower(), code) for lang, code in _FENCE.findall(answer)]
         if not blocks and _CODE_ASK.search(question):

@@ -69,6 +69,11 @@ class RunOptions:
     no_logging: bool = False
     # Only models whose outputs may be training data (tempo collect --yes-only).
     training_only: bool = False
+    # OpenAI request features: tool calling and structured output (tempo/compat.py).
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any = None
+    parallel_tool_calls: bool | None = None
+    response_format: dict[str, Any] | None = None
 
 
 @dataclass
@@ -84,6 +89,7 @@ class RunResult:
     score: float | None = None
     error: str | None = None
     error_kind: str | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
 
     @property
@@ -105,6 +111,7 @@ class RunResult:
             self.text = data["answer"]
             self.reasoning = data.get("reasoning") or self.reasoning
             self.score = data.get("score")
+            self.tool_calls = data.get("tool_calls") or []
         elif event.type == "received":
             self.question_id = data.get("question_id")
         elif event.type == "done":

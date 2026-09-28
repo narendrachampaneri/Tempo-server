@@ -131,6 +131,7 @@ class ScriptedBackend:
         self.judge_score = judge_score
         self.calls: list[tuple[str, list[dict[str, Any]], str | None]] = []
         self.accesses: list[Any] = []
+        self.extras: list[dict[str, Any]] = []  # tools / tool_choice sent with each call
         self.active = 0
         self.max_active = 0
 
@@ -166,6 +167,7 @@ class ScriptedBackend:
         copied = [dict(m) for m in messages]
         self.calls.append((model.id, copied, purpose))
         self.accesses.append(kwargs.get("access"))
+        self.extras.append({k: kwargs.get(k) for k in ("tools", "tool_choice") if kwargs.get(k)})
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:

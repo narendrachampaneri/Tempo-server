@@ -78,7 +78,42 @@ class ChatCompletionRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     max_completion_tokens: int | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any = None
+    parallel_tool_calls: bool | None = None
+    response_format: dict[str, Any] | None = None
     tempo: TempoOptions = Field(default_factory=TempoOptions)
+
+    def check_features(self) -> None:
+        """Reject requests OpenAI itself would reject, with the same kind of message."""
+        names = {
+            (t.get("function") or {}).get("name")
+            for t in self.tools or []
+            if t.get("type", "function") == "function"
+        }
+        if self.tools is not None and (not self.tools or None in names):
+            raise APIError(400, "Each tool needs a function with a name.", code="invalid_tools")
+        choice = self.tool_choice
+        if isinstance(choice, dict):
+            wanted = (choice.get("function") or {}).get("name")
+            if wanted not in names:
+                raise APIError(
+                    400, f"tool_choice names an unknown function {wanted!r}.", code="invalid_tools"
+                )
+        elif choice not in (None, "auto", "none", "required"):
+            raise APIError(400, f"Unknown tool_choice {choice!r}.", code="invalid_tools")
+        if choice in ("required",) and not self.tools:
+            raise APIError(400, "tool_choice requires tools.", code="invalid_tools")
+        fmt = self.response_format or {}
+        kind = fmt.get("type")
+        if kind not in (None, "text", "json_object", "json_schema"):
+            raise APIError(400, f"Unknown response_format type {kind!r}.", code="invalid_format")
+        if kind == "json_schema" and not isinstance(
+            (fmt.get("json_schema") or {}).get("schema"), dict
+        ):
+            raise APIError(
+                400, "response_format json_schema needs json_schema.schema.", code="invalid_format"
+            )
 
 
 class AskRequest(StageOptions):
@@ -214,6 +249,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
     ) -> JSONResponse | StreamingResponse:
         mode, explicit = resolve_model(req.model)
         mode = req.tempo.mode if req.tempo.mode in MODES else mode
+        req.check_features()
+        fmt = req.response_format if (req.response_format or {}).get("type") != "text" else None
         options: RunOptions = engine.options(
             mode=mode,
             model=explicit,
@@ -223,11 +260,15 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             temperature=req.temperature,
             max_tokens=req.max_completion_tokens or req.max_tokens,
             access=access,
+            tools=req.tools,
+            tool_choice=req.tool_choice,
+            parallel_tool_calls=req.parallel_tool_calls,
+            response_format=fmt,
             **req.tempo.stage_overrides(),
         )
         # OpenAI clients cannot take back streamed text, so a stream carries the checked final
         # answer; only a one-stage request (nothing to replace it) streams tokens as they come.
-        options.live = req.stream and options.max_stages == 1
+        options.live = req.stream and options.max_stages == 1 and not (req.tools or fmt)
         options.restart_on_partial_failure = not options.live
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
@@ -252,6 +293,11 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             if req.tempo.trace:
                 tempo_info["trace"] = result.trace
             message: dict[str, Any] = {"role": "assistant", "content": result.text}
+            finish = "stop"
+            if result.tool_calls:
+                message["content"] = result.text or None
+                message["tool_calls"] = result.tool_calls
+                finish = "tool_calls"
             if result.reasoning:
                 message["reasoning_content"] = result.reasoning
             return JSONResponse(
@@ -260,7 +306,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                     "object": "chat.completion",
                     "created": created,
                     "model": result.model,
-                    "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+                    "choices": [{"index": 0, "message": message, "finish_reason": finish}],
                     "tempo": tempo_info,
                 }
             )
@@ -268,6 +314,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         async def stream() -> AsyncIterator[str]:
             label = req.model
             role_sent = False
+            finish = "stop"
 
             def chunk(delta: dict[str, Any] | None, finish: str | None = None) -> dict[str, Any]:
                 choices = (
@@ -297,10 +344,25 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                         role_sent = True
                     for piece in _pieces(event.data["answer"]):
                         yield _sse(chunk({"content": piece}))
+                    for index, call in enumerate(event.data.get("tool_calls") or []):
+                        # Like OpenAI: the call's id and name first, then its arguments.
+                        head = {**call, "function": {**call["function"], "arguments": ""}}
+                        yield _sse(chunk({"tool_calls": [{"index": index, **head}]}))
+                        for piece in _pieces(call["function"]["arguments"]):
+                            yield _sse(
+                                chunk(
+                                    {
+                                        "tool_calls": [
+                                            {"index": index, "function": {"arguments": piece}}
+                                        ]
+                                    }
+                                )
+                            )
+                        finish = "tool_calls"
                     if req.tempo.trace:
                         yield _sse({**chunk(None), "tempo": {"event": event.to_dict()}})
                 elif event.type == "done":
-                    yield _sse(chunk({}, finish="stop"))
+                    yield _sse(chunk({}, finish=finish))
                 elif event.type == "error":
                     error = APIError(
                         503,

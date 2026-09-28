@@ -27,6 +27,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "pydantic>=2.7",
     "cryptography>=42",  # encrypts users' own provider keys at rest
+    "jsonschema>=4",  # validates tool-call arguments and strict JSON answers (MIT)
 ]
 
 [project.optional-dependencies]

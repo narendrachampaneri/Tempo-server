@@ -19,6 +19,7 @@ COOLDOWNS: dict[str, float] = {
     # Request-specific problems: the model is fine for other requests.
     "context": 0.0,
     "bad_request": 0.0,
+    "invalid": 0.0,  # the reply didn't fit this request (a bad tool call or JSON)
 }
 
 

@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import math
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from tempo import prompts
-from tempo.analyzer import analyze
+from tempo import compat, prompts
+from tempo.analyzer import analyze, message_text
 from tempo.checks import (
     PASS_THRESHOLD,
     CheckResult,
@@ -68,6 +69,7 @@ class Answer:
     finish_reason: str | None = None
     check: CheckResult | None = None
     call_id: int | None = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def score(self) -> float:
@@ -115,6 +117,20 @@ class Pipeline:
         self._stage_models: list[str] = []
         self._live_owner: tuple[int, int] | None = None
         self._shown = False
+        # OpenAI features: tool calling and strict JSON (validated per reply; tempo/compat.py).
+        self.tool_req = (
+            compat.ToolRequest(
+                options.tools,
+                options.tool_choice if options.tool_choice is not None else "auto",
+                options.parallel_tool_calls is not False,
+            )
+            if options.tools
+            else None
+        )
+        self.json_fmt = compat.JsonFormat.from_request(options.response_format)
+        self._last_invalid: str | None = None
+        if self.tool_req or self.json_fmt:
+            options.live = False  # validated before anything is shown
 
     # --- event plumbing ------------------------------------------------------------
 
@@ -262,11 +278,14 @@ class Pipeline:
         )
 
         try:
-            if self.plan.strategy == "decompose":
-                await self._decompose()
+            if self.plan.strategy == "tools":
+                await self._tools()
             else:
-                await self._draft(self.plan.drafts)
-            await self._improve()
+                if self.plan.strategy == "decompose":
+                    await self._decompose()
+                else:
+                    await self._draft(self.plan.drafts)
+                await self._improve()
         except BudgetStop as stop:
             self.stop_reason = f"budget_{stop.reason}"
             self.emit("budget", reason=stop.reason, detail=stop.detail)
@@ -304,6 +323,8 @@ class Pipeline:
         return True
 
     def _cacheable(self) -> bool:
+        if self.tool_req or self.json_fmt:
+            return False
         turns = [m for m in self.messages if m.get("role") in ("user", "assistant")]
         return len(turns) == 1 and self.o.model is None and not self.o.allow_providers
 
@@ -313,6 +334,10 @@ class Pipeline:
         o, p = self.o, self.profile
         assert p is not None
         parts = prompts.rule_split(self.question)
+        if self.tool_req:
+            return Plan("tools", 1, 1, reasons={"strategy": "tool calling: one validated call"})
+        if self.json_fmt:
+            parts = None  # one JSON answer: no splitting into parts
         if o.strategy in STRATEGIES:
             strategy, why = o.strategy, "requested"
         elif o.max_stages == 1:
@@ -330,6 +355,8 @@ class Pipeline:
             strategy, o.max_stages
         )
         budget = await self.e.decide(self, "stage_budget", 0, min(o.max_stages, budget))
+        if self.json_fmt and strategy in ("decompose", "mixture"):
+            strategy = "cascade"
         drafts = min(o.max_parallel, 3) if strategy == "mixture" else 1
         if strategy == "decompose" and not parts:
             parts = None  # the split stage will ask a model
@@ -495,6 +522,77 @@ class Pipeline:
             raise _NoAnswer(self._failure_message(), [c.model.id for s in slots for c in s])
         self.answers.extend(outputs)
 
+    async def _tools(self) -> None:
+        """Tool calling: one model reply, validated (functions exist, arguments match their
+        schemas, a required call is there); a reply that fails is retried on the next model."""
+        ranked = self._rank("draft").candidates
+        if self.o.model:
+            requested = self.e.registry.get(self.o.model)
+            if requested is not None:
+                chosen = self.e.router.candidate(
+                    requested, self.profile, self.o.mode, self.o.access
+                )
+                chosen.why = "requested by caller"
+                ranked = [chosen, *[c for c in ranked if c.model.id != requested.id]]
+        slots = await self._pick("draft", ranked, 1)
+        if not slots:
+            raise BudgetStop("quota", "no model left within the free-quota budget")
+        stage = self._begin("tools", [slots[0][0].model.id], slots[0][0].why)
+        messages = prompts.draft_messages(self.messages, self.o.system_prompt)
+        result = await self._timed(self._call(stage, "tools", slots[0], messages, live=False))
+        self._end(stage, "tools", [result] if result else [])
+        if result is None:
+            raise _NoAnswer(
+                self._failure_message(), [c.model.id for c in slots[0]], kind="unavailable"
+            )
+        result.check = CheckResult(score=1.0, passed=True)
+        self.emit(
+            "check",
+            stage=stage,
+            results=[{"model": result.model, "stage": stage, **result.check.as_dict()}],
+            judge_model=None,
+            best_score=1.0,
+            passed=True,
+        )
+        self.answers.append(result)
+        self.final = result
+        self.stop_reason = "passed"
+
+    def _prepare(self, job: str, model: ModelInfo, messages: list[dict[str, Any]]):
+        """Per model: the messages and extra arguments for this call (native or emulated tools,
+        the JSON schema instruction)."""
+        extra: dict[str, Any] = {}
+        if self.tool_req and job == "tools":
+            if model.tools:  # native tool calls; everyone else gets them described in text
+                extra = {
+                    "tools": self.tool_req.tools,
+                    "tool_choice": self.o.tool_choice,
+                    "parallel_tool_calls": self.o.parallel_tool_calls,
+                }
+            else:
+                messages = compat.emulated_messages(messages, self.tool_req)
+        if self.json_fmt and job in ANSWER_JOBS:
+            messages = _with_system(messages, compat.json_system_prompt(self.json_fmt))
+        if self.tool_req or self.json_fmt:
+            messages = _merge_systems(messages)
+        return messages, extra
+
+    def _validate(self, job: str, text: str, native: list[dict[str, Any]]) -> compat.CallOutcome:
+        """Is this reply usable? Tool calls parsed and checked; strict JSON checked."""
+        out = compat.CallOutcome(text=text)
+        if self.tool_req and job == "tools":
+            calls = [dict(c, id=c.get("id") or compat.new_call_id()) for c in native]
+            rest = text
+            if not calls:
+                calls, rest = compat.parse_text_tool_calls(text, set(self.tool_req.by_name))
+            out.tool_calls, out.text = calls, rest
+            out.issues = compat.validate_tool_calls(calls, self.tool_req)
+            if not calls and not rest.strip() and not out.issues:
+                out.issues = ["the model returned neither text nor a tool call"]
+        elif self.json_fmt and job in ANSWER_JOBS:
+            out.issues, out.text = compat.validate_json_answer(text, self.json_fmt)
+        return out
+
     def _affordable(self, count: int, ranked: list[Candidate]) -> int:
         """Parallel slots the free-quota budget can pay for (local models are free)."""
         local = sum(1 for c in ranked if self.e.registry.providers[c.model.provider].local)
@@ -528,7 +626,11 @@ class Pipeline:
             return
         p = self.profile
         assert p is not None
-        heur = {id(a): run_heuristics(p, self.question, a.text, a.finish_reason) for a in pending}
+        structured = self.json_fmt is not None
+        heur = {
+            id(a): run_heuristics(p, self.question, a.text, a.finish_reason, structured)
+            for a in pending
+        }
         gradable = [a for a in pending if not heur[id(a)].hard_fail]
         judge_slot: list[Candidate] = []
         if gradable and self._want_judge():
@@ -682,7 +784,13 @@ class Pipeline:
         if result is None:
             return
         if job == "polish":
-            heur = run_heuristics(self.profile, self.question, result.text, result.finish_reason)
+            heur = run_heuristics(
+                self.profile,
+                self.question,
+                result.text,
+                result.finish_reason,
+                self.json_fmt is not None,
+            )
             if heur.hard_fail:
                 return  # keep the best checked answer
             result.check = None
@@ -797,7 +905,7 @@ class Pipeline:
     ) -> Answer | None:
         e, o = self.e, self.o
         live = live and o.live
-        purpose = "judge" if job == "check" else job
+        purpose = {"check": "judge", "tools": "draft"}.get(job, job)
         attempts = 0
         previous: str | None = None
         for candidate in slot:
@@ -824,22 +932,28 @@ class Pipeline:
 
             meta: dict[str, Any] = {}
             text = reasoning = ""
+            native_calls: list[dict[str, Any]] = []
             streamed = False
             started = self.clock()
             first: float | None = None
+            call_messages, extra = self._prepare(job, model, messages)
             try:
                 stream = e.backend_for(model).stream(
                     model,
-                    messages,
+                    call_messages,
                     temperature=o.temperature,
                     max_tokens=o.max_tokens,
                     access=o.access,
                     meta=meta,
                     purpose=purpose,
+                    **extra,
                 )
                 async for kind, chunk in stream:
                     if first is None:
                         first = self.clock()
+                    if kind == "tool_calls":
+                        native_calls = json.loads(chunk)
+                        continue
                     if kind == "reasoning":
                         reasoning += chunk
                         if live and self._claim_live(stage, slot_id):
@@ -850,9 +964,17 @@ class Pipeline:
                         streamed = True
                         self._shown = True
                         self.emit("answer_delta", stage=stage, model=model.id, delta=chunk)
-                if not text.strip():
+                if not text.strip() and not native_calls:
                     raise ProviderError("empty", "The model returned no answer text.")
+                outcome = self._validate(job, text, native_calls)
+                if outcome.issues:
+                    # Unusable for this request (a bad tool call, JSON that doesn't match the
+                    # schema): not a provider failure, so no cool-down; the next model is tried.
+                    raise ProviderError("invalid", "; ".join(outcome.issues[:3]))
+                text = outcome.text
             except ProviderError as err:
+                if err.kind == "invalid":
+                    self._last_invalid = err.message
                 e.health.record_failure(model, err.kind, err.retry_after)
                 self._usage(model, key_id, messages, "", meta)
                 self._log_call(stage, job, model, "error", err.kind, started, first, messages, "")
@@ -891,6 +1013,7 @@ class Pipeline:
                 reasoning=reasoning,
                 finish_reason=meta.get("finish_reason"),
                 call_id=call_id,
+                tool_calls=outcome.tool_calls,
             )
         return None
 
@@ -947,6 +1070,9 @@ class Pipeline:
     def _failure_message(self) -> str:
         if self.requests_left() <= 0:
             return "The free-quota budget for this question ran out before any model answered."
+        if self._last_invalid:
+            what = "tool call" if self.tool_req else "JSON answer"
+            return f"No model gave a valid {what}. Last problem: {self._last_invalid}"
         return "Every model tried for this stage failed."
 
     # --- finish ----------------------------------------------------------------------------
@@ -972,6 +1098,7 @@ class Pipeline:
             score=final.check.score if final.check else None,
             passed=bool(final.check and final.check.passed),
             reasoning=final.reasoning or None,
+            tool_calls=final.tool_calls or None,
         )
         if (
             self.e.cache
@@ -1044,3 +1171,19 @@ class _NoAnswer(Exception):
         super().__init__(message)
         self.tried = tried
         self.kind = kind
+
+
+ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
+
+
+def _with_system(messages: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    return [{"role": "system", "content": text}, *messages]
+
+
+def _merge_systems(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One system message first (some providers reject several)."""
+    systems = [message_text(m.get("content")) for m in messages if m.get("role") == "system"]
+    rest = [m for m in messages if m.get("role") != "system"]
+    if not systems:
+        return rest
+    return [{"role": "system", "content": "\n\n".join(s for s in systems if s)}, *rest]
