@@ -451,12 +451,18 @@ def laya_compare(
 ) -> None:
     """Score Laya and the rules against outcome labels on held-out questions. Decisions set
     to "auto" in TEMPO_LAYA_TAKEOVER switch to Laya once it wins here on 50+ rows."""
-    from tempo.laya_decider import MIN_COMPARE_ROWS
+    from tempo.laya_decider import MIN_COMPARE_ROWS, STOCK_CHECKPOINT
     from tempo.tuning import compare
 
     engine = _engine()
-    results = compare(engine.store, engine.registry, test_percent=test_percent)
-    table = Table(title="Laya vs rules on held-out questions", header_style="bold")
+    checkpoint = engine.settings.laya_model or STOCK_CHECKPOINT
+    results = compare(
+        engine.store, engine.registry, test_percent=test_percent, laya_model=checkpoint
+    )
+    table = Table(
+        title=f"Laya ({checkpoint} checkpoint) vs rules on held-out questions",
+        header_style="bold",
+    )
     for column in ("decision", "rows", "Laya", "rules", "verdict"):
         table.add_column(column)
     winners = []

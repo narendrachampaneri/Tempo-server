@@ -158,14 +158,37 @@ class LayaRunner(Protocol):
     def predict(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]: ...
 
 
+# Laya's Router slot that holds a fine-tuned checkpoint (TEMPO_LAYA_MODEL).
+TUNED_SLOT = "typed-decisions"
+# How logs name Laya's own checkpoints, as opposed to a TEMPO_LAYA_MODEL path or repo.
+STOCK_CHECKPOINT = "stock"
+
+
+@dataclass
+class PinnedRunner:
+    """Sends every prediction to one checkpoint instead of Laya's language routing."""
+
+    router: Any
+    model: str
+
+    def predict(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]:
+        return self.router.predict(state, questions, model=self.model)
+
+
 def default_loader(settings: Settings) -> Callable[[], LayaRunner]:
     def load() -> LayaRunner:
         from laya import Router  # optional dependency: pip install "tempo-server[laya]"
 
-        kwargs: dict[str, Any] = {"preload": True}
+        kwargs: dict[str, Any] = {}
         if settings.laya_device:
             kwargs["device"] = settings.laya_device
-        return Router(**kwargs)
+        if not settings.laya_model:
+            return Router(preload=True, **kwargs)
+        # A checkpoint fine-tuned on `tempo export-laya` data answers every decision, in any
+        # language, and is the only one loaded.
+        router = Router(models={TUNED_SLOT: settings.laya_model}, **kwargs)
+        router.preload([TUNED_SLOT])
+        return PinnedRunner(router, TUNED_SLOT)
 
     return load
 
@@ -194,6 +217,8 @@ class LayaDecider:
         self._clock = clock
         self._runner: LayaRunner | None = None
         self.status = "off" if settings.laya == "off" else "loading"
+        # Which checkpoint made the predictions; comparisons only count its own.
+        self.checkpoint = settings.laya_model or STOCK_CHECKPOINT
         self.load_error: str | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="laya")
         self._pending = 0
@@ -277,7 +302,12 @@ class LayaDecider:
             self._compare = self.store.laya_compare()
             self._compare_loaded = time.time()
         row = self._compare.get(name)
-        if row and row["n"] >= MIN_COMPARE_ROWS and row["laya_accuracy"] > row["rules_accuracy"]:
+        if (
+            row
+            and (row.get("laya_model") or STOCK_CHECKPOINT) == self.checkpoint
+            and row["n"] >= MIN_COMPARE_ROWS
+            and row["laya_accuracy"] > row["rules_accuracy"]
+        ):
             return "laya"
         return "shadow"
 
@@ -317,6 +347,7 @@ class LayaDecider:
                     "mode": mode,
                     **{k: v for k, v in context.items() if k != "shortlist"},
                     "mapping": mapping or None,
+                    "laya_model": self.checkpoint,
                 },
             )
             if call.status == "timeout" and call.future is not None:

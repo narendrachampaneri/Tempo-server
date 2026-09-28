@@ -142,6 +142,14 @@ async def test_compare_scores_laya_and_rules_on_held_out_rows():
         assert 0.0 <= r.laya_accuracy <= 1.0 and 0.0 <= r.rules_accuracy <= 1.0
     saved = engine.store.laya_compare()
     assert saved["should_stop"]["n"] == results["should_stop"].n
+    assert saved["should_stop"]["laya_model"] == "stock"
+    rows, _ = build_rows(engine.store, engine.registry, test_percent=100)
+    decisions = [d for r in rows for d in json.loads(r["factors"])["decisions"].values()]
+    assert {d["laya_model"] for d in decisions} == {"stock"}
+
+    # Predictions logged by the stock checkpoint say nothing about a newly tuned one.
+    tuned = compare(engine.store, engine.registry, test_percent=100, laya_model="./tuned")
+    assert all(r.n == 0 for r in tuned)
 
 
 async def test_cli_export_and_compare(tmp_path, monkeypatch):

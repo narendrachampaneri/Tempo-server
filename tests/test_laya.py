@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 import time
 
 from conftest import ScriptedBackend, judge_reply, make_engine, user
@@ -9,7 +10,13 @@ from conftest import ScriptedBackend, judge_reply, make_engine, user
 from tempo.config import Settings, parse_takeover
 from tempo.engine import Engine
 from tempo.health import HealthTracker
-from tempo.laya_decider import MAX_SHORTLIST, REQUEST_CHARS, LayaDecider
+from tempo.laya_decider import (
+    MAX_SHORTLIST,
+    REQUEST_CHARS,
+    TUNED_SLOT,
+    LayaDecider,
+    default_loader,
+)
 from tempo.registry import Registry
 
 
@@ -165,6 +172,38 @@ async def test_laya_off_does_not_load():
     assert decider.start() is None and decider.status == "off"
 
 
+def test_default_loader_uses_the_stock_checkpoints_or_a_tuned_one(monkeypatch):
+    made = []
+
+    class Router:
+        def __init__(self, **kwargs):
+            self.kwargs, self.preloaded, self.calls = kwargs, None, []
+            made.append(self)
+
+        def preload(self, names=None):
+            self.preloaded = names
+
+        def predict(self, state, questions, model=None):
+            self.calls.append(model)
+            return {}
+
+    fake_module = type(sys)("laya")
+    fake_module.Router = Router
+    monkeypatch.setitem(sys.modules, "laya", fake_module)
+
+    default_loader(Settings(laya_device="cpu"))()
+    assert made[-1].kwargs == {"preload": True, "device": "cpu"}
+
+    settings = Settings.from_env({"TEMPO_LAYA_MODEL": " ./laya-tuned "})
+    assert settings.laya_model == "./laya-tuned"
+    runner = default_loader(settings)()
+    router = made[-1]
+    assert router.kwargs == {"models": {TUNED_SLOT: "./laya-tuned"}}
+    assert router.preloaded == [TUNED_SLOT]  # only the tuned checkpoint is loaded
+    runner.predict({"request": "hi"}, {})
+    assert router.calls == [TUNED_SLOT]  # every decision goes to it, whatever the language
+
+
 async def test_laya_never_stops_on_a_hard_failure():
     refusal = [("answer", "I'm sorry, but I can't help with that.")]
     fake = FakeLaya(picks={"should_stop": "A", "quality": 4})
@@ -230,6 +269,14 @@ async def test_auto_takeover_follows_held_out_comparison():
     assert events_of(result, "plan")[0].data["strategy"] == "mixture"
 
     engine.store.save_laya_compare("strategy", 120, laya_accuracy=0.5, rules_accuracy=0.64)
+    engine.laya._compare_loaded = 0
+    result = await engine.complete(user("hi"))
+    assert events_of(result, "plan")[0].data["strategy"] == "single"
+
+    # A win measured on another checkpoint's predictions does not count for this one.
+    engine.store.save_laya_compare(
+        "strategy", 120, laya_accuracy=0.81, rules_accuracy=0.64, laya_model="./old-tuned"
+    )
     engine.laya._compare_loaded = 0
     result = await engine.complete(user("hi"))
     assert events_of(result, "plan")[0].data["strategy"] == "single"

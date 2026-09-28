@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from tempo.checks import PASS_THRESHOLD
-from tempo.laya_decider import ASSESS_QUESTIONS, PLAN_QUESTIONS, budget_level
+from tempo.laya_decider import ASSESS_QUESTIONS, PLAN_QUESTIONS, STOCK_CHECKPOINT, budget_level
 from tempo.registry import Registry
 from tempo.store import Store
 
@@ -352,6 +352,7 @@ def build_rows(
                     "laya": _value_of(d["name"], _loads(d["laya_value"]), context),
                     "laya_status": d["laya_status"],
                     "laya_confidence": d["laya_confidence"],
+                    "laya_model": context.get("laya_model", STOCK_CHECKPOINT),
                 }
             if not gold:
                 continue
@@ -480,8 +481,10 @@ def compare(
     *,
     test_percent: int = 10,
     save: bool = True,
+    laya_model: str = STOCK_CHECKPOINT,
 ) -> list[Comparison]:
-    """Accuracy of Laya and of the rules against gold, on the held-out split only."""
+    """Accuracy of Laya and of the rules against gold, on the held-out split only, counting
+    only predictions made by the ``laya_model`` checkpoint (the one loaded now)."""
     rows, _ = build_rows(store, registry, test_percent=test_percent)
     tallies: dict[str, list[int]] = {name: [0, 0, 0] for name in COMPARED}  # n, laya, rules
     for row in rows:
@@ -492,6 +495,8 @@ def compare(
             if name not in tallies or info["gold_source"] == "analyzer":
                 continue
             if info["laya_status"] not in ("ok", "late") or info["laya"] is None:
+                continue
+            if info.get("laya_model", STOCK_CHECKPOINT) != laya_model:
                 continue
             if info["baseline"] is None:
                 continue
@@ -505,5 +510,7 @@ def compare(
         result = Comparison(name, n, laya_right / n if n else 0.0, rules_right / n if n else 0.0)
         results.append(result)
         if save and n:
-            store.save_laya_compare(name, n, result.laya_accuracy, result.rules_accuracy)
+            store.save_laya_compare(
+                name, n, result.laya_accuracy, result.rules_accuracy, laya_model=laya_model
+            )
     return results

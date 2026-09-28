@@ -81,6 +81,8 @@ class Settings:
     laya: str = "auto"  # "auto": use it when installed; "off": never load it
     laya_timeout_ms: float = 200.0
     laya_device: str | None = None
+    # A fine-tuned Laya checkpoint (local folder or Hub repo) that answers every decision.
+    laya_model: str | None = None
     laya_takeover: dict[str, str] = field(default_factory=dict)
     laya_min_confidence: float = 0.6  # below this, a taken-over decision falls back to rules
 
@@ -130,6 +132,7 @@ class Settings:
             laya=(env.get("TEMPO_LAYA") or "auto").strip().lower(),
             laya_timeout_ms=float(env.get("TEMPO_LAYA_TIMEOUT_MS") or 200),
             laya_device=env.get("TEMPO_LAYA_DEVICE") or None,
+            laya_model=(env.get("TEMPO_LAYA_MODEL") or "").strip() or None,
             laya_takeover=parse_takeover(env.get("TEMPO_LAYA_TAKEOVER", "")),
             laya_min_confidence=float(env.get("TEMPO_LAYA_MIN_CONFIDENCE") or 0.6),
             embeddings=(env.get("TEMPO_EMBEDDINGS") or "auto").strip().lower(),

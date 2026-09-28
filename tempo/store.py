@@ -120,7 +120,8 @@ CREATE TABLE IF NOT EXISTS laya_compare (
     n INTEGER,
     laya_accuracy REAL,
     rules_accuracy REAL,
-    updated_at REAL
+    updated_at REAL,
+    laya_model TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_question ON decisions (question_id);
 CREATE INDEX IF NOT EXISTS idx_stages_question ON stages (question_id);
@@ -159,6 +160,10 @@ class Store:
             if target != ":memory:":
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            # Databases created before a column existed get it added.
+            info = self._conn.execute("PRAGMA table_info(laya_compare)").fetchall()
+            if "laya_model" not in {row["name"] for row in info}:
+                self._conn.execute("ALTER TABLE laya_compare ADD COLUMN laya_model TEXT")
             if not _COLUMNS:
                 for table in ("questions", "decisions", "stages", "calls"):
                     info = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -301,14 +306,20 @@ class Store:
     # --- Laya comparison -------------------------------------------------------------
 
     def save_laya_compare(
-        self, decision: str, n: int, laya_accuracy: float, rules_accuracy: float
+        self,
+        decision: str,
+        n: int,
+        laya_accuracy: float,
+        rules_accuracy: float,
+        laya_model: str = "stock",
     ) -> None:
         self.execute(
-            "INSERT INTO laya_compare (decision, n, laya_accuracy, rules_accuracy, updated_at) "
-            "VALUES (?,?,?,?,?) ON CONFLICT(decision) DO UPDATE SET n = excluded.n, "
+            "INSERT INTO laya_compare "
+            "(decision, n, laya_accuracy, rules_accuracy, updated_at, laya_model) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(decision) DO UPDATE SET n = excluded.n, "
             "laya_accuracy = excluded.laya_accuracy, rules_accuracy = excluded.rules_accuracy, "
-            "updated_at = excluded.updated_at",
-            (decision, n, laya_accuracy, rules_accuracy, time.time()),
+            "updated_at = excluded.updated_at, laya_model = excluded.laya_model",
+            (decision, n, laya_accuracy, rules_accuracy, time.time(), laya_model),
         )
 
     def laya_compare(self) -> dict[str, dict[str, Any]]:

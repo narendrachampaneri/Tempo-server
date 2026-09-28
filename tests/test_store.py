@@ -70,3 +70,21 @@ def test_takeover_parsing_errors():
         parse_takeover("nonsense")
     with pytest.raises(ValueError):
         parse_takeover("task_type=maybe")
+
+
+def test_older_databases_get_new_columns(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "tempo.db"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE laya_compare (decision TEXT PRIMARY KEY, n INTEGER, "
+        "laya_accuracy REAL, rules_accuracy REAL, updated_at REAL)"
+    )
+    old.execute("INSERT INTO laya_compare VALUES ('quality', 60, 0.7, 0.6, 0)")
+    old.commit()
+    old.close()
+    store = Store(path)
+    assert store.laya_compare()["quality"]["laya_model"] is None
+    store.save_laya_compare("quality", 80, 0.8, 0.6, laya_model="./tuned")
+    assert store.laya_compare()["quality"]["laya_model"] == "./tuned"
