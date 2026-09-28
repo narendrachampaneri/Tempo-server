@@ -9,11 +9,12 @@
 #   key_env / base_env       environment variables holding the API key / base URL
 #   shared_rpm / shared_rpd  free limits shared by all of the provider's models
 #   requests_header_window   what x-ratelimit-remaining-requests counts: minute or day
-#   training_on_outputs      may this provider's outputs train other models?
-#                            allowed | disallowed | unknown. Read the provider's terms and
-#                            each model's licence before changing it. `tempo export-laya`
-#                            (and the planned Tempo Tune) never trains on "disallowed"
-#                            text and skips "unknown" with --strict.
+#   training_on_outputs      may this provider's outputs be used to train models?
+#                            yes | no | unclear (quote yes/no: bare YAML yes/no are booleans).
+#                            training_terms_url / _quote / _checked record where the verdict
+#                            comes from, word for word, so you can check it. Each model's own
+#                            licence applies too. `tempo export-laya` uses only "yes" outputs
+#                            unless --include-unclear, and never "no". `tempo terms` prints them.
 #
 # Model fields:
 #   id              LiteLLM model string; also the id clients use to request this model directly
@@ -34,19 +35,39 @@ providers:
     base_env: GROQ_API_BASE
     signup_url: https://console.groq.com/keys
     requests_header_window: day  # Groq's x-ratelimit-remaining-requests counts the day
-    training_on_outputs: unknown  # not reviewed yet
+    training_on_outputs: "unclear"
+    training_terms_url: https://console.groq.com/docs/legal/services-agreement
+    training_terms_checked: "2026-09-28; agreement last modified June 22, 2026"
+    training_terms_quote: |
+      No clause forbids training on Outputs, and the customer owns them, but a model or service built from them must not be "similar or compete with the Cloud Services":
+      8.1: "As between the parties, Customer retains all Intellectual Property Rights in Customer Data (including in Inputs and Outputs), any Customer Application, Customer Training Data, and Customer supplied AI Model Service."
+      6.3 (customer restrictions), (e): "use the Cloud Services to, directly or indirectly, develop or improve products, services, or other offerings that are similar or compete with the Cloud Services"
+      4.1: "Customer and its Authorized Users will comply with the applicable AI Model Terms for each AI Model Service that is used under this Agreement."
   cerebras:
     label: Cerebras
     key_env: CEREBRAS_API_KEY
     base_env: CEREBRAS_API_BASE
     signup_url: https://cloud.cerebras.ai
-    training_on_outputs: unknown  # not reviewed yet
+    training_on_outputs: "unclear"
+    training_terms_url: https://d7umqicpi7263.cloudfront.net/eula/4rCqa7snChhObjYFAYH325D2kcqkCRpGXBZYsSMc3mg
+    training_terms_checked: "2026-09-28; the Inference Terms and Conditions PDF carries no date"
+    training_terms_quote: |
+      No clause mentions training. Cerebras claims no ownership of outputs, but forbids using the Services to develop competing products and for benchmarking (which may cover `tempo eval`):
+      2(c): "As between you and Cerebras, Cerebras claims no ownership rights in the materials, information or other communications you transmit or post to the Services or transfer to us for processing, storage or hosting by the Services, including any inputs you pass into the Services (“Prompts”) and any Model outputs generated thereby (collectively, “User Content”)."
+      Restrictions: "Use or display the Services in competition with us, to develop competing products or services, for benchmarking or competitive analysis of the Services, or otherwise to our competitive detriment or disadvantage (except to the extent the Order Form allows for resale of the Services);"
+      2(b): "you are solely responsible for your and your Named Users’ use of the Models and User Content, and compliance with any applicable Model terms and conditions and applicable law."
   gemini:
     label: Google AI Studio
     key_env: GEMINI_API_KEY
     base_env: GEMINI_API_BASE
     signup_url: https://aistudio.google.com/apikey
-    training_on_outputs: unknown  # not reviewed yet
+    training_on_outputs: "no"
+    training_terms_url: https://ai.google.dev/gemini-api/terms
+    training_terms_checked: "2026-09-28; terms last updated 2026-04-28"
+    training_terms_quote: |
+      Models that compete with the Gemini API may not be developed with it. Tempo's own models answer the same kind of requests, so Tempo treats this as no:
+      "You may not use the Services to develop models that compete with the Services (e.g., Gemini API or Google AI Studio)."
+      Also relevant when Tempo serves other people: "You may use only Paid Services when making API Clients available to users in the European Economic Area, Switzerland, or the United Kingdom."
   openrouter:
     label: OpenRouter (free models)
     key_env: OPENROUTER_API_KEY
@@ -54,14 +75,25 @@ providers:
     signup_url: https://openrouter.ai/keys
     shared_rpm: 20  # all :free models share one pool
     shared_rpd: 50
-    training_on_outputs: unknown  # not reviewed yet
+    training_on_outputs: "unclear"
+    training_terms_url: https://openrouter.ai/terms
+    training_terms_checked: "2026-09-28; terms last updated August 31, 2026"
+    training_terms_quote: |
+      Output rights come from each model's own terms, and OpenRouter forbids developing a competing service with it:
+      "Your ownership rights in the Output are set forth in the Model Terms for each Model you use."
+      "By accessing or using any Model through the Service, you agree, and will ensure that your Authorized Users and customers agree, to comply with the applicable terms for each Model (" Model Terms ")"
+      Restriction: "access the Site or Service for purposes of reselling API access to Models or otherwise developing a competing service"
   ollama:
     label: Ollama (local)
     base_env: OLLAMA_API_BASE
     local: true
     discover: true
     signup_url: https://ollama.com/download
-    training_on_outputs: unknown  # not reviewed yet
+    training_on_outputs: "unclear"
+    training_terms_url: https://ollama.com/library
+    training_terms_checked: "2026-09-28"
+    training_terms_quote: |
+      Local models: no provider terms apply, so each model's own licence decides (`ollama show --license <model>`). Apache-2.0 or MIT models (for example Qwen3, gpt-oss) allow it; others, such as Llama and Gemma, add conditions.
 
 models:
   # --- Groq -------------------------------------------------------------------

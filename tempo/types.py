@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Task = Literal["chat", "code", "math", "reasoning", "writing", "summarize", "translate", "extract"]
 TASKS: tuple[Task, ...] = (
@@ -35,10 +35,22 @@ class ProviderInfo(BaseModel):
     shared_rpd: int | None = None
     # What the provider's x-ratelimit-remaining-requests header counts: "minute" or "day".
     requests_header_window: Literal["minute", "day"] = "minute"
-    # May outputs from this provider's models be used to train other models? Check the
-    # provider's terms and each model's licence before setting "allowed"; exports and Tempo
-    # Tune only use outputs marked allowed (or unknown, with a warning, unless --strict).
-    training_on_outputs: Literal["allowed", "disallowed", "unknown"] = "unknown"
+    # May outputs from this provider's models be used to train other models? "yes", "no" or
+    # "unclear", read from the provider's terms (training_terms_url; the deciding sentences are
+    # quoted in training_terms_quote). Each model's own licence applies as well. Dataset exports
+    # use only "yes" outputs unless --include-unclear, and never "no".
+    training_on_outputs: Literal["yes", "no", "unclear"] = "unclear"
+    training_terms_url: str | None = None
+    training_terms_quote: str | None = None
+    training_terms_checked: str | None = None  # when the quote was last checked
+
+    @field_validator("training_on_outputs", mode="before")
+    @classmethod
+    def _terms_spelling(cls, value: Any) -> Any:
+        # YAML reads a bare yes/no as a boolean; Phase 2 used allowed/disallowed/unknown.
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        return {"allowed": "yes", "disallowed": "no", "unknown": "unclear"}.get(value, value)
 
 
 class ModelInfo(BaseModel):

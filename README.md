@@ -61,7 +61,8 @@ Other commands:
 | `tempo eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
 | `tempo users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
 | `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
-| `tempo export-laya --out DIR [--strict]` | Export logged decisions as a Laya fine-tuning dataset |
+| `tempo export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
+| `tempo terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
 | `tempo laya status` / `tempo laya compare` | Laya's state per decision; Laya vs rules on held-out questions |
 
 ### Web app
@@ -123,7 +124,7 @@ tempo laya compare                            # after a few hundred more questio
 export TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto"   # Laya takes over where it wins
 ```
 
-The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. Rows with text from a provider marked `training_on_outputs: disallowed` in `models.yaml` are never exported, and `--strict` also drops providers marked `unknown`. On a CPU, Laya takes 0.4–1.2 s per decision group, so it stays in shadow mode (timed-out predictions are still logged, as `late`). Taking over needs a GPU.
+The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. Only text from providers marked `training_on_outputs: yes` in `models.yaml` is exported by default; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo terms`), and `no` is never exported. On a CPU, Laya takes 0.4–1.2 s per decision group, so it stays in shadow mode (timed-out predictions are still logged, as `late`). Taking over needs a GPU.
 
 ## Settings
 

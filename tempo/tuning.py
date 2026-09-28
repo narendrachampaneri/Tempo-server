@@ -274,16 +274,17 @@ class ExportStats:
     decisions: int = 0
     by_workflow: dict[str, int] = field(default_factory=dict)
     skipped_terms: int = 0
-    unknown_terms_providers: set[str] = field(default_factory=set)
+    unclear_terms_providers: set[str] = field(default_factory=set)
 
 
 def _terms(registry: Registry | None, model_id: str | None) -> str:
+    """yes / no / unclear: may this model's outputs be used for training?"""
     if registry is None or not model_id:
-        return "allowed"
+        return "yes"
     model = registry.get(model_id)
     provider_id = model.provider if model else model_id.split("/")[0]
     provider = registry.providers.get(provider_id)
-    return provider.training_on_outputs if provider else "unknown"
+    return provider.training_on_outputs if provider else "unclear"
 
 
 def build_rows(
@@ -291,8 +292,12 @@ def build_rows(
     registry: Registry | None = None,
     *,
     test_percent: int = 10,
-    strict: bool = False,
+    include_unclear: bool = False,
+    check_terms: bool = True,
 ) -> tuple[list[dict[str, Any]], ExportStats]:
+    """Typed-decision rows from the log. Rows containing text written by a model whose
+    provider's terms say "no" are left out, and so are "unclear" ones unless
+    ``include_unclear``. ``check_terms=False`` keeps every row (evaluation, not training)."""
     stats = ExportStats()
     questions = {
         q["id"]: q
@@ -357,12 +362,13 @@ def build_rows(
             if not gold:
                 continue
             verdicts = {_terms(registry, m) for m in sources if m}
-            if "disallowed" in verdicts or (strict and "unknown" in verdicts):
+            for model_id in sources:
+                if model_id and _terms(registry, model_id) == "unclear":
+                    stats.unclear_terms_providers.add(model_id.split("/")[0])
+            blocked = "no" in verdicts or ("unclear" in verdicts and not include_unclear)
+            if check_terms and blocked:
                 stats.skipped_terms += 1
                 continue
-            for model_id in sources:
-                if model_id and _terms(registry, model_id) == "unknown":
-                    stats.unknown_terms_providers.add(model_id.split("/")[0])
             factors["output_models"] = sorted({m for m in sources if m})
             row_id = f"{question_id}_{group}_{stage}" + (f"_{job}" if job else "")
             workflow = f"tempo_{group}"
@@ -421,9 +427,10 @@ question went), `judge` / `judge+feedback` (the LLM judge's grade, moved by thum
 
 ## Terms of use
 
-Rows whose text was written by a provider marked `training_on_outputs: disallowed` in the
-registry were left out{strict_note}. Providers still marked `unknown`: {unknown}.
-Check their terms before training on this data.
+Rows containing text written by a model whose provider is marked `training_on_outputs: no` in
+the registry were left out, and so were `unclear` ones{unclear_note}. Providers marked unclear
+that appeared in the log: {unclear}. `tempo terms` shows each provider's verdict, the link
+and the exact sentences it rests on.
 """
 
 
@@ -433,9 +440,11 @@ def export(
     out_dir: Path,
     *,
     test_percent: int = 10,
-    strict: bool = False,
+    include_unclear: bool = False,
 ) -> ExportStats:
-    rows, stats = build_rows(store, registry, test_percent=test_percent, strict=strict)
+    rows, stats = build_rows(
+        store, registry, test_percent=test_percent, include_unclear=include_unclear
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     counts = {"train": 0, "test": 0}
     for split in ("train", "test"):
@@ -452,8 +461,10 @@ def export(
             workflows=", ".join(f"{w} ({stats.by_workflow[w]})" for w in workflows) or "none",
             decisions=stats.decisions,
             workflow_list=workflows,
-            strict_note=" (and, with --strict, those marked unknown)" if strict else "",
-            unknown=", ".join(sorted(stats.unknown_terms_providers)) or "none",
+            unclear_note=" (unless --include-unclear, which was used for this export)"
+            if include_unclear
+            else " (--include-unclear keeps them once you have read their terms)",
+            unclear=", ".join(sorted(stats.unclear_terms_providers)) or "none",
         ),
         encoding="utf-8",
     )
@@ -485,7 +496,8 @@ def compare(
 ) -> list[Comparison]:
     """Accuracy of Laya and of the rules against gold, on the held-out split only, counting
     only predictions made by the ``laya_model`` checkpoint (the one loaded now)."""
-    rows, _ = build_rows(store, registry, test_percent=test_percent)
+    # Scoring is not training, so provider terms do not filter these rows.
+    rows, _ = build_rows(store, registry, test_percent=test_percent, check_terms=False)
     tallies: dict[str, list[int]] = {name: [0, 0, 0] for name in COMPARED}  # n, laya, rules
     for row in rows:
         if row["split"] != "test":

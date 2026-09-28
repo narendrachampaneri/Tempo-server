@@ -64,7 +64,7 @@ async def logged_engine(tmp_path=None):
 
 async def test_rows_match_the_typed_decisions_format():
     engine, _ = await logged_engine()
-    rows, stats = build_rows(engine.store, engine.registry, test_percent=0)
+    rows, stats = build_rows(engine.store, engine.registry, test_percent=0, include_unclear=True)
     assert rows and stats.rows == len(rows) and stats.questions == 4
     assert {r["workflow"] for r in rows} == {"tempo_plan", "tempo_assess", "tempo_pick"}
     for row in rows:
@@ -83,7 +83,7 @@ async def test_rows_match_the_typed_decisions_format():
 
 async def test_labels_come_from_outcomes():
     engine, ids = await logged_engine()
-    rows, _ = build_rows(engine.store, engine.registry, test_percent=0)
+    rows, _ = build_rows(engine.store, engine.registry, test_percent=0, include_unclear=True)
     by_id = {r["id"]: r for r in rows}
 
     code_plan = json.loads(by_id[f"{ids[0]}_plan_0"]["gold"])
@@ -111,16 +111,43 @@ async def test_labels_come_from_outcomes():
 
 async def test_terms_of_use_filter():
     engine, _ = await logged_engine()
-    all_rows, stats = build_rows(engine.store, engine.registry)
-    assert stats.unknown_terms_providers  # test providers have no recorded terms
-    strict_rows, strict_stats = build_rows(engine.store, engine.registry, strict=True)
-    assert not any(r["workflow"] == "tempo_assess" for r in strict_rows)
-    assert strict_stats.skipped_terms > 0
-    for provider in engine.registry.providers.values():
-        provider.training_on_outputs = "disallowed"
-    rows, _ = build_rows(engine.store, engine.registry)
+    # Test providers have no recorded terms, so they count as unclear: their answers stay out.
+    rows, stats = build_rows(engine.store, engine.registry)
+    assert stats.unclear_terms_providers and stats.skipped_terms > 0
     assert not any(r["workflow"] == "tempo_assess" for r in rows)
     assert any(r["workflow"] == "tempo_plan" for r in rows)  # only the user's own text
+    unclear_rows, _ = build_rows(engine.store, engine.registry, include_unclear=True)
+    assert any(r["workflow"] == "tempo_assess" for r in unclear_rows)
+
+    for provider in engine.registry.providers.values():
+        provider.training_on_outputs = "no"
+    rows, _ = build_rows(engine.store, engine.registry, include_unclear=True)
+    assert not any(r["workflow"] == "tempo_assess" for r in rows)  # "no" is never used
+    for provider in engine.registry.providers.values():
+        provider.training_on_outputs = "yes"
+    rows, stats = build_rows(engine.store, engine.registry)
+    assert any(r["workflow"] == "tempo_assess" for r in rows) and stats.skipped_terms == 0
+
+
+def test_terms_accept_yaml_booleans_and_old_spellings():
+    from tempo.types import ProviderInfo
+
+    spelled = {True: "yes", False: "no", "allowed": "yes", "disallowed": "no", "unknown": "unclear"}
+    for given, expected in spelled.items():
+        assert ProviderInfo(id="p", label="P", training_on_outputs=given).training_on_outputs == (
+            expected
+        )
+
+
+def test_registry_records_where_each_verdict_comes_from():
+    from tempo.registry import Registry
+
+    for provider in Registry.load().providers.values():
+        assert provider.training_on_outputs in ("yes", "no", "unclear")
+        if provider.local:
+            continue
+        assert provider.training_terms_url.startswith("https://")
+        assert provider.training_terms_quote and provider.training_terms_checked
 
 
 async def test_export_writes_files_the_notebook_can_load(tmp_path):
@@ -143,7 +170,7 @@ async def test_compare_scores_laya_and_rules_on_held_out_rows():
     saved = engine.store.laya_compare()
     assert saved["should_stop"]["n"] == results["should_stop"].n
     assert saved["should_stop"]["laya_model"] == "stock"
-    rows, _ = build_rows(engine.store, engine.registry, test_percent=100)
+    rows, _ = build_rows(engine.store, engine.registry, test_percent=100, check_terms=False)
     decisions = [d for r in rows for d in json.loads(r["factors"])["decisions"].values()]
     assert {d["laya_model"] for d in decisions} == {"stock"}
 

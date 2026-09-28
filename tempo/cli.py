@@ -368,6 +368,29 @@ def sync() -> None:
         err.print("No providers configured.", style="dim")
 
 
+@app.command()
+def terms() -> None:
+    """May each provider's outputs be used to train models? Verdict, link and exact sentences."""
+    from tempo.registry import Registry
+
+    registry = Registry.load()
+    colour = {"yes": "green", "no": "red", "unclear": "yellow"}
+    for provider in registry.providers.values():
+        verdict = provider.training_on_outputs
+        checked = provider.training_terms_checked
+        checked = f" (checked {checked})" if checked else ""
+        out.print(
+            f"[bold]{provider.label}[/bold]: [{colour[verdict]}]{verdict}[/{colour[verdict]}]"
+            + checked
+        )
+        if provider.training_terms_url:
+            out.print(f"  {provider.training_terms_url}", markup=False)
+        quote = provider.training_terms_quote or "No terms recorded yet."
+        for line in quote.strip().splitlines():
+            out.print(f"  {line}", markup=False)
+        out.print()
+
+
 @app.command(name="export-laya")
 def export_laya(
     out_dir: Annotated[
@@ -376,16 +399,26 @@ def export_laya(
     test_percent: Annotated[
         int, typer.Option("--test-percent", help="Share of questions held out for testing.")
     ] = 10,
-    strict: Annotated[
+    include_unclear: Annotated[
         bool,
-        typer.Option("--strict", help="Only use outputs from providers marked allowed."),
+        typer.Option(
+            "--include-unclear",
+            help="Also use outputs from providers whose terms are unclear (read them first: "
+            "tempo terms).",
+        ),
     ] = False,
 ) -> None:
     """Export logged decisions as a dataset for Laya's official fine-tuning notebook."""
     from tempo.tuning import export
 
     engine = _engine()
-    stats = export(engine.store, engine.registry, out_dir, test_percent=test_percent, strict=strict)
+    stats = export(
+        engine.store,
+        engine.registry,
+        out_dir,
+        test_percent=test_percent,
+        include_unclear=include_unclear,
+    )
     err.print(
         f"Wrote {stats.rows} rows ({stats.decisions} labelled decisions from "
         f"{stats.questions} questions) to {out_dir}/",
@@ -394,12 +427,17 @@ def export_laya(
     for workflow, count in sorted(stats.by_workflow.items()):
         err.print(f"  {workflow}: {count}", markup=False)
     if stats.skipped_terms:
-        err.print(f"Left out {stats.skipped_terms} rows because of provider terms.", markup=False)
-    if stats.unknown_terms_providers:
-        providers = ", ".join(sorted(stats.unknown_terms_providers))
         err.print(
-            f"Terms not recorded for: {providers}. Check them before training "
-            "(set training_on_outputs in models.yaml).",
+            f"Left out {stats.skipped_terms} rows with text from providers whose terms say no"
+            + ("" if include_unclear else " or are unclear")
+            + ".",
+            markup=False,
+        )
+    if stats.unclear_terms_providers:
+        providers = ", ".join(sorted(stats.unclear_terms_providers))
+        err.print(
+            f"Terms are unclear for: {providers}. Read them with `tempo terms`"
+            + ("." if include_unclear else "; --include-unclear then keeps their rows."),
             style="yellow",
             markup=False,
         )
