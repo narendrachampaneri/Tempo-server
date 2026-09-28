@@ -261,8 +261,14 @@ class Engine:
         from tempo.pipeline import Pipeline
 
         pipeline = Pipeline(self, list(messages), options or self.options(), uuid.uuid4().hex)
-        async for event in pipeline.events():
-            yield event
+        if self.laya is not None:
+            self.laya.question_started()
+        try:
+            async for event in pipeline.events():
+                yield event
+        finally:
+            if self.laya is not None:
+                self.laya.question_finished()
 
     async def complete(
         self, messages: Iterable[Mapping[str, Any]], options: RunOptions | None = None

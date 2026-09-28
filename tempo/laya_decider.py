@@ -21,13 +21,18 @@ laya-serve, whose default port 8000 is Tempo's own.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
+import math
+import queue
 import string
+import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from tempo.config import Settings
@@ -48,6 +53,9 @@ MAX_SHORTLIST = 10  # Laya gets weak with many options; keep a choice short
 # Predictions allowed in flight. One runs at a time; a timed-out one keeps running and is
 # logged as "late" when it finishes, so shadow logs stay complete on slow (CPU) hardware.
 MAX_PENDING = 4
+# Shadow predictions nobody waits for; beyond this many queued, new ones are dropped ("busy").
+MAX_BACKGROUND = 16
+HOLD_POLL_S = 0.05  # how often held shadow predictions check whether they may run
 MIN_COMPARE_ROWS = 50  # held-out rows needed before "auto" trusts a comparison
 
 STAGE_BUDGET_LEVELS = [2, 3, 5, 8]
@@ -158,44 +166,117 @@ class LayaRunner(Protocol):
     def predict(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]: ...
 
 
-# Laya's Router slot that holds a fine-tuned checkpoint (TEMPO_LAYA_MODEL).
-TUNED_SLOT = "typed-decisions"
-# How logs name Laya's own checkpoints, as opposed to a TEMPO_LAYA_MODEL path or repo.
+# How logs named predictions made before the runtime was recorded (Phase 2: PyTorch, stock).
 STOCK_CHECKPOINT = "stock"
+MIN_TIMEOUT_MS = 100.0
+MAX_TIMEOUT_MS = 5000.0
+TIMEOUT_MARGIN = 1.5  # the time limit is this many times the slowest measured group
 
 
-@dataclass
-class PinnedRunner:
-    """Sends every prediction to one checkpoint instead of Laya's language routing."""
+def checkpoint_name(settings: Settings) -> str:
+    """Names the model *and* runtime that make predictions: INT8 weights change answers, so
+    comparisons with the rules only ever count predictions from exactly this setup."""
+    return f"{settings.laya_model or settings.laya_checkpoint}/{settings.laya_backend}"
 
-    router: Any
-    model: str
 
-    def predict(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]:
-        return self.router.predict(state, questions, model=self.model)
+def cache_dir(settings: Settings) -> Path:
+    base = settings.data_dir or Path.home() / ".cache" / "tempo"
+    return base / "laya"
 
 
 def default_loader(settings: Settings) -> Callable[[], LayaRunner]:
     def load() -> LayaRunner:
-        from laya import Router  # optional dependency: pip install "tempo-server[laya]"
+        from tempo import laya_runtime
 
-        kwargs: dict[str, Any] = {}
-        if settings.laya_device:
-            kwargs["device"] = settings.laya_device
-        if not settings.laya_model:
-            return Router(preload=True, **kwargs)
-        # A checkpoint fine-tuned on `tempo export-laya` data answers every decision, in any
-        # language, and is the only one loaded.
-        router = Router(models={TUNED_SLOT: settings.laya_model}, **kwargs)
-        router.preload([TUNED_SLOT])
-        return PinnedRunner(router, TUNED_SLOT)
+        return laya_runtime.load(
+            backend=settings.laya_backend,
+            stock=settings.laya_checkpoint,
+            model=settings.laya_model,
+            threads=settings.laya_threads or laya_runtime.default_threads(),
+            cache_dir=cache_dir(settings),
+            device=settings.laya_device,
+        )
 
     return load
 
 
+def calibration_samples() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+    """One realistic call per group, at the lengths Tempo really sends."""
+    request = (
+        "Write a Python function that parses ISO-8601 durations such as P3DT4H5M into seconds, "
+        "with unit tests for days, hours, minutes and invalid input. Explain the approach "
+        "briefly and mention the edge cases you handle."
+    )
+    answer = trim_answer(
+        "```python\nimport re\n\nPATTERN = re.compile(r'P(?:(\\d+)D)?(?:T(?:(\\d+)H)?"
+        "(?:(\\d+)M)?(?:(\\d+)S)?)?')\n\ndef parse(text):\n    m = PATTERN.fullmatch(text)\n"
+        "    if not m:\n        raise ValueError(text)\n    d, h, mi, s = (int(x or 0) for x in "
+        "m.groups())\n    return ((d * 24 + h) * 60 + mi) * 60 + s\n```\n\n" + "The function "
+        "matches the pattern once and converts each part to seconds. " * 12
+    )
+    candidates = {
+        letter: f"provider/model-{i}: family {i}, strength 0.{60 + i}, good at code, math, "
+        f"about {i}.5s, {1000 * i} free left"
+        for i, letter in enumerate(string.ascii_uppercase[:MAX_SHORTLIST], start=1)
+    }
+    pick = {
+        "next_model": {
+            "type": "choice",
+            "instructions": "Which model should do the fix step for this request?",
+            "criteria": candidates,
+        }
+    }
+    return {
+        "plan": ({"request": request, "mode": "auto"}, PLAN_QUESTIONS),
+        "assess": (
+            {"request": request, "answer": answer, "checks": "no problems found"},
+            ASSESS_QUESTIONS,
+        ),
+        "pick": ({"request": request, "job": "fix"}, pick),
+    }
+
+
+class _Worker:
+    """One thread runs every Laya prediction (they already use all the CPU threads Laya is
+    given). Calls an answer waits for (taken-over decisions) jump ahead of shadow ones, and
+    shadow ones wait while ``hold()`` says an answer may need Laya soon, because a prediction
+    that has started cannot be interrupted."""
+
+    def __init__(self, hold: Callable[[], bool] = lambda: False) -> None:
+        self._queue: queue.PriorityQueue[tuple[int, int, Callable[[], Any], Future[Any]]] = (
+            queue.PriorityQueue()
+        )
+        self._seq = itertools.count()
+        self._thread: threading.Thread | None = None
+        self._hold = hold
+
+    def submit(self, fn: Callable[[], Any], urgent: bool) -> Future[Any]:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="laya", daemon=True)
+            self._thread.start()
+        future: Future[Any] = Future()
+        self._queue.put((0 if urgent else 1, next(self._seq), fn, future))
+        return future
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            priority, _, fn, future = item
+            if priority > 0 and self._hold():
+                self._queue.put(item)  # an urgent call may arrive: keep the thread free
+                time.sleep(HOLD_POLL_S)
+                continue
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(fn())
+            except BaseException as exc:  # handed to whoever awaits the future
+                future.set_exception(exc)
+
+
 @dataclass
 class LayaCall:
-    status: str  # ok | off | missing | loading | error | timeout | busy | skipped
+    status: str  # ok | off | missing | loading | error | timeout | busy | skipped | background
     answers: dict[str, Any] = field(default_factory=dict)
     ms: float | None = None
     error: str | None = None
@@ -217,11 +298,17 @@ class LayaDecider:
         self._clock = clock
         self._runner: LayaRunner | None = None
         self.status = "off" if settings.laya == "off" else "loading"
-        # Which checkpoint made the predictions; comparisons only count its own.
-        self.checkpoint = settings.laya_model or STOCK_CHECKPOINT
+        # Which checkpoint and runtime made the predictions; comparisons only count their own.
+        self.checkpoint = checkpoint_name(settings)
+        # How long a prediction may take before the rules decide: set, or measured at load.
+        self.timeout_ms: float = settings.laya_timeout_ms or MAX_TIMEOUT_MS
+        self.calibration: dict[str, float] = {}
         self.load_error: str | None = None
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="laya")
+        self._worker = _Worker(hold=self._hold_background)
+        self._active = 0  # questions in progress
         self._pending = 0
+        self._background = 0
+        self._running: set[asyncio.Future[Any]] = set()
         self._cache: dict[tuple[Any, ...], tuple[LayaCall, dict[str, Any], dict[str, Any]]] = {}
         self._compare: dict[str, dict[str, Any]] = {}
         self._compare_loaded = 0.0
@@ -232,8 +319,7 @@ class LayaDecider:
         """Load Laya in the background; questions asked meanwhile fall back to the rules."""
         if self.status == "off":
             return None
-        loop = asyncio.get_running_loop()
-        return loop.run_in_executor(self._executor, self._load)
+        return asyncio.wrap_future(self._worker.submit(self._load, urgent=True))
 
     def _load(self) -> None:
         started = time.perf_counter()
@@ -247,12 +333,35 @@ class LayaDecider:
             self.status, self.load_error = "error", f"{type(exc).__name__}: {exc}"
             log.warning("Laya failed to load (%s); the rules make every decision", exc)
             return
+        if self.settings.laya_timeout_ms is None:
+            self.calibrate()
         self.status = "ready"
         log.info("Laya loaded in %.1fs", time.perf_counter() - started)
 
+    def calibrate(self, rounds: int = 3) -> float:
+        """Time each kind of call on this machine and set the time limit to the slowest one
+        times TIMEOUT_MARGIN, so a CPU that is slower or faster gets a limit that fits it."""
+        runner = self._runner
+        assert runner is not None
+        slowest: dict[str, float] = {}
+        for group, (state, questions) in calibration_samples().items():
+            runner.predict(state, questions)  # warm-up
+            times = []
+            for _ in range(rounds):
+                started = time.perf_counter()
+                runner.predict(state, questions)
+                times.append((time.perf_counter() - started) * 1000)
+            slowest[group] = max(times)
+        limit = math.ceil(TIMEOUT_MARGIN * max(slowest.values()) / 10) * 10
+        self.timeout_ms = float(min(MAX_TIMEOUT_MS, max(MIN_TIMEOUT_MS, limit)))
+        self.calibration = {**{k: round(v, 1) for k, v in slowest.items()}}
+        log.info("Laya time limit %.0f ms, measured on this machine: %s", self.timeout_ms, slowest)
+        return self.timeout_ms
+
     def status_text(self) -> str:
         return {
-            "ready": "Laya ready (shadow unless taken over)",
+            "ready": f"Laya ready ({self.checkpoint}, {self.timeout_ms:.0f} ms limit; shadow "
+            "unless taken over)",
             "loading": "Laya still loading (rules decide)",
             "missing": "Laya not installed (rules decide)",
             "error": "Laya failed to load (rules decide)",
@@ -261,28 +370,34 @@ class LayaDecider:
 
     # --- asking -------------------------------------------------------------------------
 
-    async def ask(self, state: dict[str, Any], questions: dict[str, Any]) -> LayaCall:
+    async def ask(
+        self, state: dict[str, Any], questions: dict[str, Any], wait: bool = True
+    ) -> LayaCall:
+        """Ask Laya. With ``wait``, up to the time limit (the answer may be used); without, the
+        prediction runs in the background and is only logged (shadow mode costs no time)."""
         if self.status != "ready" or self._runner is None:
             return LayaCall(status=self.status)
-        if self._pending >= MAX_PENDING:
+        if (wait and self._pending >= MAX_PENDING) or (
+            not wait and self._background >= MAX_BACKGROUND
+        ):
             return LayaCall(status="busy")
-        self._pending += 1
-        loop = asyncio.get_running_loop()
         runner = self._runner
         started = self._clock()
-        future = loop.run_in_executor(self._executor, lambda: runner.predict(state, questions))
-
-        def release(_: Any) -> None:
-            self._pending -= 1
-
-        future.add_done_callback(release)
-        timeout = self.settings.laya_timeout_ms / 1000
+        future = self._worker.submit(lambda: runner.predict(state, questions), urgent=wait)
+        if not wait:
+            self._background += 1
+            future.add_done_callback(lambda _: self._release(background=True))
+            running = self._track(asyncio.wrap_future(future))
+            return LayaCall(status="background", future=running, started=started)
+        self._pending += 1
+        future.add_done_callback(lambda _: self._release(background=False))
+        waiting = self._track(asyncio.wrap_future(future))
         try:
-            result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            result = await asyncio.wait_for(asyncio.shield(waiting), timeout=self.timeout_ms / 1000)
         except TimeoutError:
             ms = (self._clock() - started) * 1000
-            log.info("Laya took longer than %.0f ms; rules decide", self.settings.laya_timeout_ms)
-            return LayaCall(status="timeout", ms=ms, future=future, started=started)
+            log.info("Laya took longer than %.0f ms; rules decide", self.timeout_ms)
+            return LayaCall(status="timeout", ms=ms, future=waiting, started=started)
         except Exception as exc:
             log.warning("Laya prediction failed: %s", exc)
             return LayaCall(status="error", ms=(self._clock() - started) * 1000, error=str(exc))
@@ -291,6 +406,38 @@ class LayaDecider:
         if not isinstance(answers, dict):
             return LayaCall(status="error", ms=ms, error="unexpected Laya result")
         return LayaCall(status="ok", answers=answers, ms=ms)
+
+    def _track(self, future: asyncio.Future[Any]) -> asyncio.Future[Any]:
+        self._running.add(future)
+        future.add_done_callback(self._running.discard)
+        return future
+
+    async def drain(self, timeout: float = 60.0) -> None:
+        """Wait for predictions still running, so their answers reach the log (tests, and
+        commands such as `tempo collect` before they exit)."""
+        if self._running:
+            await asyncio.wait(list(self._running), timeout=timeout)
+        for _ in range(3):  # let the done-callbacks that write the log run
+            await asyncio.sleep(0)
+
+    def question_started(self) -> None:
+        self._active += 1
+
+    def question_finished(self) -> None:
+        self._active = max(0, self._active - 1)
+
+    def _hold_background(self) -> bool:
+        """Shadow predictions wait while a question that Laya decides parts of is running;
+        they run between questions instead, so a waited-for call never queues behind them."""
+        if self._active <= 0:
+            return False
+        return any(self.mode_for(name) == "laya" for name in GROUPS)
+
+    def _release(self, background: bool) -> None:
+        if background:
+            self._background -= 1
+        else:
+            self._pending -= 1
 
     # --- decisions ----------------------------------------------------------------------
 
@@ -315,7 +462,7 @@ class LayaDecider:
         self, pipeline: Pipeline, name: str, stage: int, rules_value: Any, **context: Any
     ) -> Any:
         group = GROUPS[name]
-        call, state, questions, mapping = await self._group(pipeline, group, stage, context)
+        call, state, questions, mapping = await self._group(pipeline, group, stage, context, name)
         if call.status == "skipped":  # nothing to choose between
             return rules_value
         question = questions.get(name) if name != "next_model" else questions["next_model"]
@@ -350,11 +497,15 @@ class LayaDecider:
                     "laya_model": self.checkpoint,
                 },
             )
-            if call.status == "timeout" and call.future is not None:
+            if call.status in ("timeout", "background") and call.future is not None:
+                finished = "late" if call.status == "timeout" else "ok"
                 call.future.add_done_callback(
-                    lambda done, row_id=row_id: self._log_late(done, row_id, name, mapping, call)
+                    lambda done, row_id=row_id, finished=finished: self._log_late(
+                        done, row_id, name, mapping, call, finished
+                    )
                 )
-        if call.status not in ("off", "missing", "loading"):
+        # Background (shadow) predictions land in the log later; they add no line here.
+        if call.status not in ("off", "missing", "loading", "background"):
             pipeline.emit(
                 "decision",
                 stage=stage,
@@ -371,8 +522,16 @@ class LayaDecider:
         return value
 
     async def _group(
-        self, pipeline: Pipeline, group: str, stage: int, context: dict[str, Any]
+        self,
+        pipeline: Pipeline,
+        group: str,
+        stage: int,
+        context: dict[str, Any],
+        name: str,
     ) -> tuple[LayaCall, dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """The Laya call that answers ``name``. Questions of this group whose decisions Laya
+        has taken over are asked together and waited for; the others are asked together in the
+        background, so shadow mode never slows an answer down."""
         request = pipeline.question.strip()[:REQUEST_CHARS]
         mapping: dict[str, Any] = {}
         if group == "plan":
@@ -409,12 +568,16 @@ class LayaDecider:
             if len(shortlist) < 2:
                 call = LayaCall(status="skipped")
                 return call, state, questions, mapping
+        taken = {q for q in questions if self.mode_for(q) == "laya"}
+        wait = name in taken
+        subset = {q: d for q, d in questions.items() if (q in taken) == wait}
+        key = (*key, "wait" if wait else "shadow")
         cached = self._cache.get(key)
         if cached is not None:
             call, state, _ = cached
             return call, state, questions, mapping
-        call = await self.ask(state, questions)
-        self._cache[key] = (call, state, questions)
+        call = await self.ask(state, subset, wait=wait)
+        self._cache[key] = (call, state, subset)
         if len(self._cache) > 512:
             self._cache.pop(next(iter(self._cache)))
         return call, state, questions, mapping
@@ -426,9 +589,14 @@ class LayaDecider:
         name: str,
         mapping: dict[str, Any],
         call: LayaCall,
+        finished: str = "late",
     ) -> None:
-        """A timed-out prediction finished: record what Laya would have said (for tuning)."""
-        if self.store is None or done.cancelled() or done.exception() is not None:
+        """A prediction nobody waited for (or that ran past the limit) finished: record what
+        Laya said, for tuning and for `tempo laya compare`."""
+        if self.store is None or done.cancelled():
+            return
+        if done.exception() is not None:
+            self.store.update_decision(row_id, laya_status="error")
             return
         result = done.result()
         answers = result.get("answers") if isinstance(result, dict) else None
@@ -442,7 +610,7 @@ class LayaDecider:
             laya_value=json.dumps(value) if value is not None else None,
             laya_probs=probabilities,
             laya_confidence=confidence,
-            laya_status="late",
+            laya_status=finished,
             laya_ms=(self._clock() - call.started) * 1000,
         )
 

@@ -287,11 +287,23 @@ def models() -> None:
             reason = engine.health.unavailable_reason(m)
             status = f"[yellow]{reason}[/yellow]" if reason else "[green]ready[/green]"
         provider = registry.providers[m.provider]
-        free = "local" if provider.local else (f"{m.free_rpd:,}" if m.free_rpd else "-")
+        if provider.local:
+            free = "local"
+        elif m.free_rpd:
+            free = f"{m.free_rpd:,}"
+        elif m.free_tpd:
+            free = f"{m.free_tpd // 1000:,}K tokens"
+        else:
+            free = "-"
+        if provider.free_tier == "trial" and not provider.local:
+            free += " (trial)"
         table.add_row(
             status, m.id, provider.label, free, f"{m.context_window:,}", f"{m.strength:.2f}"
         )
     out.print(table)
+    for p in registry.providers.values():
+        if p.free_tier == "trial" and p.free_tier_note:
+            out.print(f"{p.label}: {p.free_tier_note}", style="yellow", markup=False)
 
     missing = [p for p in registry.providers.values() if not registry.is_configured(p.id)]
     if missing:
@@ -454,11 +466,24 @@ def laya_status() -> None:
     import importlib.util
 
     from tempo.config import LAYA_DECISIONS
+    from tempo.laya_decider import checkpoint_name
+    from tempo.laya_runtime import default_threads
 
     engine = _engine()
+    s = engine.settings
     installed = importlib.util.find_spec("laya") is not None
-    err.print(f"Laya package installed: {'yes' if installed else 'no'}", markup=False)
-    err.print(f"TEMPO_LAYA: {engine.settings.laya}", markup=False)
+    onnx = importlib.util.find_spec("onnxruntime") is not None
+    err.print(
+        f"Laya package installed: {'yes' if installed else 'no'} · ONNX Runtime: "
+        f"{'yes' if onnx else 'no'}",
+        markup=False,
+    )
+    err.print(
+        f"TEMPO_LAYA: {s.laya} · runs {checkpoint_name(s)} on CPU with "
+        f"{s.laya_threads or default_threads()} threads · time limit "
+        + (f"{s.laya_timeout_ms:.0f} ms" if s.laya_timeout_ms else "measured when it loads"),
+        markup=False,
+    )
     counts = {
         r["name"]: r
         for r in engine.store.query(
@@ -489,16 +514,16 @@ def laya_compare(
 ) -> None:
     """Score Laya and the rules against outcome labels on held-out questions. Decisions set
     to "auto" in TEMPO_LAYA_TAKEOVER switch to Laya once it wins here on 50+ rows."""
-    from tempo.laya_decider import MIN_COMPARE_ROWS, STOCK_CHECKPOINT
+    from tempo.laya_decider import MIN_COMPARE_ROWS, checkpoint_name
     from tempo.tuning import compare
 
     engine = _engine()
-    checkpoint = engine.settings.laya_model or STOCK_CHECKPOINT
+    checkpoint = checkpoint_name(engine.settings)
     results = compare(
         engine.store, engine.registry, test_percent=test_percent, laya_model=checkpoint
     )
     table = Table(
-        title=f"Laya ({checkpoint} checkpoint) vs rules on held-out questions",
+        title=f"Laya ({checkpoint}) vs rules on held-out questions",
         header_style="bold",
     )
     for column in ("decision", "rows", "Laya", "rules", "verdict"):

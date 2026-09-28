@@ -38,6 +38,23 @@ def _flag(env: Mapping[str, str], name: str, default: bool) -> bool:
     return default
 
 
+LAYA_BACKENDS = ("torch", "onnx", "onnx-int8")
+LAYA_CHECKPOINTS = ("english", "multilingual")
+
+
+def _timeout(value: str | None) -> float | None:
+    """TEMPO_LAYA_TIMEOUT_MS: a number of milliseconds, or "auto"/unset to measure it."""
+    value = (value or "").strip().lower()
+    return None if value in ("", "auto") else float(value)
+
+
+def _choice(env: Mapping[str, str], name: str, allowed: tuple[str, ...], default: str) -> str:
+    value = (env.get(name) or default).strip().lower()
+    if value not in allowed:
+        raise ValueError(f"{name} must be one of {', '.join(allowed)}, not {value!r}")
+    return value
+
+
 def parse_takeover(spec: str) -> dict[str, str]:
     """``"should_stop, task_type=auto"`` -> {"should_stop": "laya", "task_type": "auto"}."""
     modes: dict[str, str] = {}
@@ -79,8 +96,14 @@ class Settings:
 
     # Laya (optional dependency).
     laya: str = "auto"  # "auto": use it when installed; "off": never load it
-    laya_timeout_ms: float = 200.0
+    # None: measured on this machine when Laya loads (see LayaDecider.calibrate).
+    laya_timeout_ms: float | None = None
     laya_device: str | None = None
+    # "torch" (fp32), "onnx" (fp32, same answers) or "onnx-int8" (faster, but changes answers;
+    # see docs/LAYA_CPU.md). All run on CPU.
+    laya_backend: str = "torch"
+    laya_checkpoint: str = "english"  # stock checkpoint: "english" | "multilingual"
+    laya_threads: int | None = None  # CPU threads for Laya; None: up to 4 cores
     # A fine-tuned Laya checkpoint (local folder or Hub repo) that answers every decision.
     laya_model: str | None = None
     laya_takeover: dict[str, str] = field(default_factory=dict)
@@ -130,7 +153,10 @@ class Settings:
             max_parallel=max(1, int(env.get("TEMPO_MAX_PARALLEL") or 3)),
             judge=_flag(env, "TEMPO_JUDGE", True),
             laya=(env.get("TEMPO_LAYA") or "auto").strip().lower(),
-            laya_timeout_ms=float(env.get("TEMPO_LAYA_TIMEOUT_MS") or 200),
+            laya_timeout_ms=_timeout(env.get("TEMPO_LAYA_TIMEOUT_MS")),
+            laya_backend=_choice(env, "TEMPO_LAYA_BACKEND", LAYA_BACKENDS, "torch"),
+            laya_checkpoint=_choice(env, "TEMPO_LAYA_CHECKPOINT", LAYA_CHECKPOINTS, "english"),
+            laya_threads=int(env["TEMPO_LAYA_THREADS"]) if env.get("TEMPO_LAYA_THREADS") else None,
             laya_device=env.get("TEMPO_LAYA_DEVICE") or None,
             laya_model=(env.get("TEMPO_LAYA_MODEL") or "").strip() or None,
             laya_takeover=parse_takeover(env.get("TEMPO_LAYA_TAKEOVER", "")),
