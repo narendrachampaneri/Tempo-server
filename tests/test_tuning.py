@@ -111,22 +111,21 @@ async def test_labels_come_from_outcomes():
 
 async def test_terms_of_use_filter():
     engine, _ = await logged_engine()
-    # Test providers have no recorded terms, so they count as unclear: their answers stay out.
+    # Test providers have no recorded terms (unclear). Their answers and judge grades shaped
+    # every label, plan rows included, so nothing is exported by default.
     rows, stats = build_rows(engine.store, engine.registry)
-    assert stats.unclear_terms_providers and stats.skipped_terms > 0
-    assert not any(r["workflow"] == "tempo_assess" for r in rows)
-    assert any(r["workflow"] == "tempo_plan" for r in rows)  # only the user's own text
+    assert rows == [] and stats.unclear_terms_providers and stats.skipped_terms > 0
     unclear_rows, _ = build_rows(engine.store, engine.registry, include_unclear=True)
-    assert any(r["workflow"] == "tempo_assess" for r in unclear_rows)
+    assert {r["workflow"] for r in unclear_rows} == {"tempo_plan", "tempo_assess", "tempo_pick"}
 
-    for provider in engine.registry.providers.values():
-        provider.training_on_outputs = "no"
+    engine.registry.providers["beta"].training_on_outputs = "no"
     rows, _ = build_rows(engine.store, engine.registry, include_unclear=True)
-    assert not any(r["workflow"] == "tempo_assess" for r in rows)  # "no" is never used
+    for row in rows:  # "no" is never used, whatever the flag
+        assert not any(m.startswith("beta/") for m in json.loads(row["factors"])["output_models"])
     for provider in engine.registry.providers.values():
         provider.training_on_outputs = "yes"
     rows, stats = build_rows(engine.store, engine.registry)
-    assert any(r["workflow"] == "tempo_assess" for r in rows) and stats.skipped_terms == 0
+    assert len(rows) == len(unclear_rows) and stats.skipped_terms == 0
 
 
 def test_terms_accept_yaml_booleans_and_old_spellings():

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from tempo.checks import PASS_THRESHOLD
+from tempo.datasets import dataset_info
 from tempo.laya_decider import ASSESS_QUESTIONS, PLAN_QUESTIONS, STOCK_CHECKPOINT, budget_level
 from tempo.registry import Registry
 from tempo.store import Store
@@ -275,6 +276,7 @@ class ExportStats:
     by_workflow: dict[str, int] = field(default_factory=dict)
     skipped_terms: int = 0
     unclear_terms_providers: set[str] = field(default_factory=set)
+    sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo collect)
 
 
 def _terms(registry: Registry | None, model_id: str | None) -> str:
@@ -313,6 +315,13 @@ def build_rows(
     for s in store.query("SELECT * FROM stages ORDER BY id"):
         if s["question_id"] in questions:
             stages[s["question_id"]].append(s)
+    # Every model whose output shaped the question (answers and judge grades): the labels are
+    # derived from them, so their providers' terms decide whether a row may be used.
+    outputs: dict[str, set[str]] = defaultdict(set)
+    for c in store.query("SELECT question_id, model FROM calls WHERE status = 'ok'"):
+        if c["question_id"] in questions and c["model"]:
+            outputs[c["question_id"]].add(c["model"])
+    origins = store.collect_sources()
 
     rows: list[dict[str, Any]] = []
     for question_id, question_decisions in decisions.items():
@@ -339,7 +348,10 @@ def build_rows(
                 "feedback": outcome.feedback,
                 "decisions": {},
             }
-            sources = []
+            sources = sorted(outputs[question_id])
+            origin = dataset_info(origins.get(question_id))
+            if origin is not None:
+                factors["source"] = origin
             for d in items:
                 context = _loads(d["context"], {}) or {}
                 if group == "assess":
@@ -387,6 +399,8 @@ def build_rows(
             )
             stats.rows += 1
             stats.decisions += len(gold)
+            if origin is not None:
+                stats.sources[origin["dataset"]] = stats.sources.get(origin["dataset"], 0) + 1
             stats.by_workflow[workflow] = stats.by_workflow.get(workflow, 0) + 1
             used = True
         stats.questions += int(used)
@@ -427,11 +441,38 @@ question went), `judge` / `judge+feedback` (the LLM judge's grade, moved by thum
 
 ## Terms of use
 
-Rows containing text written by a model whose provider is marked `training_on_outputs: no` in
-the registry were left out, and so were `unclear` ones{unclear_note}. Providers marked unclear
-that appeared in the log: {unclear}. `tempo terms` shows each provider's verdict, the link
-and the exact sentences it rests on.
+A row is left out when any model that answered or judged its question (so its text or its labels
+come from that model) belongs to a provider marked `training_on_outputs: no` in the registry,
+and so were `unclear` ones{unclear_note}. Providers marked unclear that appeared in the log:
+{unclear}. `tempo terms` shows each provider's verdict, the link and the exact sentences it rests
+on.
+
+## Where the questions came from
+
+{sources}
 """
+
+
+def _sources_text(sources: dict[str, int]) -> str:
+    if not sources:
+        return "All questions came from Tempo's own traffic (no `tempo collect` datasets)."
+    lines = [
+        "Rows from `tempo collect` carry `factors.source` with the dataset and its licence:",
+        "",
+    ]
+    share_alike = False
+    for name, count in sorted(sources.items()):
+        info = dataset_info(name) or {"title": name, "license": "?", "license_url": ""}
+        lines.append(f"- {info['title']}: {count} rows, {info['license']} ({info['license_url']})")
+        share_alike = share_alike or "SA" in info["license"]
+    if share_alike:
+        lines += [
+            "",
+            "Rows from CC-BY-SA sources include their text, so a dataset or model you share from "
+            "them must credit the source and use the same licence.",
+        ]
+    lines.append("Other rows came from Tempo's own traffic.")
+    return "\n".join(lines)
 
 
 def export(
@@ -465,6 +506,7 @@ def export(
             if include_unclear
             else " (--include-unclear keeps them once you have read their terms)",
             unclear=", ".join(sorted(stats.unclear_terms_providers)) or "none",
+            sources=_sources_text(stats.sources),
         ),
         encoding="utf-8",
     )

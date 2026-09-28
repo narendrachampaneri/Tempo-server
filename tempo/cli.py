@@ -380,6 +380,123 @@ def sync() -> None:
         err.print("No providers configured.", style="dim")
 
 
+@app.command(name="collect")
+def collect_data(
+    dataset: Annotated[
+        list[str] | None,
+        typer.Option("--dataset", "-d", help="Only these datasets (repeatable; see --list)."),
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", "-n", help="Stop after this many questions.")
+    ] = None,
+    per_minute: Annotated[
+        float, typer.Option("--per-minute", help="Most questions started per minute.")
+    ] = 2.0,
+    reserve: Annotated[
+        float,
+        typer.Option(
+            "--reserve", help="Share of each model's daily free quota to leave for users (0-0.9)."
+        ),
+    ] = 0.5,
+    provider: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--provider", "-p", help="Only these providers (default: configured, terms not no)."
+        ),
+    ] = None,
+    wait: Annotated[
+        bool,
+        typer.Option("--wait/--no-wait", help="When free quota runs out, wait (or stop)."),
+    ] = True,
+    show_estimate: Annotated[
+        bool, typer.Option("--estimate", help="Only estimate how long collecting will take.")
+    ] = False,
+    show_status: Annotated[bool, typer.Option("--status", help="Only show progress.")] = False,
+    show_list: Annotated[bool, typer.Option("--list", help="Only list the datasets.")] = False,
+) -> None:
+    """Make Laya training data from openly licensed public questions, slowly and within every
+    free limit. Stop any time (Ctrl-C); running it again resumes."""
+    from tempo import collect as col
+    from tempo.datasets import DATASETS
+
+    if show_list:
+        for d in DATASETS.values():
+            out.print(f"[bold]{d.name}[/bold]: {d.title}")
+            out.print(f"  licence {d.license}: {d.license_url}", markup=False)
+            out.print(f"  personal data: {d.personal_data}", markup=False)
+        return
+    names = dataset or list(DATASETS)
+    unknown = [n for n in names if n not in DATASETS]
+    if unknown:
+        raise typer.BadParameter(f"unknown dataset(s): {', '.join(unknown)}")
+    if not 0 <= reserve <= 0.9:
+        raise typer.BadParameter("--reserve must be between 0 and 0.9")
+    engine = _engine()
+    if show_estimate:
+        est = col.estimate(
+            engine.registry,
+            engine.store,
+            reserve=reserve,
+            per_minute=per_minute,
+            providers=provider,
+        )
+        for line in col.describe(est):
+            out.print(line, markup=False)
+        return
+    if show_status:
+        counts = engine.store.collect_counts()
+        if not counts:
+            out.print("Nothing collected yet.")
+        for name, by_status in sorted(counts.items()):
+            parts = ", ".join(f"{n} {status}" for status, n in sorted(by_status.items()))
+            out.print(f"{name}: {parts}", markup=False)
+        return
+    data_dir = engine.settings.data_dir
+    if data_dir is None:
+        raise typer.BadParameter("tempo collect needs a data directory to resume (TEMPO_DATA_DIR).")
+    providers = provider or col.default_providers(engine.registry)
+    if not providers:
+        err.print(
+            "No provider to collect with: add a key (see `tempo models`). Providers whose terms "
+            "say no (see `tempo terms`) are left out.",
+            style="red",
+            markup=False,
+        )
+        raise typer.Exit(1)
+    items = col.load_items(names, data_dir / "collect")
+
+    async def main() -> col.CollectStats:
+        await engine.startup()
+        if engine._laya_loading is not None:
+            await engine._laya_loading
+        err.print(
+            f"Collecting with {', '.join(providers)} · {per_minute:g} questions/min · keeping "
+            f"{reserve:.0%} of each daily free limit for users · Laya: {engine.laya.status}",
+            markup=False,
+        )
+        return await col.run(
+            engine,
+            items,
+            limit=limit,
+            per_minute=per_minute,
+            reserve=reserve,
+            providers=providers,
+            wait=wait,
+            say=lambda line: err.print(line, markup=False),
+        )
+
+    try:
+        stats = asyncio.run(main())
+    except KeyboardInterrupt:
+        err.print("Stopped. Progress is saved; run `tempo collect` again to resume.")
+        return
+    err.print(
+        f"{stats.done} questions answered, {stats.failed} failed, {stats.skipped} skipped "
+        f"({stats.already} done earlier) · {stats.stopped}",
+        markup=False,
+    )
+
+
 @app.command()
 def terms() -> None:
     """May each provider's outputs be used to train models? Verdict, link and exact sentences."""

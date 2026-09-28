@@ -123,6 +123,16 @@ CREATE TABLE IF NOT EXISTS laya_compare (
     updated_at REAL,
     laya_model TEXT
 );
+CREATE TABLE IF NOT EXISTS collect_items (
+    dataset TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    question_id TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    updated_at REAL,
+    PRIMARY KEY (dataset, item_id)
+);
 CREATE INDEX IF NOT EXISTS idx_decisions_question ON decisions (question_id);
 CREATE INDEX IF NOT EXISTS idx_stages_question ON stages (question_id);
 CREATE INDEX IF NOT EXISTS idx_calls_question ON calls (question_id);
@@ -321,6 +331,48 @@ class Store:
             "updated_at = excluded.updated_at, laya_model = excluded.laya_model",
             (decision, n, laya_accuracy, rules_accuracy, time.time(), laya_model),
         )
+
+    # --- tempo collect ------------------------------------------------------------
+
+    def collect_item(self, dataset: str, item_id: str) -> dict[str, Any] | None:
+        rows = self.query(
+            "SELECT * FROM collect_items WHERE dataset = ? AND item_id = ?", (dataset, item_id)
+        )
+        return rows[0] if rows else None
+
+    def collect_mark(
+        self,
+        dataset: str,
+        item_id: str,
+        status: str,
+        *,
+        question_id: str | None = None,
+        attempt: bool = False,
+        note: str | None = None,
+    ) -> None:
+        self.execute(
+            "INSERT INTO collect_items (dataset, item_id, status, question_id, attempts, note, "
+            "updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(dataset, item_id) DO UPDATE SET "
+            "status = excluded.status, question_id = COALESCE(excluded.question_id, "
+            "collect_items.question_id), attempts = collect_items.attempts + ?, "
+            "note = excluded.note, updated_at = excluded.updated_at",
+            (dataset, item_id, status, question_id, int(attempt), note, time.time(), int(attempt)),
+        )
+
+    def collect_counts(self) -> dict[str, dict[str, int]]:
+        counts: dict[str, dict[str, int]] = {}
+        for row in self.query(
+            "SELECT dataset, status, COUNT(*) AS n FROM collect_items GROUP BY dataset, status"
+        ):
+            counts.setdefault(row["dataset"], {})[row["status"]] = row["n"]
+        return counts
+
+    def collect_sources(self) -> dict[str, str]:
+        """question id -> the dataset it came from."""
+        rows = self.query(
+            "SELECT question_id, dataset FROM collect_items WHERE question_id IS NOT NULL"
+        )
+        return {row["question_id"]: row["dataset"] for row in rows}
 
     def laya_compare(self) -> dict[str, dict[str, Any]]:
         return {row["decision"]: row for row in self.query("SELECT * FROM laya_compare")}
