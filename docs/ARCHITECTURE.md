@@ -39,6 +39,21 @@ Every box emits events. The **thinking window** is just a live view of those eve
 4. **Free is a budget, not a guarantee.** Free tiers have per-minute and per-day limits. Tempo tracks remaining quota and routes around exhausted providers before a request fails.
 5. **Speak standard protocols.** Tempo is itself an OpenAI-compatible model (`tempo/auto`) and an MCP server, so anyone can plug it into their own tools.
 6. **Start simple, learn later.** Version 1 uses rules and embeddings. Logged outcomes train neural routers in later versions.
+7. **Software only.** Tempo must be 100% software. Nothing may need a GPU or any special hardware to run: everything works on an ordinary CPU computer or a free cloud service. Free cloud notebooks (such as Kaggle's) are allowed only for **offline training jobs**, whose results Tempo then runs on CPU; nothing that serves a request may depend on them.
+
+### 1.1 What the software-only rule means in practice
+
+This rule applies to everything from now on. When a design choice would need a GPU, Tempo picks the CPU route below instead, or leaves the feature out.
+
+| Needs special hardware (not allowed at run time) | What Tempo does instead |
+|---|---|
+| GPU inference for small models (Laya, classifiers) | ONNX Runtime on CPU with INT8 weights (Laya: §4.12; embeddings: fastembed, ONNX) |
+| A GPU server for self-hosted LLMs (vLLM) | Small quantized models on CPU through Ollama or llama.cpp; hosted free APIs for anything bigger |
+| Docker, gVisor or a VM to run untrusted code | A WebAssembly sandbox (wasmtime + a WASI build of CPython), a plain Python package (Phase 3) |
+| Multi-LoRA serving on a GPU | Writing specialists only when they are small enough for CPU; llama.cpp applies LoRA adapters on CPU (Phase 5) |
+| Training on a GPU | Offline jobs on free notebooks (Kaggle: 2×T4, about 30 GPU hours a week), exported to CPU formats before Tempo uses them |
+
+"Small enough for CPU" is measured, not assumed: a model qualifies if it answers at a usable speed (roughly 10 tokens per second or more) on a 4-core CPU with 8 GB of RAM, which in practice means about 1–4B parameters at 4-bit quantization.
 
 ---
 
@@ -64,7 +79,7 @@ flowchart TB
         CA[("Semantic cache · memory")]
     end
 
-    PR["Provider layer - LiteLLM<br/>Groq · Cerebras · Google AI Studio · OpenRouter free<br/>Mistral · Cloudflare · Ollama / vLLM local"]
+    PR["Provider layer - LiteLLM<br/>Groq · Cerebras · Google AI Studio · OpenRouter free<br/>Mistral · Cloudflare · Ollama / llama.cpp local (CPU)"]
 
     EV[["Event bus → thinking window"]]
     LRN[("Traces · feedback · training data")]
@@ -192,7 +207,7 @@ The router only ever sees models where `status == healthy and quota_left > 0`.
 **Hard filters** first (cheap, never wrong):
 - modality supported, context window ≥ input + output tokens,
 - quota available, healthy,
-- privacy rule satisfied (e.g. user chose "local only" → only Ollama/vLLM models).
+- privacy rule satisfied (e.g. user chose "local only" → only local Ollama / llama.cpp models).
 
 **Then score** each remaining model:
 
@@ -299,8 +314,8 @@ Output: `confidence ∈ [0,1]` plus short notes. The threshold depends on mode (
 Tempo core is **your own** model identity: a system prompt, output style and a model you control.
 
 - **Version 1:** a strong free model chosen by the router for the `aggregator` role, with Tempo's system prompt.
-- **Version 2:** a self-hosted open-weight model (for example a Qwen, Gemma or gpt-oss size that fits your GPU) served by vLLM, so Tempo always has a brain even when every free API is exhausted.
-- **Version 3:** fine-tune that model (LoRA) on your own traces, so it gets better at routing decisions and at merging other models' answers. Check each provider's terms before training on its outputs; many forbid using outputs to build competing models. Outputs of permissively licensed open-weight models you run yourself are the safest training data.
+- **Version 2:** a self-hosted open-weight model small enough to run on CPU (for example a 1–4B Qwen or Gemma, 4-bit quantized, through Ollama or llama.cpp), so Tempo always has a brain even when every free API is exhausted. Under the software-only rule (§1), a GPU server such as vLLM is not an option.
+- **Version 3:** fine-tune that model (LoRA) on your own traces in an offline job on a free notebook, then run the result on CPU, so it gets better at routing decisions and at merging other models' answers. Check each provider's terms before training on its outputs; many forbid using outputs to build competing models. Outputs of permissively licensed open-weight models you run yourself are the safest training data.
 
 Its jobs: merge candidate answers, fix contradictions, keep one voice and format, cite which model contributed what (optional), and treat all sub-model output as **untrusted text** (never follow instructions found inside it).
 
@@ -433,7 +448,7 @@ Your idea: when one model isn't enough, "connect both using a neural network and
 1. **A neural network that decides the connections (the router).** A trained network looks at the query and predicts how well each model will do. This is the "structural neural network": it learns the structure of which models are good at what.
 2. **Layers of models that pass answers forward (Mixture-of-Agents).** Layer 1 models answer, layer 2 models read those answers and improve them, an aggregator merges. That is a neural-network-like layered graph where each "neuron" is a whole LLM and the "signals" are text.
 3. **A graph over models, tasks and queries (GraphRouter).** A graph neural network treats models as nodes and predicts which query→model edges will work well.
-4. **With self-hosted open-weight models only:** offline **model merging** (e.g. [mergekit](https://github.com/arcee-ai/mergekit)) to create one model from several of the same architecture, or LoRA adapters per skill swapped in at request time. Useful later, not needed for v1.
+4. **With self-hosted open-weight models only:** offline **model merging** (e.g. [mergekit](https://github.com/arcee-ai/mergekit), which runs on CPU) to create one model from several of the same architecture, or LoRA adapters per skill swapped in at request time. Only for models small enough to run on CPU (§1.1). Useful later, not needed for v1.
 
 A starter G3 router is small (two-tower design, same idea as RouteLLM's matrix factorization):
 
@@ -561,7 +576,7 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 - **Prompt-injection hygiene**: sub-model outputs are data. The aggregator prompt fences them and tells Tempo core to ignore instructions inside them.
 - **Safety filter**: a moderation model (e.g. Llama Guard, available free on some providers) on input and output.
 - **Fair use of free tiers**: respect each provider's limits and terms; no key pooling or rotation to evade limits; prefer BYOK for public deployments. Never use reverse-engineered "free GPT" endpoints.
-- **Sandbox** for code-execution verification: no network, CPU/memory/time limits (e.g. a locked-down container or gVisor/Firecracker).
+- **Sandbox** for code-execution verification (Phase 3): a WebAssembly sandbox (wasmtime running a WASI build of CPython) with no network, a scratch folder only, and memory, time and output limits. It is a normal Python package, so it needs no Docker, gVisor or special machine (§1.1).
 
 ---
 
@@ -574,13 +589,13 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 | Provider calls | LiteLLM SDK (Router for fallbacks) | 100+ providers in one format |
 | State | Redis | Quota buckets, circuit breakers, pub/sub for trace events, cache |
 | Database | Postgres + pgvector | Registry, users, traces, feedback, embeddings |
-| Local models | Ollama (dev) → vLLM (GPU prod), llama.cpp for Arch-Router GGUF | Always-available brain, private mode |
+| Local models | Ollama or llama.cpp on CPU (small 4-bit models), llama.cpp for Arch-Router GGUF | Always-available brain, private mode, no GPU (§1.1) |
 | Embeddings | A small local embedding model (BGE / Qwen3-Embedding class) | Fast, free, private |
-| Router training | PyTorch + LLMRouter algorithms | Proven implementations |
+| Router training | PyTorch + LLMRouter algorithms, as offline jobs (a free notebook at most); served on CPU via ONNX | Proven implementations, software-only at run time |
 | Observability | OpenTelemetry + Langfuse (open source LLM tracing) | See every call, cost, latency |
 | Web | Next.js + Tailwind | Fast to build a polished UI |
 | CLI | Typer + Rich | Nice terminal UX with live panels |
-| Deploy | Docker Compose → Kubernetes | Start small |
+| Deploy | One `tempo serve` process on any CPU machine or free CPU host; containers optional, never required | Start small, software only |
 
 ---
 
@@ -620,9 +635,9 @@ tempo-server/
 |---|---|---|
 | **1. MVP** ✅ done | FastAPI + LiteLLM with 5 sources (Groq, Cerebras, Google AI Studio, OpenRouter free, Ollama with auto-discovery). Rule-based analyzer, G1 router, fallbacks with cool-downs, SSE trace, CLI, web app, OpenAI-compatible API. | You type a question in CLI or web, see which model was picked and why, the answer streams, and a provider failure falls back automatically. |
 | **2. Smart** ✅ done | Staged engine (draft → check → fix → merge/polish, parallel models per stage, early stop, stage/time/quota budgets, live replacement). Quota manager, answer checker, cascade, mixture, decompose. Embedding classifier, semantic cache. Measured skill scores, registry auto-sync and health checks. BYOK key vault with users. Laya in shadow mode at every stage, full logging for tuning, Laya dataset export and comparison. Usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
-| **3. Learning** (4–6 weeks) | Consent and PII scrubbing for logs. Fine-tune Laya on the exported logs and let it take over the decisions where it wins. kNN, then two-tower routers trained on judged outcomes. Exploration traffic, Arch-Router for user-defined routes, A/B framework. Sandboxed code execution in the checker. | Learned router beats G1 rules on your eval set at equal or lower quota use. |
-| **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (Whisper, vision), self-hosted Tempo core, GraphRouter, LoRA fine-tune of Tempo core. Shared state (Redis) so several servers share quota counters and the cache. | External developers use Tempo as a model or tool in their own apps. |
-| **5. Tempo Tune** (roadmap only, see §13) | A user describes a scenario in plain English. Tempo builds and checks a labelled dataset with stronger models, fine-tunes a Laya checkpoint (decision scenarios) or a small open model with LoRA (writing scenarios), and registers the result as a specialist the router can pick. Many LoRA adapters are served on one shared base model, and the tuned models are available through the API, MCP server and SDK. | A user goes from a one-paragraph scenario to a tuned specialist that beats the general models on that scenario's held-out set, without writing code. |
+| **3. Learning** (4–6 weeks) | Consent and PII scrubbing for logs. Fine-tune Laya on the exported logs (offline, on a free notebook) and let it take over the decisions where it wins. kNN, then two-tower routers trained on judged outcomes (served on CPU). Exploration traffic, Arch-Router for user-defined routes, A/B framework. **Run code in a WebAssembly sandbox** in the checker: wasmtime (a pip package) runs a WASI build of CPython with no network, a scratch folder only, and memory, time (epoch interruption) and output limits, so answers' Python code and tests really run without Docker or any special machine. Standard-library Python first; JavaScript through a QuickJS WebAssembly build later. | Learned router beats G1 rules on your eval set at equal or lower quota use; generated code is executed and its tests counted in the check. |
+| **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (CPU-sized speech and vision models, e.g. whisper.cpp), a CPU-sized self-hosted Tempo core (§4.7), GraphRouter trained offline, LoRA fine-tune of Tempo core. Shared state (Redis) so several servers share quota counters and the cache. | External developers use Tempo as a model or tool in their own apps. |
+| **5. Tempo Tune** (roadmap only, see §13) | A user describes a scenario in plain English. Tempo builds and checks a labelled dataset with stronger models, and trains in an offline job on a free notebook. **Laya decision models come first**, because they run on CPU (ONNX INT8, §4.12). Writing models (LoRA on a small open model) come only if the result is small enough to run on CPU (§1.1); several such adapters share one base model in llama.cpp. Tuned models are available through the API, MCP server and SDK. | A user goes from a one-paragraph scenario to a tuned specialist that beats the general models on that scenario's held-out set, without writing code or owning a GPU. |
 
 ---
 
@@ -641,7 +656,7 @@ tempo-server/
 
 ## 13. Tempo Tune (roadmap only, not built yet)
 
-Tempo Tune turns a plain-English description into a small tuned model that Tempo can route to. It builds on the Phase 2 logging and Laya export, and it depends on the Phase 4 MCP server and SDK to reach other users.
+Tempo Tune turns a plain-English description into a small tuned model that Tempo can route to. It builds on the Phase 2 logging and Laya export, and it depends on the Phase 4 MCP server and SDK to reach other users. It follows the software-only rule (§1): training runs offline (a free notebook at most), and every tuned model must run on CPU. So it **starts with Laya decision models**, and adds writing models only when they are small enough for CPU.
 
 ```mermaid
 flowchart LR
@@ -651,8 +666,8 @@ flowchart LR
     DL --> G["Build dataset<br/>strong models write examples + labels<br/>only terms-allowed providers"]
     WL --> G
     G --> V["Check dataset<br/>judge from another family,<br/>agreement, dedupe, held-out split"]
-    V --> T1["Fine-tune a Laya checkpoint"]
-    V --> T2["LoRA on a small open model"]
+    V --> T1["Fine-tune a Laya checkpoint<br/>offline, free notebook → ONNX INT8 on CPU"]
+    V --> T2["LoRA on a small open model<br/>only if it runs on CPU"]
     T1 --> E{"Beats general models<br/>on held-out set?"}
     T2 --> E
     E -- yes --> R["Register specialist<br/>in the registry"]
@@ -667,12 +682,12 @@ flowchart LR
 - **Terms of use come first.** Training data is generated only with models whose provider is marked `training_on_outputs: yes` in the registry (§4.2), and whose model licence also allows it. Each dataset records which provider and model produced every item and under which recorded terms, so a dataset can be rebuilt without a provider if its terms change. Local open-weight models with permissive licences are the default generators. `unclear` providers are never used for Tempo Tune, even though `tempo export-laya --include-unclear` can include them.
 
 **3. Fine-tune.**
-- **Decision scenarios** (classify, score, yes/no) become Laya typed questions (`choice`, `score`, `noul`) and are trained with the same notebook format that `tempo export-laya` already produces. The result is a small fast checkpoint that returns calibrated probabilities.
-- **Writing scenarios** get a LoRA adapter on a small open model (for example a 1–8B Qwen, Gemma or Llama that allows fine-tuning), trained with a standard SFT recipe (for example PEFT or Unsloth) on instruction pairs.
-- Training runs as a background job: on the user's own GPU, on a rented GPU, or on a free notebook such as the Kaggle 2×T4 one Laya's notebook targets. Tempo stores the adapter or checkpoint, the dataset version and the evaluation results together.
+- **Decision scenarios come first** (classify, score, yes/no). They become Laya typed questions (`choice`, `score`, `noul`) and are trained with the same notebook format that `tempo export-laya` already produces. The result is exported to ONNX with INT8 weights and runs on CPU like Tempo's own Laya (§4.12), returning calibrated probabilities.
+- **Writing scenarios come later, and only if they fit on CPU.** They get a LoRA adapter on a small open model whose licence allows fine-tuning (for example a 1–4B Qwen or Gemma), trained with a standard SFT recipe (PEFT or Unsloth) on instruction pairs. The result is converted to GGUF with 4-bit weights. If it does not reach usable speed on a 4-core CPU (§1.1), it is not registered, and the scenario stays with the general models.
+- Training runs as an offline job on a free notebook, such as the Kaggle 2×T4 one Laya's notebook targets (the software-only rule allows notebooks only for offline training). Nothing about serving depends on the notebook. Tempo stores the adapter or checkpoint, the dataset version and the evaluation results together.
 
 **4. Evaluate and register.** The tuned model is compared on the held-out split against the general models the router would otherwise pick. It is registered only if it wins, or ties at a lower cost or latency. A registered specialist becomes a registry row with `kind: specialist`, the scenario's description and its embedding, its measured score, its owner, and who may use it (private, a team, or public). The analyzer matches new questions against scenario descriptions (the same way it matches task examples), so the router can choose the specialist and fall back to general models when it is unavailable or unsure.
 
-**5. Serve many adapters cheaply.** All writing specialists built on the same base model share **one** copy of the base weights. The adapter is chosen per request, with multi-LoRA serving (for example vLLM's LoRA support or LoRAX), so hundreds of specialists cost little more memory than one. Laya specialists are small enough to keep several in memory. Rarely used adapters load on demand and are unloaded when idle.
+**5. Serve many specialists cheaply, on CPU.** Laya specialists are INT8 ONNX files of a few hundred MB that share nothing but load in seconds; the most used stay in memory and the rest load on demand. Writing specialists built on the same base model share **one** copy of the base weights: llama.cpp's server loads several LoRA adapters next to one GGUF base and picks them per request (its `lora` request field), all on CPU. Requests for different adapters are not batched together, so writing specialists suit light traffic; rarely used adapters are unloaded when idle.
 
 **6. Use it anywhere.** Specialists appear in `/v1/models` and can be called by id (for example `tune/<owner>/<name>`) through the OpenAI-compatible API, as MCP tools (one tool per specialist, with the scenario description as the tool description), and through the SDK. The owner's settings decide who else may use them, and usage counts toward the owner's quota.
