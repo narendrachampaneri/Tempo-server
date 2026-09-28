@@ -277,7 +277,7 @@ class Pipeline:
         e, o = self.e, self.o
         if not (e.cache and o.use_cache and self._cacheable()):
             return False
-        hit = await e.cache.lookup(self.question, o.mode)
+        hit = await e.cache.lookup(self.question, o.mode, o.access.user_id)
         if hit is None:
             return False
         self.emit(
@@ -953,7 +953,9 @@ class Pipeline:
             and final.check is not None
             and final.check.passed
         ):
-            self.e.cache.store(self.question, self.o.mode, final.text, final.model)
+            self.e.cache.store(
+                self.question, self.o.mode, final.text, final.model, self.o.access.user_id
+            )
         self._done()
 
     def _done(self) -> None:

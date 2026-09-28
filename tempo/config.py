@@ -86,6 +86,7 @@ class Settings:
 
     # Embedding classifier and semantic cache (optional fastembed dependency).
     embeddings: str = "auto"  # "auto" | "off"
+    embedding_model: str | None = None  # fastembed model name; default BAAI/bge-small-en-v1.5
     cache: bool = True
     cache_ttl_s: float = 24 * 3600
 
@@ -132,6 +133,7 @@ class Settings:
             laya_takeover=parse_takeover(env.get("TEMPO_LAYA_TAKEOVER", "")),
             laya_min_confidence=float(env.get("TEMPO_LAYA_MIN_CONFIDENCE") or 0.6),
             embeddings=(env.get("TEMPO_EMBEDDINGS") or "auto").strip().lower(),
+            embedding_model=env.get("TEMPO_EMBEDDING_MODEL") or None,
             cache=_flag(env, "TEMPO_CACHE", True),
             cache_ttl_s=float(env.get("TEMPO_CACHE_TTL") or 24 * 3600),
             secret_key=env.get("TEMPO_SECRET_KEY") or None,

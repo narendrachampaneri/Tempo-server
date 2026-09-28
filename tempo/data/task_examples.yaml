@@ -1,0 +1,115 @@
+# Labelled example requests for the embedding classifier (one list per task).
+# New requests are compared with these by meaning, so wording does not need to match.
+# Add examples from your own traffic to improve it; keep each task roughly balanced.
+
+chat:
+  - hi there
+  - good morning, how are you?
+  - thanks, that helped a lot
+  - who are you?
+  - tell me a fun fact
+  - what can you do?
+  - I'm bored, talk to me
+  - nice to meet you
+  - can you hear me?
+  - what's your favourite colour?
+  - ok cool
+  - hello again
+
+code:
+  - write a function that reverses a linked list
+  - my script crashes with KeyError, how do I fix it
+  - implement binary search in Go
+  - refactor this class to use dependency injection
+  - why does this SQL query return duplicate rows
+  - add unit tests for the payment module
+  - convert this loop into a list comprehension
+  - build a REST endpoint that uploads a file
+  - explain what this regex does
+  - set up a Dockerfile for a Flask app
+  - my React component re-renders forever
+  - optimize this nested loop that is too slow
+
+math:
+  - what is 17 percent of 2340
+  - solve 3x + 5 = 20
+  - integrate x squared times e to the x
+  - prove that the square root of 2 is irrational
+  - what is the probability of rolling two sixes
+  - find the derivative of sin(x) cos(x)
+  - how many ways can 5 people sit around a table
+  - calculate compound interest on 10000 at 7 percent for 5 years
+  - is 221 a prime number
+  - convert 72 fahrenheit to celsius
+  - what is the determinant of this 3 by 3 matrix
+  - average speed if I drive 120 km in 1.5 hours
+
+reasoning:
+  - why is the sky blue
+  - compare PostgreSQL and MongoDB for an analytics app
+  - should I rent or buy a house in my situation
+  - explain how vaccines train the immune system
+  - what are the trade-offs of microservices
+  - plan a study schedule for the GRE in two months
+  - why did the Roman Empire fall
+  - how does a transformer neural network work
+  - pros and cons of remote work for a small startup
+  - design a system that sends a million notifications per minute
+  - what would happen if the moon disappeared
+  - analyse the risks of launching in two markets at once
+
+writing:
+  - write a short poem about the monsoon
+  - draft an email asking my manager for leave
+  - write a product description for handmade soap
+  - rewrite this paragraph to sound more professional
+  - compose a birthday message for my grandmother
+  - write a cover letter for a data analyst job
+  - write a short story about a robot learning to paint
+  - create a LinkedIn post announcing our new app
+  - make this apology letter sound sincere
+  - write a speech for my sister's wedding
+  - write a catchy slogan for a coffee shop
+  - proofread my essay introduction
+
+summarize:
+  - summarize this article in three bullet points
+  - give me the key takeaways from this meeting transcript
+  - tl;dr of the text below
+  - condense this report into one paragraph
+  - what are the main points of this paper
+  - shorten this email but keep the important details
+  - summarize the plot of this chapter
+  - give an executive summary of these notes
+  - boil this contract down to what I need to know
+  - recap the discussion in this thread
+  - highlight the main arguments of this essay
+  - brief overview of this long document
+
+translate:
+  - translate "where is the railway station" into Hindi
+  - how do you say thank you in Japanese
+  - translate this paragraph from Spanish to English
+  - what does "je ne sais quoi" mean in English
+  - put this message into Gujarati
+  - translate my resume summary into German
+  - convert this sentence to formal French
+  - say good night in Marathi
+  - translate these instructions into Tamil
+  - what is the Arabic word for water
+  - render this poem in Portuguese
+  - translate the menu into Chinese
+
+extract:
+  - extract all email addresses from this text
+  - pull the invoice number, date and total out of this receipt
+  - list every person and company mentioned in this article
+  - turn this table into JSON
+  - find all dates in the document and return them as a list
+  - get the phone numbers from these contact notes
+  - parse this log and return the error lines as CSV
+  - extract the product names and prices as structured data
+  - which cities are mentioned in the passage
+  - make a JSON object with name, age and city from this bio
+  - collect all URLs in this page
+  - return the key-value pairs from this form as YAML

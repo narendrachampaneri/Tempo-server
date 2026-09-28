@@ -214,7 +214,8 @@ def _complexity(text: str, task: Task, tokens: int) -> float:
     return round(min(1.0, max(0.0, c)), 2)
 
 
-def analyze(messages: Iterable[Mapping[str, Any]]) -> QueryProfile:
+def analyze(messages: Iterable[Mapping[str, Any]], task: Task | None = None) -> QueryProfile:
+    """Profile a conversation. ``task`` overrides the rule-based task (e.g. from embeddings)."""
     messages = list(messages)
     user_messages = [m for m in messages if m.get("role") == "user"]
     last_user = message_text(user_messages[-1].get("content")) if user_messages else ""
@@ -222,7 +223,8 @@ def analyze(messages: Iterable[Mapping[str, Any]]) -> QueryProfile:
     has_images = any(_has_image(m.get("content")) for m in messages)
 
     script = detect_script(last_user)
-    task, _ = classify(last_user)
+    if task is None:
+        task, _ = classify(last_user)
     input_tokens = estimate_tokens(all_text, script)
     last_tokens = estimate_tokens(last_user, script)
     complexity = _complexity(last_user, task, last_tokens)

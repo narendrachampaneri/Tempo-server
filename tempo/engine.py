@@ -7,6 +7,7 @@ consumes the same stream, so the thinking window shows exactly what the engine d
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from tempo.analyzer import analyze
 from tempo.config import MAX_STAGES_LIMIT, Settings
+from tempo.embeddings import EmbeddingClassifier, SemanticCache, load_encoder
 from tempo.events import STREAM_EVENTS, Event
 from tempo.health import HealthTracker
 from tempo.laya_decider import LayaDecider
@@ -122,10 +124,11 @@ class Engine:
         self.store = store or Store(self.settings.db_path)
         self.quota = QuotaManager(registry, self.store)
         self.router = Router(registry, self.health, self.quota)
-        self.cache: Any = None  # semantic cache, attached in Engine.from_settings
+        self.cache: SemanticCache | None = None  # attached in Engine.from_settings
         self.laya: LayaDecider | None = None  # attached in Engine.from_settings
         self._laya_loading: Any = None
-        self.classifier: Any = None  # embedding classifier
+        self.classifier: EmbeddingClassifier | None = None
+        self._classifier_loading: Any = None
         self._warm_up = warm_up
         self._clock = clock
 
@@ -140,6 +143,14 @@ class Engine:
 
         engine = cls(registry, backend_for, settings=settings, warm_up=litellm_backend.warm_up)
         engine.laya = LayaDecider(settings, engine.store)
+        model_name = settings.embedding_model
+        classifier = EmbeddingClassifier(
+            lambda: load_encoder(settings.embeddings, model_name),
+            multilingual="multilingual" in (model_name or "").lower(),
+        )
+        engine.classifier = classifier
+        if settings.cache:
+            engine.cache = SemanticCache(lambda: classifier.encoder, ttl_s=settings.cache_ttl_s)
         return engine
 
     async def startup(self) -> None:
@@ -148,6 +159,9 @@ class Engine:
         await self.registry.discover_ollama()
         if self.laya is not None:
             self._laya_loading = self.laya.start()
+        if self.classifier is not None and self.classifier.status == "loading":
+            loop = asyncio.get_running_loop()
+            self._classifier_loading = loop.run_in_executor(None, self.classifier.load)
         if self._warm_up:
             await self._warm_up()
 
