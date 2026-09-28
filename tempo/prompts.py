@@ -13,7 +13,8 @@ Message = dict[str, Any]
 
 TEMPO_SYSTEM = (
     "You are Tempo, a helpful assistant. Answer accurately and concisely. Use Markdown, and "
-    "put code in fenced code blocks. If you are not sure about something, say so."
+    "put code in fenced code blocks. Reply in the language of the user's question unless they "
+    "ask for another. If you are not sure about something, say so."
 )
 
 _DATA_RULE = (

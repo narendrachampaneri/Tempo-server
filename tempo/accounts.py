@@ -45,7 +45,10 @@ def load_vault_key(secret: str | None, data_dir: Path | None) -> Fernet:
     if secret:
         return _fernet_from_secret(secret)
     if data_dir is None:
-        log.warning("No TEMPO_DATA_DIR or TEMPO_SECRET_KEY: stored provider keys are temporary")
+        log.warning(
+            "TEMPO_DATA_DIR is 'memory' and TEMPO_SECRET_KEY is unset: provider keys stored "
+            "now last only until this process ends"
+        )
         return Fernet(Fernet.generate_key())
     path = data_dir / "secret.key"
     if not path.exists():

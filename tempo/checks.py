@@ -23,6 +23,7 @@ PASS_THRESHOLD = {"fast": 0.6, "auto": 0.7, "private": 0.7, "best": 0.85}
 NO_JUDGE_CAP = 0.8
 HARD_FAIL_CAP = 0.2
 SOFT_PENALTY = 0.1
+WRONG_SCRIPT_WEIGHT = 2.0
 
 _REFUSAL = re.compile(
     r"^\s*(i'?m sorry,? but |sorry,? )?"
@@ -59,19 +60,20 @@ class CheckResult:
 class Heuristics:
     issues: list[str] = field(default_factory=list)
     hard_fail: bool = False
+    soft: float = 0.0  # soft issues, weighted
 
     def fail(self, issue: str) -> None:
         self.issues.append(issue)
         self.hard_fail = True
 
-    def warn(self, issue: str) -> None:
+    def warn(self, issue: str, weight: float = 1.0) -> None:
         self.issues.append(issue)
+        self.soft += weight
 
     @property
     def score(self) -> float:
-        soft = len(self.issues) - (1 if self.hard_fail else 0)
         base = HARD_FAIL_CAP if self.hard_fail else 1.0
-        return max(0.0, base - SOFT_PENALTY * soft)
+        return max(0.0, base - SOFT_PENALTY * self.soft)
 
 
 def extract_json(text: str) -> Any:
@@ -134,7 +136,10 @@ def run_heuristics(
 
     wanted = detect_script(question)
     if wanted != "latin" and profile.task != "translate" and detect_script(text) != wanted:
-        h.warn(f"question is in {wanted} script but the answer is not")
+        # An answer in the wrong language is a real miss, so it weighs enough to fail "auto"
+        # without a judge. Code answers are mostly Latin letters, so there it stays light.
+        weight = 1.0 if profile.task == "code" else WRONG_SCRIPT_WEIGHT
+        h.warn(f"question is in {wanted} script but the answer is not", weight)
 
     lines = [line.strip() for line in text.splitlines() if len(line.strip()) > 10]
     if lines:
@@ -158,8 +163,7 @@ def combine(
     else:
         issues.extend(i for i in (judge_issues or []) if i not in issues)
         score = max(0.0, min(1.0, judge_score / 10))
-        soft = len(heuristics.issues) - (1 if heuristics.hard_fail else 0)
-        score = max(0.0, score - 0.05 * soft)
+        score = max(0.0, score - 0.05 * heuristics.soft)
         if heuristics.hard_fail:
             score = min(score, HARD_FAIL_CAP)
     return CheckResult(

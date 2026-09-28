@@ -14,6 +14,13 @@ def profile(text: str):
         ("Why does this crash?\n```js\nconsole.log(x.y)\n```", "code"),
         ("What is 17% of 2,340?", "math"),
         ("Solve the equation 3x + 5 = 20", "math"),
+        (
+            "A train travels 240 km in 3 hours, then 180 km in 2 hours. "
+            "What is its average speed in km/h?",
+            "math",
+        ),
+        ("How many apples are left if I have 12 and give away 5?", "math"),
+        ("What happened in 1947 and why does it matter?", "reasoning"),
         ('Translate "Where is the station?" into Hindi', "translate"),
         ("Summarize this article in three bullet points: ...", "summarize"),
         ("Extract all email addresses from this text and return JSON", "extract"),

@@ -55,6 +55,16 @@ _RULES: dict[Task, list[tuple[re.Pattern[str], float]]] = {
         (re.compile(r"\d+(\.\d+)?\s*[-+*/^×÷=]\s*\d+"), 2.0),
         (re.compile(r"\d+(\.\d+)?\s*%"), 2.0),
         (re.compile(r"[∫∑√π≤≥≠∞]"), 2.0),
+        # Word problems: at least two numbers plus a quantity word ("average speed", "how many").
+        (
+            re.compile(
+                r"\A(?=.*?\d\D+\d)(?=.*?\b(how (many|much|long|far)|average|mean|median|ratio|"
+                r"speed|velocity|distance|area|volume|perimeter|interest|profit|remainder|divisible|"
+                r"total cost|in total|per (hour|day|week|month|year|km|kg|unit))\b)",
+                _I | re.DOTALL,
+            ),
+            2.0,
+        ),
     ],
     "translate": [
         (re.compile(r"\btranslat(e|ion|ing)\b", _I), 3.0),

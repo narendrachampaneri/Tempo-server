@@ -58,6 +58,17 @@ def test_script_mismatch_is_flagged():
     assert not any("script" in i for i in check("hi", "hello there friend").issues)
 
 
+def test_wrong_language_answer_fails_without_a_judge_but_code_answers_stay_light():
+    question = "ગુજરાતની રાજધાની કઈ છે?"
+    assert not check(question, "The capital of Gujarat is Gandhinagar.").passed
+    assert check(question, "ગુજરાતની રાજધાની ગાંધીનગર છે.").passed
+    code_q = "પાયથનમાં બે સંખ્યાઓ ઉમેરવાનું function લખો"
+    code_a = "```python\ndef add(a, b):\n    return a + b\n```\nThis adds two numbers."
+    code = check(code_q, code_a)
+    assert any("gujarati script" in i for i in code.issues)
+    assert code.score >= 0.7
+
+
 def test_judge_grade_combines_with_heuristics():
     assert check("hi", "Hello there!", judge=6).score == pytest.approx(0.6)
     assert not check("hi", "Hello there!", judge=6).passed
