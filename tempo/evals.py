@@ -141,7 +141,13 @@ async def run_evals(
     limit: int | None = None,
     on_result: Callable[[EvalResult], None] | None = None,
 ) -> list[EvalResult]:
-    """Grade each model on the probe set and save the scores. Models run in parallel."""
+    """Grade each model on the probe set and save the scores. Models run in parallel.
+
+    Providers whose terms or the owner's rules forbid evaluation (``blocked_for: [eval]``) are
+    never called; neither are non-chat models."""
+    models = [
+        m for m in models if m.chat_capable and not engine.registry.blocked_for(m.provider, "eval")
+    ]
     wanted = set(tasks or TASKS)
     items = [item for item in load_evalset() if item.task in wanted]
     by_task: dict[str, list[EvalItem]] = {}

@@ -408,6 +408,14 @@ def collect_data(
         bool,
         typer.Option("--wait/--no-wait", help="When free quota runs out, wait (or stop)."),
     ] = True,
+    yes_only: Annotated[
+        bool,
+        typer.Option(
+            "--yes-only",
+            help="Only models whose outputs may be training data (tempo terms: yes), for every "
+            "stage including the judge. Local Apache-2.0 or MIT models through Ollama qualify.",
+        ),
+    ] = False,
     show_estimate: Annotated[
         bool, typer.Option("--estimate", help="Only estimate how long collecting will take.")
     ] = False,
@@ -439,6 +447,7 @@ def collect_data(
             reserve=reserve,
             per_minute=per_minute,
             providers=provider,
+            yes_only=yes_only,
         )
         for line in col.describe(est):
             out.print(line, markup=False)
@@ -455,6 +464,11 @@ def collect_data(
     if data_dir is None:
         raise typer.BadParameter("tempo collect needs a data directory to resume (TEMPO_DATA_DIR).")
     providers = provider or col.default_providers(engine.registry)
+    blocked = [p for p in providers if engine.registry.blocked_for(p, "collect")]
+    if blocked:
+        raise typer.BadParameter(f"not allowed for tempo collect: {', '.join(blocked)}")
+    if yes_only:
+        providers = [p for p in providers if col.has_yes_models(engine.registry, p)]
     if not providers:
         err.print(
             "No provider to collect with: add a key (see `tempo models`). Providers whose terms "
@@ -480,6 +494,7 @@ def collect_data(
             limit=limit,
             per_minute=per_minute,
             reserve=reserve,
+            yes_only=yes_only,
             providers=providers,
             wait=wait,
             say=lambda line: err.print(line, markup=False),

@@ -111,6 +111,13 @@ def judge_reply(scores: Sequence[float] | Callable[[list[str]], list[float]]):
     return reply
 
 
+def _asks_function(messages: list[dict[str, Any]]) -> bool:
+    return any(
+        m.get("role") == "user" and "python function" in str(m.get("content")).lower()
+        for m in messages
+    )
+
+
 class ScriptedBackend:
     """Plays back a script per model and purpose.
 
@@ -141,9 +148,13 @@ class ScriptedBackend:
             return judge_reply([self.judge_score])(messages)
         if purpose == "split":
             return [("answer", json.dumps({"parts": ["first part", "second part"]}))]
+        # Asked to write a function: answer with code, as the checker expects.
+        code = (
+            "\n\n```python\ndef f(s):\n    return s[::-1]\n```" if _asks_function(messages) else ""
+        )
         if purpose == "draft":
-            return [("answer", f"Answer from {model_id}.")]
-        return [("answer", f"{purpose.capitalize()} from {model_id}.")]
+            return [("answer", f"Answer from {model_id}.{code}")]
+        return [("answer", f"{purpose.capitalize()} from {model_id}.{code}")]
 
     async def stream(
         self,

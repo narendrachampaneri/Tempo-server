@@ -84,8 +84,18 @@ def default_providers(registry: Registry) -> list[str]:
     return [
         p.id
         for p in registry.providers.values()
-        if registry.is_configured(p.id) and p.training_on_outputs != "no"
+        if registry.is_configured(p.id)
+        and p.training_on_outputs != "no"
+        and not registry.blocked_for(p.id, "collect")
     ]
+
+
+def has_yes_models(registry: Registry, provider_id: str) -> bool:
+    """Does this provider have a chat model whose outputs may be training data?"""
+    return any(
+        m.provider == provider_id and m.chat_capable and registry.training_verdict(m) == "yes"
+        for m in registry.all()
+    )
 
 
 async def run(
@@ -95,6 +105,7 @@ async def run(
     limit: int | None = None,
     per_minute: float = 2.0,
     reserve: float = 0.5,
+    yes_only: bool = False,
     providers: list[str] | None = None,
     wait: bool = True,
     say: Callable[[str], None] = print,
@@ -103,6 +114,9 @@ async def run(
 ) -> CollectStats:
     stats = CollectStats()
     providers = providers if providers is not None else default_providers(engine.registry)
+    blocked = [p for p in providers if engine.registry.blocked_for(p, "collect")]
+    if blocked:
+        raise ValueError(f"not allowed for tempo collect: {', '.join(blocked)}")
     gap = 60.0 / per_minute if per_minute > 0 else 0.0
     options = engine.options(
         mode="auto",
@@ -112,6 +126,7 @@ async def run(
         live=False,
         quota_budget=min(engine.settings.quota_budget, 6),
         access=Access(user_id=COLLECT_USER),
+        training_only=yes_only,
     )
     try:
         await _run_items(engine, items, stats, limit, gap, options, wait, say, sleep, clock)
@@ -259,6 +274,7 @@ def estimate(
     reserve: float = 0.5,
     per_minute: float = 2.0,
     providers: list[str] | None = None,
+    yes_only: bool = False,
 ) -> Estimate:
     stats = measured(store) if store is not None else None
     n, per_q, req_q, tok_r = stats or (
@@ -270,13 +286,37 @@ def estimate(
     result = Estimate(target_decisions, per_q, req_q, tok_r, n, reserve, per_minute=per_minute)
     wanted = set(providers) if providers is not None else None
     for provider in registry.providers.values():
-        if provider.local or provider.training_on_outputs == "no":
+        if provider.training_on_outputs == "no" or provider.id == "mock":
+            continue
+        if provider.blocked_for and "collect" in provider.blocked_for:
             continue
         if wanted is not None and provider.id not in wanted:
+            continue
+        if yes_only and not has_yes_models(registry, provider.id):
+            continue
+        if provider.local:
+            # No free quota to count: only the pace limits a local run.
+            installed = any(
+                m.provider == provider.id and m.installed is not False and m.chat_capable
+                for m in registry.all()
+            )
+            pace = per_minute * 60 * 24 if per_minute > 0 else 0.0
+            result.providers.append(
+                ProviderCapacity(
+                    provider=provider.id,
+                    label=provider.label,
+                    requests_per_day=pace * req_q if installed else 0.0,
+                    configured=registry.is_configured(provider.id),
+                    trial=False,
+                    note="local: limited only by --per-minute and your CPU",
+                )
+            )
             continue
         per_day = 0.0
         for model in registry.all():
             if model.provider != provider.id or model.listed is False:
+                continue
+            if not model.chat_capable:
                 continue
             limits = [float(x) for x in (model.free_rpd,) if x]
             if model.free_tpd:

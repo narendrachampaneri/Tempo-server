@@ -187,9 +187,10 @@ def test_estimate_uses_free_limits_and_the_reserve():
     engine, _ = make_engine()
     est = col.estimate(engine.registry, reserve=0.5, per_minute=100)
     by_provider = {p.provider: p for p in est.providers}
-    # alpha: 20 + 14,400 requests/day; beta: 14,400; half kept for users; local is not counted.
+    # alpha: 20 + 14,400 requests/day; beta: 14,400; half kept for users. Local models have no
+    # quota: only the pace (100 questions/min x 4 requests each) limits them.
     assert by_provider["alpha"].requests_per_day == (20 + 14400) / 2
-    assert "local" not in by_provider
+    assert by_provider["local"].requests_per_day == 100 * 60 * 24 * 4
     assert est.questions_needed == 778  # 7,000 decisions / 9 per question
     assert est.days() is not None and est.days() < 1
     assert any("days" in line for line in col.describe(est))
@@ -207,3 +208,42 @@ def test_cli_list_estimate_and_status(tmp_path, monkeypatch):
     assert est.exit_code == 0 and "labelled decisions" in est.stdout
     status = runner.invoke(app, ["collect", "--status"])
     assert status.exit_code == 0 and "Nothing collected yet" in status.stdout
+
+
+async def test_local_only_yes_models_collect_and_export(tmp_path):
+    """Owner's rule: local Apache-2.0/MIT models count as "yes"; collect --yes-only uses only
+    them (judge included), and every exported row names its source and licences."""
+    from tempo.tuning import build_rows
+
+    engine, backend = make_engine(data_dir=tmp_path)
+    engine.laya = LayaDecider(Settings(laya_timeout_ms=1000), engine.store, loader=FakeLaya)
+    engine.laya._load()
+    engine.registry.get("local/tiny").licence = "Apache-2.0"
+    engine.registry.add(
+        engine.registry.get("local/tiny").model_copy(
+            update={"id": "local/judge", "family": "other", "licence": "MIT"}
+        )
+    )
+    t = FakeTime()
+    stats = await col.run(
+        engine,
+        items(2),
+        yes_only=True,
+        providers=["alpha", "beta", "local"],
+        say=lambda _: None,
+        sleep=t.sleep,
+        clock=t.clock,
+    )
+    assert stats.done == 4  # two per dataset
+    assert set(backend.called) <= {"local/tiny", "local/judge"}
+    assert col.has_yes_models(engine.registry, "local")
+    assert not col.has_yes_models(engine.registry, "alpha")
+    rows, row_stats = build_rows(engine.store, engine.registry)  # no --include-unclear
+    assert rows and row_stats.skipped_terms == 0
+    for row in rows:
+        factors = json.loads(row["factors"])
+        assert factors["source"]["license"] and factors["source"]["dataset"] in ("gsm8k", "mbpp")
+        assert all(t["verdict"] == "yes" and t["licence"] for t in factors["output_terms"].values())
+
+    est = col.estimate(engine.registry, yes_only=True, per_minute=2)
+    assert [p.provider for p in est.providers] == ["local"]

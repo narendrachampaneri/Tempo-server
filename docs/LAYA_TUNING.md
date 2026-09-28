@@ -26,6 +26,12 @@ tempo collect --status      # progress per dataset
   instead, and a later run resumes).
 - Providers whose terms say outputs may not be used for training (`tempo terms`: Google AI
   Studio) are left out by default, since their answers could never be exported.
+- **Local only, all "yes":** `tempo collect --yes-only` uses only models whose outputs may be
+  training data, for every stage including the judge. Today that means local Ollama models
+  under Apache-2.0 or MIT (for example Qwen or gpt-oss; Tempo reads each installed model's
+  licence). With only Ollama running, nothing leaves your computer and no free quota is used;
+  the pace (`--per-minute`) and your CPU are the only limits.
+- Cerebras is never used for collecting.
 - Items that look like they contain an email, phone number, IP address or card number are
   skipped. Each question keeps its dataset's name, and every exported row says which licence
   its text came under.

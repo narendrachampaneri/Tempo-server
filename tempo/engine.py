@@ -64,6 +64,10 @@ class RunOptions:
     # Share of each model's daily free quota to leave untouched (tempo collect keeps some for
     # real users); 0 uses everything.
     quota_reserve: float = 0.0
+    # Privacy "no_logging": never send to models whose free tier may log or train on prompts.
+    no_logging: bool = False
+    # Only models whose outputs may be training data (tempo collect --yes-only).
+    training_only: bool = False
 
 
 @dataclass

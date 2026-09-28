@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from tempo.registry import Registry
@@ -34,8 +36,18 @@ def test_mock_models_are_opt_in():
     assert registry.is_configured("mock")
 
 
+LICENCES = {
+    "qwen2.5:7b": "                                 Apache License\n  Version 2.0, January 2004",
+    "phi4-mini:latest": "MIT License\n\nCopyright (c) Microsoft Corporation.",
+    "llama3.2:latest": "LLAMA 3.2 COMMUNITY LICENSE AGREEMENT\nLlama 3.2 Version Release Date",
+}
+
+
 def _ollama_transport(tags: list[dict]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/show":
+            name = json.loads(request.content)["model"]
+            return httpx.Response(200, json={"license": LICENCES.get(name, "")})
         assert request.url.path == "/api/tags"
         return httpx.Response(200, json={"models": tags})
 
@@ -83,3 +95,34 @@ async def test_ollama_discovery_skipped_when_not_configured():
         raise AssertionError("should not be called")
 
     assert await registry.discover_ollama(transport=httpx.MockTransport(handler)) == 0
+
+
+def test_every_hand_entered_limit_has_a_source_and_a_date():
+    from tempo.registry import Registry
+
+    registry = Registry.load(env={})
+    limit_fields = ("free_rpm", "free_rpd", "free_tpm", "free_tpd")
+    for provider in registry.providers.values():
+        if provider.shared_rpm or provider.shared_rpd or provider.shared_rpmonth:
+            assert provider.limits_source and provider.limits_checked, provider.id
+    for model in registry.all():
+        if any(getattr(model, name) for name in limit_fields):
+            provider = registry.providers[model.provider]
+            assert model.limits_source or provider.limits_source, model.id
+            assert model.limits_checked or provider.limits_checked, model.id
+
+
+async def test_ollama_discovery_records_each_models_licence():
+    registry = Registry.load(env={"OLLAMA_API_BASE": "http://ollama:11434"})
+    tags = [{"name": "qwen2.5:7b"}, {"name": "phi4-mini:latest"}, {"name": "mystery:1b"}]
+    await registry.discover_ollama(transport=_ollama_transport(tags))
+    licences = {m.id: m.licence for m in registry.all() if m.provider == "ollama"}
+    assert licences["ollama_chat/qwen2.5:7b"] == "Apache-2.0"
+    assert licences["ollama_chat/phi4-mini"] == "MIT"
+    assert licences["ollama_chat/mystery:1b"] is None  # no licence text: unknown
+    assert licences["ollama_chat/llama3.2"] == "llama3.2"  # seeded
+    verdicts = {
+        m.id: registry.training_verdict(m) for m in registry.all() if m.provider == "ollama"
+    }
+    assert verdicts["ollama_chat/qwen2.5:7b"] == verdicts["ollama_chat/phi4-mini"] == "yes"
+    assert verdicts["ollama_chat/llama3.2"] == verdicts["ollama_chat/mystery:1b"] == "unclear"

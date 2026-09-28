@@ -226,6 +226,9 @@ class Pipeline:
                 local_only=o.local_only or o.mode == "private",
                 allow_providers=o.allow_providers,
                 access=o.access,
+                no_logging=o.no_logging,
+                training_only=o.training_only,
+                explicit=True,
             )
             if reason:
                 message = f"{o.model} is unavailable: {reason}"
@@ -365,6 +368,8 @@ class Pipeline:
             access=o.access,
             exclude=exclude,
             reserve=o.quota_reserve,
+            no_logging=o.no_logging,
+            training_only=o.training_only,
         )
 
     def _slots(self, ranked: list[Candidate], count: int) -> list[list[Candidate]]:
@@ -529,6 +534,8 @@ class Pipeline:
         if gradable and self._want_judge():
             families = {self._family(a.model) for a in gradable}
             ranked = self._rank("check", exclude=[a.model for a in gradable]).candidates
+            # Previews and last-resort routers never judge.
+            ranked = [c for c in ranked if not (c.model.preview or c.model.fallback_only)]
             other = [c for c in ranked if c.model.family not in families]
             judge_ranked = other or ranked
             if self.requests_left() <= 0:
@@ -924,6 +931,8 @@ class Pipeline:
             ttft_ms=round((first - started) * 1000) if first is not None else None,
             input_tokens=sum(len(str(m.get("content", ""))) for m in messages) // 4,
             output_tokens=len(text) // 4,
+            licence=model.licence,
+            training_verdict=self.e.registry.training_verdict(model),
         )
 
     def _family(self, model_id: str) -> str:

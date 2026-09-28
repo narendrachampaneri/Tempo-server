@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS calls (
     input_tokens INTEGER,
     output_tokens INTEGER,
     score REAL,
+    licence TEXT,
+    training_verdict TEXT,
     created_at REAL
 );
 CREATE TABLE IF NOT EXISTS quota_days (
@@ -171,9 +173,14 @@ class Store:
                 self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
             # Databases created before a column existed get it added.
-            info = self._conn.execute("PRAGMA table_info(laya_compare)").fetchall()
-            if "laya_model" not in {row["name"] for row in info}:
-                self._conn.execute("ALTER TABLE laya_compare ADD COLUMN laya_model TEXT")
+            for table, column in (
+                ("laya_compare", "laya_model"),
+                ("calls", "licence"),
+                ("calls", "training_verdict"),
+            ):
+                info = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+                if column not in {row["name"] for row in info}:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
             if not _COLUMNS:
                 for table in ("questions", "decisions", "stages", "calls"):
                     info = self._conn.execute(f"PRAGMA table_info({table})").fetchall()

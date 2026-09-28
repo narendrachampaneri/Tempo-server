@@ -31,7 +31,7 @@ No keys yet? `TEMPO_ENABLE_MOCK=1 tempo serve` runs offline demo models. One of 
 | Provider | Set | Get it |
 |---|---|---|
 | Groq | `GROQ_API_KEY` | https://console.groq.com/keys |
-| Cerebras | `CEREBRAS_API_KEY` | https://cloud.cerebras.ai |
+| Cerebras (off by default: trial, needs a payment method; `TEMPO_ENABLE_PROVIDERS=cerebras`; never used for eval or collect) | `CEREBRAS_API_KEY` | https://cloud.cerebras.ai |
 | Google AI Studio | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
 | OpenRouter (free models) | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | Ollama (local) | `OLLAMA_API_BASE=http://localhost:11434` | https://ollama.com/download |
@@ -63,7 +63,7 @@ Other commands:
 | `tempo eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
 | `tempo users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
 | `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
-| `tempo collect [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable |
+| `tempo collect [--yes-only] [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable. `--yes-only` uses only models whose outputs may be training data (local Apache-2.0/MIT models) |
 | `tempo export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
 | `tempo terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
 | `tempo laya status` / `tempo laya compare` | Laya's state per decision; Laya vs rules on held-out questions |

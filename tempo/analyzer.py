@@ -138,6 +138,31 @@ _HARD = re.compile(
     r"edge cases?|production|scalab\w*|security)\b",
     _I,
 )
+# Fields that have specialist models. A specialist answers only questions in its own field.
+_DOMAINS: dict[str, re.Pattern[str]] = {
+    "finance": re.compile(
+        r"\b(financ\w*|stocks?|invest\w*|portfolio|dividends?|tax(es)?|"
+        r"loans?|mortgage|interest rates?|inflation|accounting|balance sheet|cash flow|"
+        r"revenue|ebitda|valuation|bank(ing)?|credit (score|card)|budget(ing)?|mutual funds?|"
+        r"crypto\w*|forex|gst|income tax)\b|शेयर|निवेश|कर्ज|ब्याज|રોકાણ|વ્યાજ|લોન",
+        _I,
+    ),
+    "health": re.compile(
+        r"\b(health|medical|medicine|medication|drugs?|dos(e|age)|symptoms?|diagnos\w*|disease|"
+        r"illness|infection|doctor|patient|treatment|therap\w*|vaccin\w*|blood pressure|"
+        r"diabet\w*|cancer|fever|pregnan\w*|allerg\w*|nutrition|clinical|hospital)\b|"
+        r"दवा|बीमारी|डॉक्टर|बुखार|લક્ષણ|દવા|બીમારી|ડૉક્ટર|તાવ",
+        _I,
+    ),
+}
+
+
+def detect_domain(text: str) -> str | None:
+    hits = {name: len(pattern.findall(text)) for name, pattern in _DOMAINS.items()}
+    name, count = max(hits.items(), key=lambda item: item[1])
+    return name if count else None
+
+
 _LIST_ITEM = re.compile(r"^\s*([-*•]|\d+[.)])\s+", _M)
 _JSON = re.compile(r"\bjson\b", _I)
 
@@ -264,4 +289,5 @@ def analyze(messages: Iterable[Mapping[str, Any]], task: Task | None = None) -> 
         input_tokens=input_tokens,
         est_output_tokens=est_output,
         has_images=has_images,
+        domain=detect_domain(last_user),
     )

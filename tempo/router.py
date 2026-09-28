@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 
 from tempo.health import HealthTracker
 from tempo.quota import QuotaLeft, QuotaManager
-from tempo.registry import Registry
-from tempo.types import Access, ModelInfo, QueryProfile
+from tempo.registry import Registry, expired
+from tempo.types import FLAGGED_POLICIES, Access, ModelInfo, QueryProfile
 
 SkillFn = Callable[[ModelInfo, str], float]
 
@@ -36,6 +36,8 @@ MODE_WEIGHTS: dict[str, Weights] = {
 
 # Extra hidden "thinking" tokens a reasoning model spends before answering.
 REASONING_OVERHEAD_TOKENS = 300
+# Utility lost by a model whose endpoints are degraded or under 95% success in 30 minutes.
+DEGRADED_PENALTY = 0.2
 
 
 @dataclass
@@ -111,6 +113,7 @@ def score(
         weights.quality * quality
         - weights.scarcity * scarce
         - weights.latency * _latency_penalty(latency)
+        - (DEGRADED_PENALTY if model.degraded else 0.0)
     )
     return Candidate(
         model=model,
@@ -144,14 +147,31 @@ class Router:
         allow_providers: Iterable[str] | None = None,
         access: Access | None = None,
         reserve: float = 0.0,
+        no_logging: bool = False,
+        training_only: bool = False,
+        explicit: bool = False,
     ) -> str | None:
+        """Why this model can't take the request, or None. ``explicit``: the caller asked for
+        this model by name, so a specialist may answer outside its field."""
         provider = self.registry.providers[model.provider]
+        if not model.chat_capable:
+            return f"not a chat model ({model.type})"
         if not self.registry.is_configured(model.provider, access):
             return "provider not configured"
         if model.installed is False:
             return "not installed"
         if model.listed is False:
             return "no longer offered"
+        if model.endpoints == 0 and not model.fallback_only:
+            return "no endpoints serving it"
+        if expired(model.expires):
+            return "expired"
+        if model.domain and model.domain != profile.domain and not explicit:
+            return f"{model.domain} specialist; question is not about {model.domain}"
+        if no_logging and self.registry.data_policy(model) in FLAGGED_POLICIES:
+            return "may log or train on prompts"
+        if training_only and self.registry.training_verdict(model) != "yes":
+            return "outputs not allowed as training data"
         if local_only and not provider.local:
             return "not local"
         if allow_providers is not None and model.provider not in set(allow_providers):
@@ -200,6 +220,8 @@ class Router:
         access: Access | None = None,
         exclude: Iterable[str] = (),
         reserve: float = 0.0,
+        no_logging: bool = False,
+        training_only: bool = False,
     ) -> RouteResult:
         local_only = local_only or mode == "private"
         allowed = list(allow_providers) if allow_providers is not None else None
@@ -217,13 +239,18 @@ class Router:
                 allow_providers=allowed,
                 access=access,
                 reserve=reserve,
+                no_logging=no_logging,
+                training_only=training_only,
             )
             if reason:
                 skipped.setdefault(reason, []).append(model.id)
                 continue
             candidates.append(self.candidate(model, profile, mode, access))
 
-        candidates.sort(key=lambda c: (-c.utility, c.model.id))
+        # Stable models first, then previews, then last-resort routers; by utility within each.
+        candidates.sort(
+            key=lambda c: (c.model.fallback_only, c.model.preview, -c.utility, c.model.id)
+        )
         for index, candidate in enumerate(candidates):
             others = candidates[:index] + candidates[index + 1 :]
             candidate.why = _explain(candidate, others, profile)
@@ -241,4 +268,10 @@ def _explain(best: Candidate, others: list[Candidate], profile: QueryProfile) ->
         parts.append("most free quota")
     if not parts:
         parts.append("best balance of quality, speed and free quota")
+    if best.model.preview:
+        parts.append("preview model")
+    if best.model.fallback_only:
+        parts = ["last fallback: no other model available"]
+    if best.model.degraded:
+        parts.append("endpoints degraded")
     return ", ".join(parts)

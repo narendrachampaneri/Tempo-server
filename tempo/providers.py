@@ -217,7 +217,7 @@ class LiteLLMBackend:
         litellm = _load_litellm()
         meta = meta if meta is not None else {}
         kwargs: dict[str, Any] = {
-            "model": model.id,
+            "model": self.registry.litellm_model(model),
             "messages": list(messages),
             "stream": True,
             "timeout": self.timeout,

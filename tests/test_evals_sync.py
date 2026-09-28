@@ -196,7 +196,12 @@ def provider_lists(request: httpx.Request) -> httpx.Response:
 
 
 async def test_sync_adds_new_free_models_and_retires_missing_ones():
-    env = {"GROQ_API_KEY": "gk", "GEMINI_API_KEY": "gm", "CEREBRAS_API_KEY": "ck"}
+    env = {
+        "GROQ_API_KEY": "gk",
+        "GEMINI_API_KEY": "gm",
+        "CEREBRAS_API_KEY": "ck",
+        "TEMPO_ENABLE_PROVIDERS": "cerebras",
+    }
     registry = Registry.load(env=env)
     health = HealthTracker()
     status = await RegistrySync(registry, health, httpx.MockTransport(provider_lists)).run()
@@ -262,7 +267,7 @@ def test_guesses_use_the_providers_own_fields():
 
 
 def test_expired_models_are_skipped():
-    from tempo.sync import expired
+    from tempo.registry import expired
 
     now = 1_790_000_000  # 2026-09-21 UTC
     assert expired("2026-09-01", now) and expired("2026-09-21", now)

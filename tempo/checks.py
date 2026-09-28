@@ -1,7 +1,8 @@
 """Answer checking: is this answer good enough to stop, or does another stage need to run?
 
 Cheap heuristics run on every answer (empty, cut off, refusal, broken JSON, Python syntax,
-wrong script, repetition). An LLM judge from a different model family can add a 0-10 grade.
+an answer mostly in another language, repetition). An LLM judge from a different model
+family can add a 0-10 grade.
 Heuristic hard failures always win over a judge's grade. Code is syntax-checked, never run.
 """
 
@@ -14,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from tempo.analyzer import detect_script
+from tempo.language import mismatch as language_mismatch
 from tempo.types import QueryProfile
 
 PASS_THRESHOLD = {"fast": 0.6, "auto": 0.7, "private": 0.7, "best": 0.85}
@@ -23,12 +24,17 @@ PASS_THRESHOLD = {"fast": 0.6, "auto": 0.7, "private": 0.7, "best": 0.85}
 NO_JUDGE_CAP = 0.8
 HARD_FAIL_CAP = 0.2
 SOFT_PENALTY = 0.1
-WRONG_SCRIPT_WEIGHT = 2.0
 
 _REFUSAL = re.compile(
     r"^\s*(i'?m sorry,? but |sorry,? )?"
     r"(i (can(no|')t|am unable to|won'?t) (help|assist|provide|do that|comply)"
     r"|as an ai(?: language model)?,? i (can(no|')t|am unable))",
+    re.IGNORECASE,
+)
+# The user clearly asked for code (not just a question about code).
+_CODE_ASK = re.compile(
+    r"\b(write|writing|written|fix|fixing|fixed|implement\w*|convert\w*)\b"
+    r"|लिखो|लिखिए|लिखें|ठीक कर|बदलो|લખો|લખી|સુધારો|બદલો",
     re.IGNORECASE,
 )
 _FENCE = re.compile(r"```([\w+-]*)\n(.*?)```", re.DOTALL)
@@ -121,8 +127,9 @@ def run_heuristics(
 
     if profile.task == "code":
         blocks = [(lang.lower(), code) for lang, code in _FENCE.findall(answer)]
-        if not blocks:
-            h.warn("no code block")
+        if not blocks and _CODE_ASK.search(question):
+            # Only when the user clearly asked for code; otherwise the judge decides.
+            h.fail("asked for code but the answer has no code block")
         for lang, code in blocks:
             if lang in ("python", "py", "python3"):
                 try:
@@ -134,12 +141,9 @@ def run_heuristics(
     if len(text) < 40 and profile.est_output_tokens >= 300 and profile.task != "chat":
         h.warn("very short for this question")
 
-    wanted = detect_script(question)
-    if wanted != "latin" and profile.task != "translate" and detect_script(text) != wanted:
-        # An answer in the wrong language is a real miss, so it weighs enough to fail "auto"
-        # without a judge. Code answers are mostly Latin letters, so there it stays light.
-        weight = 1.0 if profile.task == "code" else WRONG_SCRIPT_WEIGHT
-        h.warn(f"question is in {wanted} script but the answer is not", weight)
+    wrong_language = language_mismatch(question, text)
+    if wrong_language:
+        h.fail(wrong_language)
 
     lines = [line.strip() for line in text.splitlines() if len(line.strip()) > 10]
     if lines:

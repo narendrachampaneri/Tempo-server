@@ -279,14 +279,35 @@ class ExportStats:
     sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo collect)
 
 
-def _terms(registry: Registry | None, model_id: str | None) -> str:
-    """yes / no / unclear: may this model's outputs be used for training?"""
+def _terms(registry: Registry | None, model_id: str | None, recorded: str | None = None) -> str:
+    """yes / no / unclear: may this model's outputs be used for training? Combines the verdict
+    logged with the call (it knew a local model's licence) with today's registry: "no" from
+    either wins, then "yes" from either, else unclear."""
     if registry is None or not model_id:
         return "yes"
     model = registry.get(model_id)
-    provider_id = model.provider if model else model_id.split("/")[0]
-    provider = registry.providers.get(provider_id)
-    return provider.training_on_outputs if provider else "unclear"
+    if model is not None:
+        current = registry.training_verdict(model)
+    else:
+        provider = registry.providers.get(model_id.split("/")[0])
+        current = provider.training_on_outputs if provider else "unclear"
+    verdicts = {current, recorded}
+    if "no" in verdicts:
+        return "no"
+    return "yes" if "yes" in verdicts else "unclear"
+
+
+# Questions typed by Tempo's own users (not from a `tempo collect` dataset).
+OWN_TRAFFIC = {
+    "dataset": "tempo-traffic",
+    "license": "owner's own questions (not published)",
+    "url": None,
+}
+
+
+def _licence(registry: Registry | None, model_id: str) -> str | None:
+    model = registry.get(model_id) if registry is not None else None
+    return model.licence if model is not None else None
 
 
 def build_rows(
@@ -318,9 +339,13 @@ def build_rows(
     # Every model whose output shaped the question (answers and judge grades): the labels are
     # derived from them, so their providers' terms decide whether a row may be used.
     outputs: dict[str, set[str]] = defaultdict(set)
-    for c in store.query("SELECT question_id, model FROM calls WHERE status = 'ok'"):
+    recorded: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for c in store.query(
+        "SELECT question_id, model, licence, training_verdict FROM calls WHERE status = 'ok'"
+    ):
         if c["question_id"] in questions and c["model"]:
             outputs[c["question_id"]].add(c["model"])
+            recorded[(c["question_id"], c["model"])] = (c["licence"], c["training_verdict"])
     origins = store.collect_sources()
 
     rows: list[dict[str, Any]] = []
@@ -350,8 +375,8 @@ def build_rows(
             }
             sources = sorted(outputs[question_id])
             origin = dataset_info(origins.get(question_id))
-            if origin is not None:
-                factors["source"] = origin
+            # Every row says where its question came from and under which licence.
+            factors["source"] = origin or OWN_TRAFFIC
             for d in items:
                 context = _loads(d["context"], {}) or {}
                 if group == "assess":
@@ -373,15 +398,27 @@ def build_rows(
                 }
             if not gold:
                 continue
-            verdicts = {_terms(registry, m) for m in sources if m}
+
+            def verdict(model_id: str, qid: str = question_id) -> str:
+                return _terms(registry, model_id, recorded.get((qid, model_id), (None, None))[1])
+
+            verdicts = {verdict(m) for m in sources if m}
             for model_id in sources:
-                if model_id and _terms(registry, model_id) == "unclear":
+                if model_id and verdict(model_id) == "unclear":
                     stats.unclear_terms_providers.add(model_id.split("/")[0])
             blocked = "no" in verdicts or ("unclear" in verdicts and not include_unclear)
             if check_terms and blocked:
                 stats.skipped_terms += 1
                 continue
             factors["output_models"] = sorted({m for m in sources if m})
+            factors["output_terms"] = {
+                m: {
+                    "verdict": verdict(m),
+                    "licence": recorded.get((question_id, m), (None, None))[0]
+                    or _licence(registry, m),
+                }
+                for m in factors["output_models"]
+            }
             row_id = f"{question_id}_{group}_{stage}" + (f"_{job}" if job else "")
             workflow = f"tempo_{group}"
             rows.append(

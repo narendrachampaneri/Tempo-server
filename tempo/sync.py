@@ -8,7 +8,6 @@ are added with priors guessed from their name and size until `tempo eval` measur
 
 from __future__ import annotations
 
-import datetime
 import logging
 import math
 import re
@@ -21,7 +20,7 @@ import httpx
 
 from tempo.health import HealthTracker
 from tempo.providers import KEY_REJECTED
-from tempo.registry import Registry
+from tempo.registry import Registry, expired
 from tempo.types import TASKS, ModelInfo
 
 log = logging.getLogger(__name__)
@@ -245,17 +244,6 @@ class RegistrySync:
             if model.provider == provider:
                 self.health.record_failure(model, "auth")
                 break
-
-
-def expired(date: Any, now: float) -> bool:
-    """True if an ``expiration_date`` (YYYY-MM-DD, as OpenRouter lists it) is today or earlier."""
-    if not isinstance(date, str) or not date:
-        return False
-    try:
-        day = datetime.date.fromisoformat(date[:10])
-    except ValueError:
-        return False
-    return day <= datetime.datetime.fromtimestamp(now, datetime.UTC).date()
 
 
 def key_rejected(response: httpx.Response) -> bool:

@@ -44,29 +44,86 @@ def test_hard_failures(question, answer, issue):
     assert any(i.startswith(issue) for i in result.issues)
 
 
-def test_soft_issues_lower_the_score():
-    q = "Write a Python function that reverses a string, with tests and error handling"
-    good = check(q, "```python\ndef rev(s):\n    return s[::-1]\n```")
-    no_code = check(q, "Use slicing with a negative step to reverse the string in Python.")
-    assert "no code block" in no_code.issues
-    assert no_code.score < good.score
+def test_missing_code_block_fails_only_when_code_was_clearly_asked_for():
+    prose = "Use slicing with a negative step to reverse the string in Python."
+    asked = check("Write a Python function that reverses a string", prose)
+    assert asked.hard_fail and "asked for code but the answer has no code block" in asked.issues
+    assert check("Write a Python function that reverses a string", "```python\nx = 1\n```").passed
+    # A question about code, not a request for code: the judge decides, no heuristic issue.
+    about = check("Explain how Python decorators work in a class", prose)
+    assert not about.issues and not about.hard_fail
+    gujarati = check("પાયથનમાં બે સંખ્યાઓ ઉમેરવાનું function લખો", "તમે + વાપરી શકો છો.")
+    assert gujarati.hard_fail
 
 
-def test_script_mismatch_is_flagged():
-    result = check("તમે કેમ છો? મને પાયથન વિશે કહો", "I am fine, Python is a language.")
-    assert any("gujarati script" in i for i in result.issues)
-    assert not any("script" in i for i in check("hi", "hello there friend").issues)
+@pytest.mark.parametrize(
+    ("question", "answer"),
+    [
+        # Mostly the wrong language: fails, in any language.
+        (
+            "ગુજરાતની રાજધાની કઈ છે? તેનો ઇતિહાસ જણાવો.",
+            "The capital of Gujarat is Gandhinagar, a planned city that was built near the "
+            "old town of Ahmedabad after the state was formed.",
+        ),
+        (
+            "What is the capital of France and why is it important?",
+            "La capitale de la France est Paris, et c'est une ville très importante pour "
+            "l'économie et la culture du pays.",
+        ),
+        (
+            "¿Cuál es la capital de Francia y por qué es importante?",
+            "The capital of France is Paris and it is important for the economy and the "
+            "culture of the country.",
+        ),
+        # The user asked for a language: that language is expected.
+        (
+            "Explain recursion in Hindi",
+            "Recursion is when a function calls itself to solve a smaller version of the same "
+            "problem until it reaches a base case.",
+        ),
+    ],
+)
+def test_answer_mostly_in_another_language_fails(question, answer):
+    result = check(question, answer)
+    assert result.hard_fail and not result.passed
+    assert any(i.startswith("answer is mostly in") for i in result.issues)
 
 
-def test_wrong_language_answer_fails_without_a_judge_but_code_answers_stay_light():
-    question = "ગુજરાતની રાજધાની કઈ છે?"
-    assert not check(question, "The capital of Gujarat is Gandhinagar.").passed
-    assert check(question, "ગુજરાતની રાજધાની ગાંધીનગર છે.").passed
-    code_q = "પાયથનમાં બે સંખ્યાઓ ઉમેરવાનું function લખો"
-    code_a = "```python\ndef add(a, b):\n    return a + b\n```\nThis adds two numbers."
-    code = check(code_q, code_a)
-    assert any("gujarati script" in i for i in code.issues)
-    assert code.score >= 0.7
+@pytest.mark.parametrize(
+    ("question", "answer"),
+    [
+        # Mixed language with English terms, names, numbers, links and code: passes.
+        (
+            "गुजरात की राजधानी क्या है?",
+            "गुजरात की राजधानी Gandhinagar है। यह एक planned city है और Ahmedabad के पास "
+            "है। ज़्यादा जानकारी: https://gujaratindia.gov.in",
+        ),
+        (
+            "Python में list comprehension क्या है?",
+            "List comprehension एक छोटा तरीका है list बनाने का। उदाहरण:\n```python\n"
+            "[x * x for x in range(5)]\n```\nयह हर संख्या का वर्ग देता है।",
+        ),
+        # Asked for English in a Gujarati question: English is right.
+        (
+            "ગુજરાતીમાં નહીં, answer in English: પ્રકાશસંશ્લેષણ શું છે?",
+            "Photosynthesis is the process plants use to turn light, water and carbon dioxide "
+            "into sugar and oxygen.",
+        ),
+        # A language mentioned, not requested.
+        (
+            "Why is namaste used in Hindi greetings?",
+            "Namaste is used as a respectful greeting because it acknowledges the other person.",
+        ),
+        (
+            "Translate 'Where is the station?' into Hindi",
+            "स्टेशन कहाँ है? यह वाक्य हिंदी में ऐसे लिखा जाता है।",
+        ),
+        ("hi", "hello there friend, how can I help you today?"),
+    ],
+)
+def test_mixed_or_requested_language_passes(question, answer):
+    result = check(question, answer)
+    assert not any(i.startswith("answer is mostly in") for i in result.issues), result.issues
 
 
 def test_judge_grade_combines_with_heuristics():

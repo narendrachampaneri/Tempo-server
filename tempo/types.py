@@ -21,6 +21,41 @@ TASKS: tuple[Task, ...] = (
 Mode = Literal["auto", "fast", "best", "private"]
 MODES: tuple[Mode, ...] = ("auto", "fast", "best", "private")
 
+# What a model does. Only chat-capable types ever receive a chat request.
+ModelType = Literal[
+    "chat",
+    "code",
+    "vision",
+    "speech-to-text",
+    "text-to-speech",
+    "safety",
+    "embedding",
+    "reranker",
+    "decision",
+]
+MODEL_TYPES: tuple[ModelType, ...] = (
+    "chat",
+    "code",
+    "vision",
+    "speech-to-text",
+    "text-to-speech",
+    "safety",
+    "embedding",
+    "reranker",
+    "decision",
+)
+CHAT_TYPES = frozenset({"chat", "code", "vision"})
+
+Verdict = Literal["yes", "no", "unclear"]
+# What a free tier may do with prompts: "ok" (the provider says it neither logs for improvement
+# nor trains), "may-log" (kept or logged beyond the request, e.g. to improve products),
+# "may-train" (may be used to train models), "unknown" (nothing recorded). Requests marked
+# private (privacy "no_logging") never go to "may-log" or "may-train" models.
+DataPolicy = Literal["ok", "may-log", "may-train", "unknown"]
+FLAGGED_POLICIES = frozenset({"may-log", "may-train"})
+# Model licences that allow training on the outputs of a model you run yourself.
+OPEN_LICENCES = frozenset({"Apache-2.0", "MIT"})
+
 
 class ProviderInfo(BaseModel):
     id: str
@@ -48,6 +83,25 @@ class ProviderInfo(BaseModel):
     training_terms_url: str | None = None
     training_terms_quote: str | None = None
     training_terms_checked: str | None = None  # when the quote was last checked
+    # Off unless TEMPO_ENABLE_PROVIDERS names it (Cerebras: trial credits need a payment method).
+    enabled: bool = True
+    disabled_note: str | None = None
+    # Jobs this provider must never be used for, e.g. ["eval", "collect"].
+    blocked_for: list[str] = Field(default_factory=list)
+    # Only a user's own key may be used (never a server-wide key).
+    byok_only: bool = False
+    # OpenAI-compatible base URL. {NAME} is filled from the environment (CLOUDFLARE_ACCOUNT_ID).
+    openai_base: str | None = None
+    # Public model-list URL (read without a key); when unset, listing needs a key.
+    public_models_url: str | None = None
+    shared_rpmonth: int | None = None  # requests per calendar month, shared by all models
+    free_limit_note: str | None = None  # limits Tempo cannot count itself (e.g. neurons)
+    # Where the hand-entered limits above come from, and when they were checked.
+    limits_source: str | None = None
+    limits_checked: str | None = None
+    data_policy: DataPolicy = "unknown"
+    data_policy_note: str | None = None
+    data_policy_url: str | None = None
 
     @field_validator("day_reset_tz")
     @classmethod
@@ -90,9 +144,41 @@ class ModelInfo(BaseModel):
     # None = not checked; False = the provider's model list no longer includes it.
     listed: bool | None = None
     source: str = "seed"  # "seed" (models.yaml), "sync" (provider list) or "discovered"
+    type: ModelType = "chat"
+    max_output: int | None = None
+    inputs: list[str] = Field(default_factory=lambda: ["text"])
+    tools: bool | None = None
+    # Preview / experimental / stealth models rank below stable ones and never judge.
+    preview: bool = False
+    expires: str | None = None  # YYYY-MM-DD; dropped from that day on
+    # A specialist (e.g. "finance", "health") answers only questions in its field.
+    domain: str | None = None
+    # Only used as the very last fallback (e.g. OpenRouter's own openrouter/free router).
+    fallback_only: bool = False
+    licence: str | None = None  # SPDX-style id where known ("Apache-2.0", "MIT", "llama3.2")
+    training_on_outputs: Verdict | None = None  # overrides the provider's verdict
+    data_policy: DataPolicy | None = None  # overrides the provider's policy
+    data_policy_note: str | None = None
+    limits_source: str | None = None
+    limits_checked: str | None = None
+    # Live health, from the provider's endpoint list (OpenRouter).
+    endpoints: int | None = None
+    endpoint_status: int | None = None  # worst endpoint status; below 0 means degraded
+    uptime_30m: float | None = None  # best endpoint's success rate over 30 minutes, 0-100
+    health_checked: float | None = None  # unix time of the last check
 
     def skill(self, task: str) -> float:
         return self.skills.get(task, self.strength)
+
+    @property
+    def chat_capable(self) -> bool:
+        return self.type in CHAT_TYPES
+
+    @property
+    def degraded(self) -> bool:
+        return (self.endpoint_status is not None and self.endpoint_status < 0) or (
+            self.uptime_30m is not None and self.uptime_30m < 95.0
+        )
 
 
 class QueryProfile(BaseModel):
@@ -105,6 +191,7 @@ class QueryProfile(BaseModel):
     input_tokens: int
     est_output_tokens: int
     has_images: bool = False
+    domain: str | None = None  # "finance", "health", ... when the question is in that field
 
 
 class Access(BaseModel):

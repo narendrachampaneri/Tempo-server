@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import math
 import os
 import re
+import time
 from collections.abc import Mapping
 from importlib import resources
 from pathlib import Path
@@ -13,7 +15,7 @@ from pathlib import Path
 import httpx
 import yaml
 
-from tempo.types import TASKS, Access, ModelInfo, ProviderInfo
+from tempo.types import OPEN_LICENCES, TASKS, Access, DataPolicy, ModelInfo, ProviderInfo, Verdict
 
 log = logging.getLogger(__name__)
 
@@ -71,29 +73,90 @@ class Registry:
             raise ValueError(f"Model {model.id} uses unknown provider {model.provider!r}")
         self._models.setdefault(model.id, model)
 
+    def is_enabled(self, provider_id: str) -> bool:
+        """Providers marked ``enabled: false`` run only when TEMPO_ENABLE_PROVIDERS names them."""
+        provider = self.providers[provider_id]
+        if provider.enabled:
+            return True
+        wanted = self._env.get("TEMPO_ENABLE_PROVIDERS", "")
+        return provider_id in {p.strip().lower() for p in wanted.split(",") if p.strip()}
+
     def is_configured(self, provider_id: str, access: Access | None = None) -> bool:
         provider = self.providers[provider_id]
         if provider.id == "mock":
             return True
+        if not self.is_enabled(provider_id):
+            return False
         if provider.key_env:
             if access is not None and access.user_keys.get(provider_id):
                 return True
-            return bool(self._env.get(provider.key_env, "").strip())
+            if provider.byok_only:
+                return False  # a server-wide key is never used for this provider
+            if not self._env.get(provider.key_env, "").strip():
+                return False
+            return self.openai_base(provider_id) is not None or not provider.openai_base
         if provider.base_env:
             return bool(self._env.get(provider.base_env, "").strip())
         return False
+
+    def openai_base(self, provider_id: str) -> str | None:
+        """The provider's OpenAI-compatible base URL, with {NAME} filled from the environment
+        (None when a needed variable, such as CLOUDFLARE_ACCOUNT_ID, is missing)."""
+        template = self.providers[provider_id].openai_base
+        if not template:
+            return None
+        names = re.findall(r"\{([A-Z0-9_]+)\}", template)
+        values = {name: self._env.get(name, "").strip() for name in names}
+        if any(not v for v in values.values()):
+            return None
+        return template.format(**values).rstrip("/")
 
     def credentials(self, provider_id: str, access: Access | None = None) -> dict[str, str]:
         """Keyword arguments (api_key / api_base) for calling this provider."""
         provider = self.providers[provider_id]
         creds: dict[str, str] = {}
-        if provider.key_env and self._env.get(provider.key_env, "").strip():
-            creds["api_key"] = self._env[provider.key_env].strip()
+        if provider.key_env and not provider.byok_only:
+            if self._env.get(provider.key_env, "").strip():
+                creds["api_key"] = self._env[provider.key_env].strip()
         if access is not None and access.user_keys.get(provider_id):
             creds["api_key"] = access.user_keys[provider_id]
+        base = self.openai_base(provider_id)
+        if base:
+            creds["api_base"] = base
         if provider.base_env and self._env.get(provider.base_env, "").strip():
             creds["api_base"] = self._env[provider.base_env].strip().rstrip("/")
         return creds
+
+    def litellm_model(self, model: ModelInfo) -> str:
+        """The model string LiteLLM gets: OpenAI-compatible providers use ``openai/<raw id>``."""
+        provider = self.providers.get(model.provider)
+        if provider is not None and provider.openai_base:
+            return "openai/" + model.id.removeprefix(model.provider + "/")
+        return model.id
+
+    # --- terms and data policy -----------------------------------------------
+
+    def training_verdict(self, model: ModelInfo) -> Verdict:
+        """May this model's outputs be used as training data? A model's own verdict wins; a
+        local model decides by its licence (Apache-2.0 or MIT: yes); else the provider's."""
+        if model.training_on_outputs is not None:
+            return model.training_on_outputs
+        provider = self.providers.get(model.provider)
+        if provider is not None and provider.local and model.licence:
+            return "yes" if model.licence in OPEN_LICENCES else "unclear"
+        return provider.training_on_outputs if provider else "unclear"
+
+    def data_policy(self, model: ModelInfo) -> DataPolicy:
+        if model.data_policy is not None:
+            return model.data_policy
+        provider = self.providers.get(model.provider)
+        if provider is None:
+            return "unknown"
+        return "ok" if provider.local else provider.data_policy
+
+    def blocked_for(self, provider_id: str, job: str) -> bool:
+        provider = self.providers.get(provider_id)
+        return provider is not None and job in provider.blocked_for
 
     # --- Ollama discovery ----------------------------------------------------
 
@@ -118,7 +181,8 @@ class Registry:
 
         installed: set[str] = set()
         for tag in tags:
-            name = _strip_latest(str(tag.get("name") or tag.get("model") or ""))
+            raw_name = str(tag.get("name") or tag.get("model") or "")
+            name = _strip_latest(raw_name)
             if not name or "embed" in name.lower():
                 continue
             model_id = f"ollama_chat/{name}"
@@ -126,11 +190,53 @@ class Registry:
             if model_id not in self._models:
                 details = tag.get("details") or {}
                 self._models[model_id] = _ollama_model_from_tag(model_id, name, details)
+            model = self._models[model_id]
+            if model.licence is None:
+                model.licence = await _ollama_licence(base, raw_name, transport)
 
         for model in self._models.values():
             if model.provider == "ollama":
                 model.installed = model.id in installed
         return len(installed)
+
+
+# First lines of licence texts Ollama models ship with -> an SPDX-style id. Anything else is
+# recorded as "other", which does not count as open for training.
+_LICENCE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"apache license[,\s]*version 2\.0|\bapache-2\.0\b", "Apache-2.0"),
+    (r"^\s*(the )?mit license|permission is hereby granted, free of charge", "MIT"),
+    (r"llama 3\.3 community license", "llama3.3"),
+    (r"llama 3\.2 community license", "llama3.2"),
+    (r"llama 3\.1 community license", "llama3.1"),
+    (r"llama (3 )?community license", "llama"),
+    (r"gemma terms of use", "gemma"),
+    (r"qwen (research )?license agreement", "qwen"),
+    (r"creative commons attribution[- ]noncommercial|cc-by-nc", "CC-BY-NC"),
+)
+
+
+def licence_id(text: str | None) -> str | None:
+    """A short licence id from a model's licence text (as ``ollama show`` prints it)."""
+    if not text or not text.strip():
+        return None
+    head = text[:3000].lower()
+    for pattern, spdx in _LICENCE_PATTERNS:
+        if re.search(pattern, head, re.MULTILINE):
+            return spdx
+    return "other"
+
+
+async def _ollama_licence(
+    base: str, name: str, transport: httpx.AsyncBaseTransport | None
+) -> str | None:
+    try:
+        async with httpx.AsyncClient(transport=transport, timeout=5.0) as client:
+            response = await client.post(f"{base}/api/show", json={"model": name})
+            response.raise_for_status()
+            return licence_id(response.json().get("license"))
+    except (httpx.HTTPError, ValueError) as exc:
+        log.debug("ollama show %s failed: %s", name, exc)
+        return None
 
 
 def _strip_latest(name: str) -> str:
@@ -167,3 +273,15 @@ def _ollama_model_from_tag(model_id: str, name: str, details: Mapping) -> ModelI
         installed=True,
         source="discovered",
     )
+
+
+def expired(date: str | None, now: float | None = None) -> bool:
+    """True if an expiry date (YYYY-MM-DD) is today or earlier, in UTC."""
+    if not isinstance(date, str) or not date:
+        return False
+    try:
+        day = datetime.date.fromisoformat(date[:10])
+    except ValueError:
+        return False
+    moment = time.time() if now is None else now
+    return day <= datetime.datetime.fromtimestamp(moment, datetime.UTC).date()
