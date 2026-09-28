@@ -139,6 +139,8 @@ Build it in three layers, cheapest first:
 2. **Embedding classifier** (milliseconds): embed the query with a small local embedding model, compare with labelled example queries per task ([semantic-router](https://github.com/aurelio-labs/semantic-router) does exactly this).
 3. **Small router LLM** (when unsure): [Arch-Router-1.5B](https://huggingface.co/katanemo/Arch-Router-1.5B) matches the query to route descriptions you write in plain English, or NVIDIA's [prompt-task-and-complexity-classifier](https://github.com/NVIDIA-AI-Blueprints/llm-router) returns task + complexity. Both run locally.
 
+**As built (Phase 2):** layers 1 and 2. The embedding classifier (`tempo/embeddings.py`) embeds the question with [fastembed](https://github.com/qdrant/fastembed) (`BAAI/bge-small-en-v1.5`, ONNX, CPU) and takes a kNN vote over 12 labelled examples per task (`tempo/data/task_examples.yaml`). It overrides the keyword rules only when the vote is clear (similarity ≥ 0.55 and ≥ 50% of the votes) and the rules were not confident. Without the `embeddings` extra, the rules run alone. Laya (§4.12) also predicts the task type, in shadow mode by default.
+
 ### 4.2 Model Registry ("who can do what?")
 
 A database row per model. It's what makes "1000+ models" manageable.
@@ -171,6 +173,8 @@ How it stays current:
 - **Probe evals**: when a new model appears, run a small fixed eval set (e.g. 50 questions per skill) in the background to fill in `skills`.
 - **Live stats**: latency, error rate and user feedback update the row continuously.
 
+**As built (Phase 2):** `tempo/models.yaml` is the seed list. `tempo/sync.py` reads each configured provider's model list every 6 hours (`TEMPO_SYNC_INTERVAL`) and on `tempo sync`. Listing models uses no generation quota, so it doubles as the health and key check. New chat models get priors guessed from size and family, and seeds that a provider stopped listing are marked "no longer offered" and skipped. `tempo eval` runs a fixed probe set (`tempo/data/evalset.yaml`, 5 questions per task, graded by rules: number, contains, JSON, Python parses). `SkillBook` (`tempo/evals.py`) blends the measured scores with the priors, then adds live judge scores and live latency from the log. Each provider also records `training_on_outputs` (`allowed`, `disallowed` or `unknown`). Dataset exports and Tempo Tune (§13) use it to decide whose outputs may become training data. Every provider is `unknown` until someone reads its terms.
+
 ### 4.3 Quota & Health Manager ("who can take a request right now?")
 
 Free tiers fail in predictable ways: 429 rate limits, daily caps, model removed. Handle them **before** calling.
@@ -180,6 +184,8 @@ Free tiers fail in predictable ways: 429 rate limits, daily caps, model removed.
 - **BYOK**: if a user has added their own Groq key, their requests use their bucket, not a shared one.
 
 The router only ever sees models where `status == healthy and quota_left > 0`.
+
+**As built (Phase 2):** `tempo/quota.py` keeps sliding one-minute and per-UTC-day counters per (provider, key, model), plus provider-wide pools where one exists (OpenRouter's `:free` models share 20/min and 50/day). Instead of Redis, the counters live in the process and daily totals are saved in SQLite, so they survive restarts. `x-ratelimit-*` headers (read through LiteLLM's hidden response headers, including on errors) correct the counters. The router skips models with no quota left and says why ("free requests used up for today"). A user's own key gets its own counters (`user:<id>`), separate from the server's key. Scarcity (few requests left today) lowers a model's score, so scarce strong models are saved for hard questions.
 
 ### 4.4 Router ("pick the best model for this query")
 
@@ -286,6 +292,8 @@ This is how Tempo decides "the model is not capable". Combine cheap signals firs
 
 Output: `confidence ∈ [0,1]` plus short notes. The threshold depends on mode (`fast` accepts 0.6, `best` wants 0.85).
 
+**As built (Phase 2):** `tempo/checks.py` runs free heuristics first: empty answer, cut off at the length limit, unclosed code fence, refusal, invalid JSON when JSON was asked for, Python that does not parse, no code block for a code task, very short answer, wrong script for the question's language, and repetition. Then a **judge** model from a different family than the writer scores the answer 1–10 and lists issues, and the two are combined into one score. The pass marks are fast 0.6, auto and private 0.7, best 0.85. Without a judge, the score is capped at 0.8 of the heuristic score. Hard failures (empty, cut off, refusal, broken code) can never pass. Code is only **parsed, not run**: sandboxed execution is still to do.
+
 ### 4.7 Synthesizer / Tempo core ("goes back to my main model")
 
 Tempo core is **your own** model identity: a system prompt, output style and a model you control.
@@ -323,6 +331,8 @@ UI rules for the window: small panel, monospace, auto-scrolls, collapsible, each
 - **Conversation memory**: recent turns verbatim, older turns summarized by a small model. The router has to account for the history's tokens when checking context windows.
 - **Sticky routing inside a conversation**: prefer the same model across turns unless the task changes, so tone and context stay consistent.
 
+**As built (Phase 2):** the semantic cache (`SemanticCache` in `tempo/embeddings.py`) reuses the classifier's embeddings. A hit needs cosine similarity ≥ 0.97, the same user and mode, a checked answer that passed, and an age under 24 hours (`TEMPO_CACHE_TTL`). Questions that depend on the current time ("today", "latest", "price", …) are never cached. The cache is in memory, so it is empty after a restart. Conversation memory and sticky routing are not built yet.
+
 ### 4.10 Learning loop
 
 ```mermaid
@@ -339,6 +349,76 @@ flowchart LR
 - Label outcomes automatically (tests, judge scores) and with users' 👍/👎.
 - Occasionally (e.g. 2% of traffic) send the query to a **second** model too and have a judge compare them. This "exploration" data is what teaches the router about models it rarely picks.
 - Retrain nightly or weekly; deploy only if it beats the current router offline **and** in an A/B test.
+
+**As built (Phase 2):** logging and labelling are done; router training is Phase 3. For every question, `tempo/store.py` (SQLite in `~/.tempo/tempo.db`, `TEMPO_DATA_DIR`) records the question, its profile, every decision (rules value, Laya's prediction, probabilities, latency, status, who decided), every stage (job, models, reason, time, quota), every call (model, attempt, time, tokens, output, error, judge score), the check results, the final answer, the stop reason, and 👍/👎 from the web page. `TEMPO_LOG=0` turns it off. `tempo export-laya` turns the log into a fine-tuning dataset for Laya (§4.12), and `tempo laya compare` measures Laya against the rules on held-out questions.
+
+### 4.11 The staged engine (built in Phase 2)
+
+Every question runs as a series of **stages**. Each stage has one job, and a stage can call several models in parallel. `tempo/pipeline.py` runs it; strategies (§4.5) only change which stages run.
+
+```mermaid
+flowchart LR
+    Q[Question] --> PL["Plan<br/>strategy, stage budget"]
+    PL --> D["Draft<br/>1 model, or 2-3 in parallel<br/>from different families"]
+    D --> C{"Check<br/>heuristics + judge"}
+    C -- passes --> F[Final answer]
+    C -- fails --> N{Budget left?}
+    N -- yes --> X["Fix · merge · polish"]
+    X --> C
+    N -- no --> F
+```
+
+| Job | What it does |
+|---|---|
+| **draft** | Writes a first answer. `single`/`cascade`: one model. `mixture`: 2–3 models from different families in parallel (`TEMPO_MAX_PARALLEL`). `decompose`: one model per part, several parts per stage, then a `combine` step. |
+| **check** | Runs the heuristics, then a judge from another family (§4.6). With parallel drafts, it judges every draft. |
+| **fix** | Another model (not the one that wrote the failing answer) rewrites the best answer using the check's issue list. |
+| **merge** | Merges the best parts of parallel drafts into one answer. |
+| **polish** | A last rewrite when only one stage is left and the answer still hasn't passed. |
+
+In a cascade, the order is draft → check → fix → check. If the fix still fails and at least 3 stages are left, the cascade escalates: 2–3 new drafts from model families not used yet, then merge → check. The `pick` decision (§4.12) chooses the model for every stage from a ranked shortlist.
+
+**When it stops.** The engine stops **as soon as an answer passes its check**, or when the stop decision says to send the answer (made by the rules, or by Laya once it has taken over). It also stops when a budget runs out, and then sends the best answer so far. A hard failure never stops early. Every question has three budgets. Server defaults come from environment variables; one question can change them from a CLI flag, the web settings panel, or the API's `tempo` field.
+
+| Budget | Default | Limit | Stop reason |
+|---|---|---|---|
+| `max_stages` | 5 (`TEMPO_MAX_STAGES`) | 50 (use 20+ for long multi-part jobs) | `budget_stages` |
+| `time_budget_s` | 60 s (`TEMPO_TIME_BUDGET`) | 600 s | `budget_time` |
+| `quota_budget` | 12 free provider requests (`TEMPO_QUOTA_BUDGET`) | 200 | `budget_quota` |
+
+Local models cost no quota. The other stop reasons are `passed`, `decided`, `polished` (the last stage was a polish, with no stage left to check it), `unchecked` (the stage budget ended before the newest answer could be checked, for example with `max_stages` 1) and `cache`.
+
+**Live replacement.** The first draft streams to the user right away. When a later stage produces a better answer, the engine sends `answer_reset` and streams the replacement. `answer_final` always carries the answer that was chosen. OpenAI clients cannot take back text, so with more than one stage `/v1/chat/completions` streams the checked final answer. It streams live only when `max_stages` is 1.
+
+**Thinking-window events per stage** (the web app, CLI and API all render the same stream):
+
+| Event | Fields |
+|---|---|
+| `plan` | strategy, max_stages, drafts, parts, time and quota budgets, reason, Laya status |
+| `stage_start` | stage number, max stages, **job**, **models**, **reason**, requests left, time left |
+| `call_start` / `call_end` / `call_error` / `fallback` | stage, model, attempt, ms, first-token ms, tokens |
+| `answer_delta` / `reasoning_delta` / `answer_reset` | stage, model, text |
+| `check` | per-answer score, pass/fail, issues, judge model |
+| `decision` | name, value used, rules value, Laya value and probability, Laya status and ms, who decided |
+| `stage_end` | stage, job, **time taken**, requests used and left, time left, **quota left today** per model |
+| `budget` | which budget ran out |
+| `answer_final`, `done` | answer, model, stage, score; totals and stop reason |
+
+### 4.12 Laya: the fast decision-maker (built in Phase 2, shadow mode)
+
+[Laya](https://github.com/NandhaKishorM/laya) (`convaiinnovations/laya`, Apache-2.0, `pip install laya`) does not write text. It answers **typed questions** about a text (choice, score, yes/no) with calibrated probabilities, in one forward pass (about 35 ms on a T4 GPU). Tempo asks it three groups of questions (`tempo/laya_decider.py`):
+
+| When | Group | Decisions | Type |
+|---|---|---|---|
+| Before stage 1 | `plan` | `task_type` (8 tasks), `difficulty` (4 levels), `strategy` (single/cascade/mixture/decompose), `stage_budget` (2/3/5/8+) | choice, score |
+| After each check | `assess` | `quality` (5 levels), `should_stop` (send now / keep improving) | score, two-option choice |
+| Before a stage | `pick` | `next_model` from a shortlist of **at most 10** ranked candidates (Laya gets weak with many options) | choice |
+
+- **Short context.** The English checkpoint reads 512 tokens (about 320 for the state), so Tempo sends the question (first 700 characters) and a trimmed answer (the first 500 and last 150 characters), not the whole conversation.
+- **In-process, optional.** `pip install -e ".[laya]"`, then `from laya import Router; Router(preload=True)` on one worker thread. `laya-serve` is not used, because its default port 8000 is Tempo's own. `TEMPO_LAYA=auto` loads Laya when it is installed, `on` also loads it for one-shot CLI runs, and `off` disables it. `TEMPO_LAYA_DEVICE` picks the device (for example `cuda`).
+- **Shadow mode first.** Base checkpoints are near-random on new typed decisions until fine-tuned. By default Laya predicts, the rules decide, and both are logged. `TEMPO_LAYA_TAKEOVER` sets each decision's mode: `shadow`, `laya`, or `auto`. `auto` hands a decision to Laya only once `tempo laya compare` shows it beating the rules on at least 50 held-out rows. Example: `TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto"`. Even after a takeover, Laya's answer is used only if its confidence is at least `TEMPO_LAYA_MIN_CONFIDENCE` (0.6).
+- **Fallback.** If Laya is missing, fails to load, errors, is busy, or takes longer than `TEMPO_LAYA_TIMEOUT_MS` (200 ms), the rules decide and the reason is logged (`missing`, `error`, `busy`, `timeout`). A prediction that timed out keeps running (up to 4 at once) and is logged as `late` when it finishes, so shadow logs stay complete on slow hardware. On a CPU, one group took 0.4–1.2 s in testing, so on CPU Laya only runs in shadow mode. Taking over needs a GPU.
+- **Tuning loop.** `tempo export-laya` writes `train.jsonl` / `test.jsonl` in the typed-decisions format that Laya's official notebook (`notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`) loads with `load_dataset("json", …)`. The columns are `id`, `workflow`, `split`, `state`, `questions`, `gold`, `factors`, `label_agreement` and `n_questions`. Most labels come from **outcomes**, not from the rules. `task_type` comes from the analyzer (keyword rules plus embeddings). `difficulty`, `strategy` and `stage_budget` come from how many stages the answer really needed. `quality` comes from the judge, adjusted by 👍/👎. `should_stop` is whether later stages actually improved the answer. `next_model` comes from judged comparisons on the same stage, or from hindsight. Rows containing text from providers marked `training_on_outputs: disallowed` are left out, and `--strict` also drops `unknown`. The notebook's own preprocessing was run on an export and built every item, with the longest sequence at 182 of 512 tokens. After fine-tuning, set `TEMPO_LAYA_MODEL` to the new checkpoint (a local folder or Hub repo). It then answers every decision and is the only checkpoint loaded. Collect a few hundred questions in shadow mode, run `tempo laya compare`, and set the decisions that win to `auto`. Each prediction is logged with its checkpoint, so the comparison and the `auto` switch only count predictions from the checkpoint that is loaded now.
 
 ---
 
@@ -506,7 +586,7 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 
 ## 10. Proposed repository layout
 
-Phase 1 keeps a flat `tempo/` package (one module per component; see the README). It will grow into this layout as the later phases land.
+Phases 1 and 2 keep a flat `tempo/` package with one module per component (see the README): `pipeline.py` (staged engine), `checks.py`, `prompts.py`, `quota.py`, `laya_decider.py`, `embeddings.py`, `evals.py`, `sync.py`, `accounts.py`, `store.py` and `tuning.py` were added in Phase 2. The package will grow into this layout as the later phases land.
 
 ```
 tempo-server/
@@ -539,9 +619,10 @@ tempo-server/
 | Phase | Scope | Done when |
 |---|---|---|
 | **1. MVP** ✅ done | FastAPI + LiteLLM with 5 sources (Groq, Cerebras, Google AI Studio, OpenRouter free, Ollama with auto-discovery). Rule-based analyzer, G1 router, fallbacks with cool-downs, SSE trace, CLI, web app, OpenAI-compatible API. | You type a question in CLI or web, see which model was picked and why, the answer streams, and a provider failure falls back automatically. |
-| **2. Smart** (3–4 weeks) | Embedding classifier in the analyzer (moved from Phase 1), registry auto-sync + health checks, quota manager, verifier, cascade + MoA, semantic cache, BYOK key vault, usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
-| **3. Learning** (4–6 weeks) | Trace logging with consent, judge labelling, feedback buttons, kNN then two-tower router, Arch-Router for user-defined routes, A/B framework. | Learned router beats G1 rules on your eval set at equal or lower quota use. |
-| **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (Whisper, vision), self-hosted Tempo core, GraphRouter, LoRA fine-tune of Tempo core. | External developers use Tempo as a model or tool in their own apps. |
+| **2. Smart** ✅ done | Staged engine (draft → check → fix → merge/polish, parallel models per stage, early stop, stage/time/quota budgets, live replacement). Quota manager, answer checker, cascade, mixture, decompose. Embedding classifier, semantic cache. Measured skill scores, registry auto-sync and health checks. BYOK key vault with users. Laya in shadow mode at every stage, full logging for tuning, Laya dataset export and comparison. Usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
+| **3. Learning** (4–6 weeks) | Consent and PII scrubbing for logs. Fine-tune Laya on the exported logs and let it take over the decisions where it wins. kNN, then two-tower routers trained on judged outcomes. Exploration traffic, Arch-Router for user-defined routes, A/B framework. Sandboxed code execution in the checker. | Learned router beats G1 rules on your eval set at equal or lower quota use. |
+| **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (Whisper, vision), self-hosted Tempo core, GraphRouter, LoRA fine-tune of Tempo core. Shared state (Redis) so several servers share quota counters and the cache. | External developers use Tempo as a model or tool in their own apps. |
+| **5. Tempo Tune** (roadmap only, see §13) | A user describes a scenario in plain English. Tempo builds and checks a labelled dataset with stronger models, fine-tunes a Laya checkpoint (decision scenarios) or a small open model with LoRA (writing scenarios), and registers the result as a specialist the router can pick. Many LoRA adapters are served on one shared base model, and the tuned models are available through the API, MCP server and SDK. | A user goes from a one-paragraph scenario to a tuned specialist that beats the general models on that scenario's held-out set, without writing code. |
 
 ---
 
@@ -555,3 +636,43 @@ tempo-server/
 | p50 / p95 latency, time to first token | Users feel this first |
 | Fallback rate, 429 rate, quota exhaustion events per provider | Health of the free-tier strategy |
 | Cost per answer (for paid/BYOK keys) and free quota used per answer | Sustainability |
+
+---
+
+## 13. Tempo Tune (roadmap only, not built yet)
+
+Tempo Tune turns a plain-English description into a small tuned model that Tempo can route to. It builds on the Phase 2 logging and Laya export, and it depends on the Phase 4 MCP server and SDK to reach other users.
+
+```mermaid
+flowchart LR
+    S["Scenario in plain English<br/>'Classify support tickets as<br/>billing, bug or feature request'"] --> K{Kind of scenario}
+    K -- "decide: classify, score, yes/no" --> DL[Laya typed questions]
+    K -- "write: replies, summaries, rewrites" --> WL[Instruction pairs]
+    DL --> G["Build dataset<br/>strong models write examples + labels<br/>only terms-allowed providers"]
+    WL --> G
+    G --> V["Check dataset<br/>judge from another family,<br/>agreement, dedupe, held-out split"]
+    V --> T1["Fine-tune a Laya checkpoint"]
+    V --> T2["LoRA on a small open model"]
+    T1 --> E{"Beats general models<br/>on held-out set?"}
+    T2 --> E
+    E -- yes --> R["Register specialist<br/>in the registry"]
+    E -- no --> B[Report why, suggest more data]
+    R --> U["Router picks it · API · MCP · SDK"]
+```
+
+**1. Describe the scenario.** The user writes a paragraph, for example "Classify incoming support tickets as billing, bug or feature request" or "Reply to customer reviews in our brand voice", with optional example inputs and a few labelled examples. Tempo turns it into a spec: the kind of scenario (**decision** or **writing**), the labels or output format, what counts as correct, and 5–10 seed examples for the user to confirm.
+
+**2. Build a labelled dataset with stronger models.** The staged engine in `best` mode generates varied inputs from the seeds (different lengths, tones, edge cases, languages), then labels or answers each one.
+- Every item goes through the checker. Labels need two models from different families to agree, or a judge to confirm. Near-duplicates are removed (by embedding), the labels are balanced, and a held-out test split is kept aside before any training.
+- **Terms of use come first.** Training data is generated only with models whose provider is marked `training_on_outputs: allowed` in the registry (§4.2), and whose model licence also allows it. Each dataset records which provider and model produced every item and under which recorded terms, so a dataset can be rebuilt without a provider if its terms change. Local open-weight models with permissive licences are the default generators. `unknown` providers are never used for Tempo Tune; this is stricter than `tempo export-laya`, which only warns about them.
+
+**3. Fine-tune.**
+- **Decision scenarios** (classify, score, yes/no) become Laya typed questions (`choice`, `score`, `noul`) and are trained with the same notebook format that `tempo export-laya` already produces. The result is a small fast checkpoint that returns calibrated probabilities.
+- **Writing scenarios** get a LoRA adapter on a small open model (for example a 1–8B Qwen, Gemma or Llama that allows fine-tuning), trained with a standard SFT recipe (for example PEFT or Unsloth) on instruction pairs.
+- Training runs as a background job: on the user's own GPU, on a rented GPU, or on a free notebook such as the Kaggle 2×T4 one Laya's notebook targets. Tempo stores the adapter or checkpoint, the dataset version and the evaluation results together.
+
+**4. Evaluate and register.** The tuned model is compared on the held-out split against the general models the router would otherwise pick. It is registered only if it wins, or ties at a lower cost or latency. A registered specialist becomes a registry row with `kind: specialist`, the scenario's description and its embedding, its measured score, its owner, and who may use it (private, a team, or public). The analyzer matches new questions against scenario descriptions (the same way it matches task examples), so the router can choose the specialist and fall back to general models when it is unavailable or unsure.
+
+**5. Serve many adapters cheaply.** All writing specialists built on the same base model share **one** copy of the base weights. The adapter is chosen per request, with multi-LoRA serving (for example vLLM's LoRA support or LoRAX), so hundreds of specialists cost little more memory than one. Laya specialists are small enough to keep several in memory. Rarely used adapters load on demand and are unloaded when idle.
+
+**6. Use it anywhere.** Specialists appear in `/v1/models` and can be called by id (for example `tune/<owner>/<name>`) through the OpenAI-compatible API, as MCP tools (one tool per specialist, with the scenario description as the tool description), and through the SDK. The owner's settings decide who else may use them, and usage counts toward the owner's quota.

@@ -82,6 +82,8 @@ Source: the auto-generated list from `cheahjs/free-llm-api-resources` (the origi
 | [HF Inference Providers](https://huggingface.co/docs/inference-providers/en/index) | $0.10/month credit | Anything served by partners |
 | [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) | $5/month credit | Multi-provider |
 
+> **These lists change within weeks.** During Phase 2 (late September 2026), OpenRouter's live `/models` listing no longer included several `:free` models that were seeded in Phase 1. Tempo's registry now carries `nemotron-3-super-120b-a12b:free`, `gemma-4-31b-it:free` and `qwen3.8-27b:free`. `tempo sync` (and the server every 6 hours) reads each provider's live model list, adds new chat models, and marks seeded models that a provider stopped listing as "no longer offered", so the router skips them.
+
 Trial credits (one-time): Fireworks ($1), SambaNova ($5 / 3 months), Scaleway (1M tokens), Alibaba Model Studio (1M tokens per model), plus Baseten, Nebius, Novita, AI21, Upstage, NLP Cloud, Modal, Inference.net, Hyperbolic.
 
 ### 4.3 Self-hosted open-weight models (no limits except hardware)
