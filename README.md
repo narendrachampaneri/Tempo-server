@@ -168,7 +168,7 @@ All optional; put them in `.env` or the environment.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 223 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
+pytest          # 229 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
                 # fallback and timeout, quota budgets and the event stream; some tests make real
                 # LiteLLM calls against a local fake provider server
 ruff check . && ruff format --check .
@@ -176,5 +176,7 @@ ruff check . && ruff format --check .
 
 ## Documents
 
+- [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
+- [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
 - [docs/RESEARCH.md](docs/RESEARCH.md): existing GitHub projects (routers, gateways, model-mixing methods), the free LLM API providers and their limits, and what to avoid.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the full design: components, request lifecycle, the staged engine, Laya, thinking-window events, the neural router, using Tempo as a skill (API / MCP / CLI), security, tech stack, the roadmap and the planned **Tempo Tune** phase.
