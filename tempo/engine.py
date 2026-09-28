@@ -31,7 +31,7 @@ from tempo.quota import QuotaManager
 from tempo.registry import Registry
 from tempo.router import Router, RouteResult
 from tempo.store import Store
-from tempo.sync import RegistrySync
+from tempo.sync import CATALOG_FILE, RegistrySync, load_catalog, save_catalog
 from tempo.types import MODES, Access, ModelInfo, QueryProfile
 
 if TYPE_CHECKING:
@@ -181,6 +181,8 @@ class Engine:
         CLI run loads the classifier before answering, skips Laya unless TEMPO_LAYA=on, and
         does not sync.
         """
+        if self.settings.data_dir is not None:
+            load_catalog(self.registry, self.settings.data_dir / CATALOG_FILE)
         await self.registry.discover_ollama()
         loop = asyncio.get_running_loop()
         if self.laya is not None:
@@ -206,13 +208,18 @@ class Engine:
         while True:
             try:
                 if time.monotonic() - last_full >= self.settings.sync_interval_s:
-                    await self.sync.run()
+                    status = await self.sync.run()
                     last_full = time.monotonic()
+                    self.save_catalog(status)
                 else:  # between full syncs: OpenRouter endpoint health only
                     await self.sync.check_openrouter_health()
             except Exception:  # a sync problem must never take the server down
                 log.exception("registry sync failed")
             await asyncio.sleep(min(self.settings.sync_interval_s, HEALTH_EVERY_S))
+
+    def save_catalog(self, status: dict[str, Any]) -> None:
+        if self.settings.data_dir is not None:
+            save_catalog(self.registry, status, self.settings.data_dir / CATALOG_FILE)
 
     def access_for(self, user_id: str) -> Access:
         """The credentials a user's requests run with: their own keys, then the server's."""

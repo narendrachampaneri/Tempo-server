@@ -194,3 +194,25 @@ async def test_rate_limit_headers_reach_the_quota_manager(env):
     left = quota.left(model)
     assert left.rpd == 42  # Groq's request header counts the day
     assert left.tpm == 900
+
+
+async def test_openai_compatible_provider_route(env, base_url):
+    """New providers (Cloudflare, NVIDIA, Cohere, Mistral, Zen) go through LiteLLM's
+    OpenAI-compatible route: model "openai/<raw id>", the provider's base URL and its key."""
+    from tempo.types import ModelInfo, ProviderInfo
+
+    provider = ProviderInfo(
+        id="compat",
+        label="Compat",
+        key_env="COMPAT_KEY",
+        openai_base="{COMPAT_BASE}/openai/v1",
+    )
+    model = ModelInfo(id="compat/@cf/meta/llama-x", provider="compat", name="x")
+    registry = Registry(
+        {"compat": provider},
+        [model],
+        env={"COMPAT_KEY": "placeholder-key", "COMPAT_BASE": base_url},
+    )
+    deltas = await _collect(LiteLLMBackend(registry, timeout=10), model.id, registry)
+    assert "".join(t for k, t in deltas if k == "answer") == "Hello from @cf/meta/llama-x"
+    assert seen[-1] == {"model": "@cf/meta/llama-x", "auth": "Bearer placeholder-key"}

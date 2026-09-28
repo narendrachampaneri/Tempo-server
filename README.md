@@ -34,7 +34,16 @@ No keys yet? `TEMPO_ENABLE_MOCK=1 tempo serve` runs offline demo models. One of 
 | Cerebras (off by default: trial, needs a payment method; `TEMPO_ENABLE_PROVIDERS=cerebras`; never used for eval or collect) | `CEREBRAS_API_KEY` | https://cloud.cerebras.ai |
 | Google AI Studio | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
 | OpenRouter (free models) | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
+| Cloudflare Workers AI (10,000 neurons/day) | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com/profile/api-tokens |
+| Cohere (trial key: 1,000 calls/month; never used for eval) | `COHERE_API_KEY` | https://dashboard.cohere.com/api-keys |
+| Mistral (free plan; limits read from response headers) | `MISTRAL_API_KEY` | https://console.mistral.ai/api-keys |
+| NVIDIA API catalog (off by default: trial terms allow testing and evaluation only; `TEMPO_ENABLE_PROVIDERS=nvidia`) | `NVIDIA_API_KEY` | https://build.nvidia.com |
+| OpenCode Zen (free models only, each user's own key; never a server key) | added per user with `tempo keys add opencode` | https://opencode.ai/auth |
 | Ollama (local) | `OLLAMA_API_BASE=http://localhost:11434` | https://ollama.com/download |
+
+GitHub Models is not offered: GitHub retired it on 30 July 2026 ([docs](https://docs.github.com/en/github-models), checked 2026-09-28).
+
+Model lists are read live from each provider (public lists without a key: OpenRouter, NVIDIA, OpenCode Zen). Every model gets a type (chat, code, vision, speech-to-text, text-to-speech, safety, embedding, reranker, decision); only chat-capable ones get chat requests. `tempo terms` shows each provider's training verdict and what its free tier may do with prompts; `tempo terms --check` re-reads the terms pages and reports quotes that changed (`pip install -e ".[terms]"` for NVIDIA's PDF).
 
 Installed Ollama models are discovered automatically at startup. The seed model list, skill priors, free limits and each provider's training terms live in [`tempo/models.yaml`](tempo/models.yaml); set `TEMPO_MODELS_FILE` to use your own copy. The server refreshes each provider's model list every 6 hours, and `tempo sync` does it on demand.
 

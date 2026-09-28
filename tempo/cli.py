@@ -369,6 +369,7 @@ def sync() -> None:
 
     engine = _engine()
     status = asyncio.run(RegistrySync(engine.registry, engine.health).run())
+    engine.save_catalog(status)
     table = Table(title="Provider sync", header_style="bold")
     for column in ("provider", "status", "models listed", "new", "no longer listed"):
         table.add_column(column)
@@ -513,25 +514,54 @@ def collect_data(
 
 
 @app.command()
-def terms() -> None:
-    """May each provider's outputs be used to train models? Verdict, link and exact sentences."""
+def terms(
+    check: Annotated[
+        bool,
+        typer.Option(
+            "--check",
+            help="Fetch each provider's terms page and check the quoted sentences are still there.",
+        ),
+    ] = False,
+) -> None:
+    """May each provider's outputs be used to train models? Verdict, link and exact sentences,
+    and what each free tier may do with prompts (data policy)."""
     from tempo.registry import Registry
 
     registry = Registry.load()
+    if check:
+        from tempo.terms import check as check_terms
+
+        colours = {"ok": "green", "changed": "red", "unreachable": "yellow", "unchecked": "dim"}
+        for r in asyncio.run(check_terms(registry)):
+            c = colours[r.status]
+            out.print(f"[bold]{r.provider}[/bold]: [{c}]{r.status}[/{c}] ({r.found} quotes found)")
+            out.print(f"  {r.url}", markup=False)
+            for quote in r.missing:
+                out.print(f"  missing: {quote[:140]}", markup=False)
+            if r.note:
+                out.print(f"  {r.note}", markup=False)
+        return
     colour = {"yes": "green", "no": "red", "unclear": "yellow"}
     for provider in registry.providers.values():
         verdict = provider.training_on_outputs
         checked = provider.training_terms_checked
         checked = f" (checked {checked})" if checked else ""
+        state = "" if provider.enabled else " [dim](off by default)[/dim]"
         out.print(
-            f"[bold]{provider.label}[/bold]: [{colour[verdict]}]{verdict}[/{colour[verdict]}]"
-            + checked
+            f"[bold]{provider.label}[/bold]{state}: "
+            f"[{colour[verdict]}]{verdict}[/{colour[verdict]}]" + checked
         )
         if provider.training_terms_url:
             out.print(f"  {provider.training_terms_url}", markup=False)
         quote = provider.training_terms_quote or "No terms recorded yet."
         for line in quote.strip().splitlines():
             out.print(f"  {line}", markup=False)
+        if provider.data_policy != "unknown" or provider.data_policy_note:
+            out.print(f"  Data policy: {provider.data_policy}", markup=False)
+            if provider.data_policy_note:
+                out.print(f"    {provider.data_policy_note}", markup=False)
+        if provider.blocked_for:
+            out.print(f"  Never used for: {', '.join(provider.blocked_for)}", markup=False)
         out.print()
 
 

@@ -81,6 +81,9 @@ providers:
     # checked 2026-09-28), so the per-model numbers below come from this generated list:
     limits_source: https://github.com/raullenchai/free-llm-api-resources
     limits_checked: "2026-09-28"
+    data_policy: may-train
+    data_policy_url: https://ai.google.dev/gemini-api/terms
+    data_policy_note: "When you use Unpaid Services, including, for example, Google AI Studio and the unpaid quota on Gemini API, Google uses the content you submit to the Services and any generated responses to provide, improve, and develop Google products and services and machine learning technologies (checked 2026-09-28)."
     training_on_outputs: "no"
     training_terms_url: https://ai.google.dev/gemini-api/terms
     training_terms_checked: "2026-09-28; terms last updated 2026-04-28"
@@ -107,6 +110,105 @@ providers:
       "Your ownership rights in the Output are set forth in the Model Terms for each Model you use."
       "By accessing or using any Model through the Service, you agree, and will ensure that your Authorized Users and customers agree, to comply with the applicable terms for each Model (" Model Terms ")"
       Restriction: "access the Site or Service for purposes of reselling API access to Models or otherwise developing a competing service"
+  cloudflare:
+    label: Cloudflare Workers AI
+    key_env: CLOUDFLARE_API_TOKEN
+    # CLOUDFLARE_ACCOUNT_ID is a normal environment variable (not a secret).
+    openai_base: https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    signup_url: https://dash.cloudflare.com/profile/api-tokens
+    free_limit_note: "10,000 Neurons a day free, shared by all models, reset at 00:00 UTC; text generation 300 requests/min per model. Neurons are counted by Cloudflare, so Tempo reacts to its limit errors instead of counting them."
+    limits_source: https://developers.cloudflare.com/workers-ai/platform/pricing/ and https://developers.cloudflare.com/workers-ai/platform/limits/
+    limits_checked: "2026-09-28"
+    data_policy: ok
+    data_policy_url: https://developers.cloudflare.com/workers-ai/platform/data-usage/
+    data_policy_note: "Cloudflare does not use your Customer Content to (1) train any AI models made available on Workers AI or (2) improve any Cloudflare or third-party services, and would not do so unless we received your explicit consent. (page last updated Apr 21, 2026; checked 2026-09-28)"
+    training_on_outputs: "unclear"
+    training_terms_url: https://developers.cloudflare.com/workers-ai/platform/data-usage/
+    training_terms_checked: "2026-09-28; page last updated Apr 21, 2026"
+    training_terms_quote: |
+      Outputs are the customer's, and each model's own licence applies; nothing says outputs may be used to train other models, so Tempo treats this as unclear:
+      "Your inputs (e.g., text prompts, image submissions, audio files, etc.), outputs (e.g., generated text/images, translations, etc.), embeddings, and training data constitute Customer Content. For Workers AI: You own, and are responsible for, all of your Customer Content."
+      "The models constitute Third-Party Services and may be subject to open source or other license terms that apply between you and the model provider. Be sure to review the license terms applicable to each model (if any)."
+  nvidia:
+    label: NVIDIA API catalog (trial)
+    key_env: NVIDIA_API_KEY
+    openai_base: https://integrate.api.nvidia.com/v1
+    signup_url: https://build.nvidia.com
+    free_tier: trial
+    free_tier_note: "Trial terms: internal testing and evaluation only, not production. Off by default (TEMPO_ENABLE_PROVIDERS=nvidia)."
+    enabled: false
+    disabled_note: "NVIDIA's trial terms allow internal testing and evaluation only, not production. Off by default (TEMPO_ENABLE_PROVIDERS=nvidia)."
+    blocked_for: [collect]
+    shared_rpm: 40
+    limits_source: https://github.com/raullenchai/free-llm-api-resources (NVIDIA NIM, 40 requests/min; NVIDIA publishes no per-model free limits)
+    limits_checked: "2026-09-28"
+    data_policy: may-train
+    data_policy_url: https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf
+    data_policy_note: "3.3: NVIDIA will collect ... (iv) User Content and Generated Content to improve NVIDIA products and services, including AI models. Your use of the API Services will be logged for security, fraud or abuse monitoring (terms v. September 19, 2025; checked 2026-09-28)."
+    training_on_outputs: "no"
+    training_terms_url: https://assets.ngc.nvidia.com/products/api-catalog/legal/NVIDIA%20API%20Trial%20Terms%20of%20Service.pdf
+    training_terms_checked: "2026-09-28; terms version September 19, 2025"
+    training_terms_quote: |
+      Generated content may not be used to build competing services, and the trial is for testing and evaluation only:
+      4.12: "You will not use (or allow others to use) the API Service including Generated Content to develop or improve products or services that compete with the API Service."
+      1.4: "Unless you purchase a Subscription from NVIDIA or a Service Provider (as applicable), you may only use the API Service for internal testing and evaluation purposes, not in production."
+  cohere:
+    label: Cohere (trial key)
+    key_env: COHERE_API_KEY
+    openai_base: https://api.cohere.ai/compatibility/v1
+    signup_url: https://dashboard.cohere.com/api-keys
+    shared_rpmonth: 1000
+    free_tier_note: "Trial (evaluation) key: 1,000 API calls a month, 20 requests/min per chat model. Cohere's terms forbid benchmarking, so tempo eval never uses it."
+    blocked_for: [eval, collect]
+    limits_source: https://docs.cohere.com/docs/rate-limits
+    limits_checked: "2026-09-28"
+    data_policy: may-train
+    data_policy_url: https://cohere.com/terms-of-use
+    data_policy_note: "Cohere may use API data to 'IMPROVE AND ENHANCE THE COHERE SOLUTION AND OUR OTHER OFFERINGS AND BENCHMARK THE FOREGOING, INCLUDING BY SHARING API DATA AND FINETUNING DATA WITH THIRD PARTIES' (terms last updated September 7, 2022; checked 2026-09-28)."
+    training_on_outputs: "no"
+    training_terms_url: https://cohere.com/terms-of-use
+    training_terms_checked: "2026-09-28; terms last updated September 7, 2022"
+    training_terms_quote: |
+      Content received from Cohere may not be used to build a similar or competing product, and benchmarking is forbidden:
+      "use the Cohere Solution or any Content that You receive through or from the Cohere Solution for the purpose of building a similar or competitive product or service"
+      "YOU MAY NOT ACCESS THE COHERE SOLUTION FOR PURPOSES OF MONITORING AVAILABILITY, PERFORMANCE OR FUNCTIONALITY, OR FOR ANY OTHER BENCHMARKING OR COMPETITIVE PURPOSES."
+  mistral:
+    label: Mistral (free plan)
+    key_env: MISTRAL_API_KEY
+    openai_base: https://api.mistral.ai/v1
+    signup_url: https://console.mistral.ai/api-keys
+    free_limit_note: "Free-plan limits are read from each response's rate-limit headers; Mistral's docs page for them was not reachable on 2026-09-28."
+    limits_source: live response headers (x-ratelimit-*)
+    limits_checked: "2026-09-28"
+    data_policy: may-train
+    data_policy_url: https://mistral.ai/pricing
+    data_policy_note: "Pricing page, Free plan: 'Model training: Opt-out' (prompts may be used for training unless you opt out in the console; checked 2026-09-28)."
+    training_on_outputs: "unclear"
+    training_terms_url: https://legal.mistral.ai/terms/commercial-terms-of-service
+    training_terms_checked: "2026-09-28; Commercial Terms of Service effective September 25, 2026"
+    training_terms_quote: |
+      Only image outputs are restricted; nothing forbids training on text outputs, but each model's licence applies and the owner treats providers as unclear until they confirm in writing:
+      3.3: "To the extent permitted by applicable law, Customer may not use image Outputs to develop or train any image generation product that competes with a Mistral AI Product."
+      4.2: "Mistral AI will not use Customer Data or Outputs to train its artificial intelligence models except (a) when you (i) opted-in to training on a Mistral AI Product set to opt-out by default or (ii) have not opted-out of training on a Mistral AI Product set to opt-in by default"
+  opencode:
+    label: OpenCode Zen (your own key, free models only)
+    key_env: OPENCODE_API_KEY
+    byok_only: true  # only a user's own Zen key; Tempo never calls Zen's free pool without one
+    openai_base: https://opencode.ai/zen/v1
+    signup_url: https://opencode.ai/auth
+    free_tier_note: "Free models are free for a limited time. Only each user's own key is used."
+    free_limit_note: "Zen publishes no free-model rate limits; Tempo reacts to its limit errors."
+    limits_source: https://opencode.ai/docs/zen
+    limits_checked: "2026-09-28"
+    data_policy: ok
+    data_policy_url: https://opencode.ai/docs/zen
+    data_policy_note: "'Our providers follow a zero-retention policy and do not use your data for model training', except the free models listed on the page, which Tempo flags per model (checked 2026-09-28)."
+    training_on_outputs: "no"
+    training_terms_url: https://opencode.ai/legal/terms-of-service
+    training_terms_checked: "2026-09-28; Terms of Use effective Aug 15, 2026"
+    training_terms_quote: |
+      Outputs may not be used to develop competing models:
+      "uses Output to develop artificial intelligence models that compete with the Services or any Third Party Models"
   ollama:
     label: Ollama (local)
     base_env: OLLAMA_API_BASE

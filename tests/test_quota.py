@@ -114,7 +114,7 @@ def test_local_models_are_unlimited():
     quota = QuotaManager(registry, clock=Clock())
     tiny = registry.get("local/tiny")
     quota.record(tiny, tokens=10_000)
-    assert quota.left(tiny).as_dict() == {"rpm": None, "rpd": None, "tpm": None, "tpd": None}
+    assert set(quota.left(tiny).as_dict().values()) == {None}
 
 
 def test_router_skips_exhausted_models_and_uses_remaining_quota():
@@ -164,3 +164,40 @@ def test_daily_quota_resets_in_the_providers_time_zone():
     assert quota.left(model).rpd == 10
     with pytest.raises(ValueError):
         ProviderInfo(id="bad", label="Bad", day_reset_tz="Mars/Olympus")
+
+
+def test_monthly_pool_and_limits_read_from_headers(tmp_path):
+    from tempo.store import Store
+
+    providers = {
+        "month": ProviderInfo(id="month", label="Month", key_env="M", shared_rpmonth=3),
+        "hdr": ProviderInfo(id="hdr", label="Hdr", key_env="H", requests_header_window="day"),
+    }
+    models = [
+        ModelInfo(id="month/a", provider="month", name="a"),
+        ModelInfo(id="hdr/a", provider="hdr", name="a", free_rpd=50),
+    ]
+    registry = Registry(providers, models, env={"M": "x", "H": "x"})
+    clock = Clock()
+    quota = QuotaManager(registry, Store(tmp_path / "q.db"), clock=clock)
+    month = registry.get("month/a")
+    for _ in range(3):
+        quota.record(month)
+        clock.t += 86400  # spread over days: the month still adds up
+    assert quota.left(month).rpmonth == 0
+    assert quota.blocked_reason(month) == "free requests/month used up"
+
+    hdr = registry.get("hdr/a")
+    quota.observe_headers(
+        hdr,
+        "server",
+        {
+            "llm_provider-x-ratelimit-limit-requests": "14400",  # Groq: requests per day
+            "llm_provider-x-ratelimit-limit-tokens": "6000",  # tokens per minute
+            "x-ratelimit-remaining-tokens-month": "999",  # Mistral-style monthly tokens
+        },
+    )
+    assert hdr.free_rpd == 14400 and hdr.free_tpm == 6000
+    assert hdr.limits_source == "live: response headers" and hdr.limits_checked
+    assert quota.left(hdr).tpmonth == 999
+    assert quota.blocked_reason(hdr, tokens=5000) == "free tokens/month used up"

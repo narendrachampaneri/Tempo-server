@@ -15,12 +15,14 @@ down.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -255,6 +257,7 @@ ZEN_DATA_POLICY: dict[str, str] = {
     "space-bunny-free": "may-log",  # stealth (owner's rule), though Zen says zero retention
     "longcat-2.5-preview-free": "ok",  # "zero-retention policy and does not use your data"
 }
+COHERE_TRIAL_CHAT_RPM = 20
 # Free Zen models served only on /responses or /systemone, which LiteLLM's OpenAI-compatible
 # chat route can't call (same page, "Endpoints"). Jev is a decision model (typed questions).
 ZEN_NOT_CHAT_COMPLETIONS = re.compile(r"contributor-free$", re.I)
@@ -288,10 +291,12 @@ class RegistrySync:
         return template.format(**values)
 
     def wanted(self, provider: str) -> bool:
-        if provider not in self.registry.providers or not self.registry.is_enabled(provider):
+        if provider not in self.registry.providers:
             return False
         if provider in PUBLIC_LISTS:
-            return True
+            return True  # public data, read even for providers that are off (the catalog)
+        if not self.registry.is_enabled(provider):
+            return False
         return self.registry.is_configured(provider)
 
     async def run(self) -> dict[str, ProviderStatus]:
@@ -446,7 +451,7 @@ class RegistrySync:
                 tools=str(props.get("function_calling", "")).lower() == "true" or None,
                 preview=str(props.get("beta", "")).lower() == "true" or None,
                 expires=props.get("planned_deprecation_date"),
-                type=by_name if kind == "chat" and by_name != "chat" else kind,
+                type=by_name if by_name != "chat" else kind,
             )
 
     def _parse_cohere(self, provider: str, data: Any, out: dict[str, ModelInfo]) -> None:
@@ -473,6 +478,11 @@ class RegistrySync:
                 context_window=item.get("context_length"),
                 tools=bool(features & {"tools", "tool_use"}) or None,
                 type=kind,
+                # "Chat API (per model) ... Trial rate limit 20 req / min"
+                # (docs.cohere.com/docs/rate-limits, checked 2026-09-28)
+                free_rpm=COHERE_TRIAL_CHAT_RPM if kind is None else None,
+                limits_source="https://docs.cohere.com/docs/rate-limits" if kind is None else None,
+                limits_checked="2026-09-28" if kind is None else None,
             )
 
     def _parse_mistral(self, provider: str, data: Any, out: dict[str, ModelInfo]) -> None:
@@ -628,6 +638,79 @@ class RegistrySync:
 LIVE_FIELDS = frozenset(
     {"context_window", "max_output", "inputs", "tools", "expires", "reasoning", "vision"}
 )
+
+
+# --- the last synced catalog, kept in the data directory ------------------------------------
+
+CATALOG_FILE = "catalog.json"
+# Per-model fields a sync learns (seeds keep their hand-written priors otherwise).
+SAVED_FIELDS = LIVE_FIELDS | {
+    "listed",
+    "endpoints",
+    "endpoint_status",
+    "uptime_30m",
+    "health_checked",
+    "free_rpm",
+    "free_rpd",
+    "free_tpm",
+    "free_tpd",
+    "limits_source",
+    "limits_checked",
+    "licence",
+}
+
+
+def save_catalog(registry: Registry, status: dict[str, ProviderStatus], path: Path) -> None:
+    """Write what the last sync learned, so a later one-shot CLI run starts from it."""
+    models = []
+    for model in registry.all():
+        if model.provider == "mock":
+            continue
+        if model.source == "sync":
+            models.append(model.model_dump(mode="json"))
+        else:
+            models.append({"id": model.id, **{f: getattr(model, f) for f in sorted(SAVED_FIELDS)}})
+    data = {
+        "saved_at": time.time(),
+        "status": {k: v.as_dict() for k, v in status.items()},
+        "providers": {
+            p.id: {
+                "shared_rpd": p.shared_rpd,
+                "limits_source": p.limits_source,
+                "limits_checked": p.limits_checked,
+            }
+            for p in registry.providers.values()
+            if p.limits_source and p.limits_source.startswith("live:")
+        },
+        "models": models,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".part")
+    partial.write_text(json.dumps(data), encoding="utf-8")
+    partial.replace(path)
+
+
+def load_catalog(registry: Registry, path: Path) -> dict[str, Any] | None:
+    """Apply a saved catalog: synced models are added back, seeds get their live fields."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for pid, fields in (data.get("providers") or {}).items():
+        if pid in registry.providers:
+            for name, value in fields.items():
+                setattr(registry.providers[pid], name, value)
+    for item in data.get("models") or []:
+        existing = registry.get(item.get("id", ""))
+        try:
+            if existing is not None:
+                for name in SAVED_FIELDS & item.keys():
+                    setattr(existing, name, item[name])
+            elif item.get("provider") in registry.providers:
+                registry.add(ModelInfo(**item))
+        except (ValueError, TypeError) as exc:
+            log.debug("catalog entry %s skipped: %s", item.get("id"), exc)
+    return data
 
 
 def _int(value: Any) -> int | None:

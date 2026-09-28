@@ -32,6 +32,8 @@ class QuotaLeft:
     rpd: int | None = None
     tpm: int | None = None
     tpd: int | None = None
+    rpmonth: int | None = None  # requests left this calendar month (Cohere's trial key)
+    tpmonth: int | None = None  # tokens left this month, as a provider's headers report it
 
     def as_dict(self) -> dict[str, int | None]:
         return asdict(self)
@@ -78,6 +80,25 @@ class QuotaManager:
         zone = _zone(provider.day_reset_tz if provider else "UTC")
         return datetime.fromtimestamp(self._clock(), zone).strftime("%Y-%m-%d")
 
+    def _month(self, provider_id: str) -> str:
+        return self._today(provider_id)[:7]
+
+    def _month_usage(self, bucket: str) -> int:
+        """Requests this month: the persisted daily counts of this month, added up."""
+        month = self._month(self._provider_of(bucket))
+        if self.store is not None:
+            rows = self.store.query(
+                "SELECT day, requests FROM quota_days WHERE bucket = ? AND day LIKE ?",
+                (bucket, month + "-%"),
+            )
+            counts = {r["day"]: r["requests"] for r in rows}
+        else:
+            counts = {}
+        for (b, day), (requests, _) in self._day.items():
+            if b == bucket and day.startswith(month):
+                counts[day] = requests
+        return sum(counts.values())
+
     @staticmethod
     def _provider_of(bucket: str) -> str:
         return bucket.split(":", 1)[0]
@@ -107,6 +128,8 @@ class QuotaManager:
         if name in ("rpm", "tpm") and self._clock() - observed_at > MINUTE:
             return None
         if name in ("rpd", "tpd") and day != self._today(self._provider_of(bucket)):
+            return None
+        if name in ("rpmonth", "tpmonth") and day[:7] != self._month(self._provider_of(bucket)):
             return None
         return value
 
@@ -139,6 +162,13 @@ class QuotaManager:
             ),
             tpm=_min_known(minus(model.free_tpm, m_min_tok), self._header(mb, "tpm")),
             tpd=_min_known(minus(model.free_tpd, m_day_tok), self._header(mb, "tpd")),
+            rpmonth=_min_known(
+                minus(provider.shared_rpmonth, self._month_usage(pb))
+                if provider.shared_rpmonth
+                else None,
+                self._header(mb, "rpmonth"),
+            ),
+            tpmonth=self._header(mb, "tpmonth"),
         )
 
     def blocked_reason(
@@ -147,6 +177,10 @@ class QuotaManager:
         """Why this model cannot take a request of ``tokens`` now. ``reserve`` keeps that share
         of each daily free limit untouched (for background jobs such as `tempo collect`)."""
         left = self.left(model, key_id)
+        if left.rpmonth == 0:
+            return "free requests/month used up"
+        if left.tpmonth is not None and tokens > left.tpmonth:
+            return "free tokens/month used up"
         if left.rpd == 0:
             return "free requests/day used up"
         if left.tpd is not None and tokens > left.tpd:
@@ -187,29 +221,52 @@ class QuotaManager:
     def observe_headers(
         self, model: ModelInfo, key_id: str, headers: Mapping[str, str] | None
     ) -> None:
-        """Read x-ratelimit-remaining-* headers (LiteLLM prefixes them with llm_provider-)."""
+        """Read x-ratelimit-* headers (LiteLLM prefixes them with llm_provider-).
+
+        ``remaining`` headers correct the counters. ``limit`` headers are the provider's own
+        statement of the free limit: they fill in a limit the registry does not know, and
+        replace a hand-entered one (rule: limits are read live wherever a provider sends them).
+        """
         if not headers:
             return
         provider = self.registry.providers[model.provider]
-        names = {
-            "x-ratelimit-remaining-requests-day": "rpd",
-            "x-ratelimit-remaining-requests-minute": "rpm",
-            "x-ratelimit-remaining-requests": (
-                "rpd" if provider.requests_header_window == "day" else "rpm"
-            ),
-            "x-ratelimit-remaining-tokens-minute": "tpm",
-            "x-ratelimit-remaining-tokens": "tpm",
-            "x-ratelimit-remaining-tokens-day": "tpd",
+        requests = "rpd" if provider.requests_header_window == "day" else "rpm"
+        windows = {
+            "requests-day": "rpd",
+            "requests-minute": "rpm",
+            "req-minute": "rpm",
+            "requests-month": "rpmonth",
+            "req-month": "rpmonth",
+            "requests": requests,
+            "tokens-minute": "tpm",
+            "tokens": "tpm",
+            "tokens-day": "tpd",
+            "tokens-month": "tpmonth",
         }
+        limit_fields = {"rpm": "free_rpm", "rpd": "free_rpd", "tpm": "free_tpm", "tpd": "free_tpd"}
         bucket = self.model_bucket(model, key_id)
         now, day = self._clock(), self._today(model.provider)
+        learned = False
         for raw_name, raw_value in headers.items():
             name = str(raw_name).lower().removeprefix("llm_provider-")
-            kind = names.get(name)
+            if name == "ratelimitbysize-remaining":  # Mistral: tokens left this minute
+                name = "x-ratelimit-remaining-tokens-minute"
+            if not name.startswith(("x-ratelimit-remaining-", "x-ratelimit-limit-")):
+                continue
+            which, _, window = name.removeprefix("x-ratelimit-").partition("-")
+            kind = windows.get(window)
             if kind is None:
                 continue
             try:
                 value = int(float(raw_value))
             except (TypeError, ValueError):
                 continue
-            self._headers.setdefault(bucket, {})[kind] = (value, now, day)
+            if which == "remaining":
+                self._headers.setdefault(bucket, {})[kind] = (value, now, day)
+            elif kind in limit_fields and value > 0:
+                if getattr(model, limit_fields[kind]) != value:
+                    setattr(model, limit_fields[kind], value)
+                    learned = True
+        if learned:
+            model.limits_source = "live: response headers"
+            model.limits_checked = day
