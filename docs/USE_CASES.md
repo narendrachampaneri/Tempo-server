@@ -43,7 +43,7 @@ function that parses ISO-8601 durations, with tests."
 **Today:** routed as a code task; a reply without a code block fails when code was clearly asked
 for; Python that doesn't parse fails; a cascade fixes it.
 **Still needs:** running the code and its tests in the WebAssembly sandbox (so "passed" means
-the tests pass), tool calls passed through the API, conversation memory. **Phase 3** (sandbox),
+the tests pass) and conversation memory. Tool calls through the API work (step 4). **Phase 3** (sandbox),
 Phase 4 (tools).
 
 ### 2. Pull-request reviewer
@@ -111,8 +111,10 @@ questions on CPU in under a second with calibrated probabilities. **Phase 5.**
 **Example:** "Extract name, date and amount from this email as JSON."
 **Today:** extract tasks are recognised; an answer without valid JSON is a hard failure and
 gets fixed.
-**Still needs:** checking against a JSON Schema the caller sends (`response_format`), not just
-"is it JSON". **Phase 3.**
+**Today (step 4):** `response_format` with a JSON Schema is validated, and a mismatch is retried
+on another model.
+**Still needs:** measured JSON reliability per model, so the router tries the most reliable
+first. **Phase 3.**
 
 ### 10. Batch jobs
 
@@ -167,8 +169,10 @@ provider keys, and quota tracking per user.
 
 **Example:** LangChain, LlamaIndex or an agent loop uses `tempo/auto` as its model.
 **Today:** OpenAI-compatible chat completions with streaming.
-**Still needs:** tool/function calls passed through and checked, JSON-schema outputs, and
-routing to models whose `tools` support is known (the catalog already records it). **Phase 4.**
+**Today (step 4):** tool calls work on every provider (native or emulated, validated),
+with strict JSON output and streaming.
+**Still needs:** measured tool-calling reliability per model for routing, and parallel tool
+calls tested with real providers. **Phase 4.**
 
 ### 17. MCP second opinion
 

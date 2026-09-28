@@ -246,3 +246,8 @@ def test_zen_is_off_and_out_of_eval_collect_and_exports():
     for job in ("eval", "collect", "export"):
         assert reg.blocked_for("opencode", job)
     assert reg.training_verdict(model("opencode/big-pickle", training_on_outputs="yes")) == "no"
+
+
+def test_nvidia_is_refused_whenever_demo_models_are_loaded():
+    env = {"NVIDIA_API_KEY": "placeholder", "TEMPO_ENABLE_PROVIDERS": "nvidia"}
+    assert not Registry.load(env=env, include_mock=True).is_configured("nvidia")

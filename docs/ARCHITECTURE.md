@@ -507,6 +507,8 @@ resp = client.chat.completions.create(
 )
 ```
 
+**As built (step 4):** chat completions with tool calling, strict JSON schema output, image input and streaming for all of them (`tempo/compat.py`). Tool calls: native for models whose provider lists tool support (`tools: true` in the catalog), emulated through a system prompt for all others, then parsed from any common text format and validated against each function's JSON schema; `tool_choice` (`auto`, `none`, `required`, a named function) and `parallel_tool_calls` are enforced. A tool-calling request is one validated stage with no judge. Strict JSON: the schema goes into the system message, the answer's JSON is extracted and validated with `jsonschema`, and the normal staged engine (draft, check, fix) runs on the validated answer, with prose checks (language, code block) switched off. Every reply that fails validation counts as a failed call ("invalid": no cool-down) and the next model is tried; if none succeeds, the request fails with the last reason. Images route only to vision models at every stage. Tested with the official OpenAI SDK against a live server.
+
 Because this is the OpenAI format, Tempo drops into LangChain, LlamaIndex, Open WebUI, LibreChat, Cursor-style editors, n8n and similar tools by changing only `base_url` and `model`.
 
 ### 6.2 MCP server (for AI agents and assistants)

@@ -81,7 +81,9 @@ class Registry:
 
     @property
     def demo_mode(self) -> bool:
-        return self._env.get("TEMPO_ENABLE_MOCK", "").strip().lower() in ("1", "true", "yes", "on")
+        """Demo models are loaded (TEMPO_ENABLE_MOCK, or include_mock when loading)."""
+        flag = self._env.get("TEMPO_ENABLE_MOCK", "").strip().lower() in ("1", "true", "yes", "on")
+        return flag or "mock" in self.providers
 
     def is_enabled(self, provider_id: str) -> bool:
         """Providers marked ``enabled: false`` run only when TEMPO_ENABLE_PROVIDERS names them.

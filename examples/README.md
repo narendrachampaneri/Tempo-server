@@ -12,6 +12,7 @@ pip install openai                   # for the Python examples
 |---|---|
 | `openai_client.py` | Tempo as a model in the official OpenAI Python client, with conditions |
 | `stream_trace.py` | Streaming the answer and the thinking-window events |
+| `tools_and_json.py` | Tool calls (with the tool result sent back), strict JSON schema, and an image |
 | `privacy.py` | `local_only` and `no_logging` privacy options |
 | `curl.sh` | The API with curl: a question and the model list |
 

@@ -1,7 +1,7 @@
 # Status
 
-_Last updated 2026-09-28, at the end of step 3 (Tempo's own models and publishing docs; plan
-and data only, nothing trained). Branch: `claude/multi-model-ai-platform-o0fx9v`._
+_Last updated 2026-09-28, at the end of step 4 (OpenAI API compatibility). Branch:
+`claude/multi-model-ai-platform-o0fx9v`._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -147,6 +147,55 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   found no keys.
 - Tests: 281 pass, lint clean.
 
+### Step 4: the owner's decisions on step 3
+
+- **Licence**: Apache-2.0. `LICENSE` ("Copyright 2026 The Tempo-server authors"), `NOTICE`
+  (credits Laya), and `pyproject.toml` metadata. Dataset credits (for example MBPP's CC-BY-4.0
+  attribution) go in the model cards (TEMPO_MODELS.md §5).
+- **Tempo-Core**: Qwen3-1.7B first, Granite 3.3 2B as the second family; a 4B option only if it
+  reaches 8 tokens a second on 4 CPU threads and wins on the held-out set (plan).
+- **Consent**: per user, opt-in, off by default, withdrawable, every change logged
+  (`tempo users consent NAME --on/--off`, `GET`/`PUT /api/consent`). Consenting users'
+  questions join every export (Laya, SFT, pairs); text from Tempo's own traffic is scrubbed
+  first (emails, phone numbers including Indian mobiles, card, Aadhaar and PAN numbers, IP
+  addresses). Users delete their data with `tempo users forget NAME` or `DELETE /api/data`.
+- **Dolly**: out of every training export; its rows go only to test splits.
+  OpenAssistant `oasst2` (Apache-2.0) proposed as the replacement (not added yet).
+- **Data mix**: `TEMPO_MIN_PUBLIC_SHARE=0.3`, `TEMPO_MAX_SELF_SHARE=0.3`; exports report the mix
+  and warn.
+- **Promotion gate per task type** (plan): a new version takes a task type only with 30+
+  held-out questions and no drop; other types keep the old version.
+- **Demo**: a replayed recording on a static page (plan). **Name**: Tempo-server in the README,
+  `LICENSE`, package metadata, Docker image and Hugging Face placeholders.
+
+### Step 4: OpenAI API compatibility
+
+- **Tool calling on every provider** (`tempo/compat.py`): native `tools` for models whose
+  provider lists tool support; for every other model the tools are described in a system
+  message. Replies in the text formats open models print (Hermes/Qwen `<tool_call>`, Mistral
+  `[TOOL_CALLS]`, Llama `<|python_tag|>` and `<function=…>`, fenced or bare JSON) become the
+  same OpenAI `tool_calls`. Every call is validated (known function, JSON-object arguments
+  matching its schema, `tool_choice` `auto`/`none`/`required`/named, `parallel_tool_calls`);
+  a bad reply is retried on another model, and the error names the reason if none succeeds.
+  Tool results (`role: "tool"`) are sent back (as text for emulated models).
+- **Strict JSON schema** (`response_format` `json_schema` or `json_object`): schema in the
+  system message, the answer's JSON extracted and validated with `jsonschema`, a mismatch
+  retried on another model, clean JSON returned; the normal check/fix stages still run.
+- **Images**: `image_url` parts go only to vision models, at every stage (tested end to end,
+  and the image reaches the provider unchanged through LiteLLM).
+- **Streaming** for all of them: tool calls stream as OpenAI `tool_calls` deltas; tool-call and
+  JSON answers are streamed after validation.
+- **Malformed requests** get 400s like OpenAI's (unknown `tool_choice` function, `required`
+  without tools, `json_schema` without a schema).
+- **Real client**: the official OpenAI Python SDK against a live Tempo-server over HTTP in demo
+  mode (`tests/test_real_client.py`): chat, streaming, tool calls native and emulated with
+  tool results, strict JSON streamed and not, and an image. Also LiteLLM's real streaming of
+  tool-call fragments against a fake provider server. Demo models now answer tools, JSON and
+  images, and `examples/tools_and_json.py` shows all three.
+- Also fixed: NVIDIA's "never in demo mode" now also holds when demo models are loaded in code,
+  not only through `TEMPO_ENABLE_MOCK`.
+- Tests: 320 pass, lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -177,7 +226,7 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 3 is finished; waiting for step 4 from the owner.
+Nothing. Step 4 is finished; waiting for step 5 from the owner.
 
 ## Blocked: needs key
 
@@ -198,6 +247,9 @@ server:
 | `tempo eval` on real models | any key (never Cerebras or Cohere) | mock models |
 | `tempo collect` with hosted models | a key (outputs stay "unclear", not exported) | mocks; local-only yes run tested with mocks |
 | Local "yes" collection for real | Ollama with an Apache-2.0/MIT model | mocked `/api/tags` and `/api/show` |
+| Native tool calls on real providers (Groq, OpenRouter, Mistral, Cloudflare) | keys | LiteLLM against a fake server; emulation works on any model |
+| Real vision models (catalog `inputs`, OpenRouter live; Groq/Google seeds) | keys | demo and scripted models |
+| Strict JSON reliability per real model | keys | demo and scripted models |
 
 ## What to run once keys exist
 
@@ -219,6 +271,7 @@ tempo terms --check                # re-verify every quote
 # With Ollama and an Apache-2.0 model (qwen3:8b, granite3.3:8b):
 tempo collect --estimate --yes-only && tempo collect --yes-only --limit 10
 tempo export-sft --out sft && tempo export-pairs --out pairs && tempo export-laya --out laya
+tempo serve & python examples/tools_and_json.py   # tools, strict JSON and an image on real models
 ```
 
 Check that a real 429 cools the model down and falls back, that `x-ratelimit-limit-*` headers
@@ -227,36 +280,37 @@ update the limits (`tempo models --free` shows them), and that Mistral's headers
 
 ## Next
 
-- Step 4, when the owner sends it.
-- The owner's plan: run `tempo collect --yes-only` on their own computer with a local
-  Apache-2.0 model (docs/COLLECT_ANYWHERE.md), then the first exports.
+- Step 5, when the owner sends it: check that "Tempo-server" is free on PyPI and Hugging Face,
+  and whether the `tempo` command clashes with Grafana Tempo's `tempo` program.
+- The owner's plan: `tempo collect --yes-only` on their computer with a local Apache-2.0 model,
+  then the first exports.
 - Noticed, not started:
-  - NVIDIA's model list gives no context sizes; the catalog shows "?" and routing assumes 8K.
-  - The web page has no switch for privacy `no_logging` yet (API and CLI do).
-  - Language check: Latin-script languages other than the seven covered are not told apart.
-  - The collapse plan needs human reference answers from open datasets; `tempo collect` stores
-    questions only today (TEMPO_MODELS.md §4).
-  - A static, replayed demo page for publishing (PUBLISHING.md §5).
+  - Groq's and Google's seeded models have no `tools`/`vision` flags (their lists need a key),
+    so they get tools emulated and no images until a sync with a key fills them in.
+  - Native structured outputs (`response_format` passed to providers that support it) are not
+    used yet: JSON is asked for in the prompt and validated, which works everywhere.
+  - Tool-calling requests run as one validated stage with no judge; text answers after tool
+    results do not get the check/fix stages either.
+  - NVIDIA's model list gives no context sizes; routing assumes 8K.
+  - The web page has no switches for `no_logging` or consent yet (API and CLI have them).
+  - `oasst2` as a collect dataset; human reference answers for the data mix.
+  - A static, replayed demo page.
 
 ## Decisions for the owner
 
-1. **Code licence**: Apache-2.0 (matches Laya; recommended) or MIT. No `LICENSE` file is added
-   until you choose.
-2. **Tempo-Core base model**: Qwen3-1.7B (Apache-2.0, first choice) with Granite 3.3 2B
-   (Apache-2.0) as the second family, or a 3–4B model (Qwen3-4B, SmolLM3-3B, Phi-4-mini, MIT)
-   if CPU speed allows?
-3. **Other users' questions in training data**: left out by default (they need consent,
-   Phase 3). Keep that, or add a consent setting now?
-4. **Share-alike data**: Dolly (CC-BY-SA-3.0) questions are collected; keep CC-BY-SA rows out of
-   Tempo-Core's training data (the plan's default), or accept share-alike for the datasets?
-5. **Public-data share**: at least 30% human or public data per run, and at most 30% answers
-   written by an earlier Tempo-Core. Keep these numbers?
-6. **Promotion gate**: at least 30 held-out questions per task type, else promotion is blocked.
-   Keep, or allow promotion on the tasks that have enough?
-7. **Public demo**: free Hugging Face Spaces now run only static pages, so the plan is a
-   replayed recording. Is that enough, or should a free CPU host be found for a live demo?
-8. **Hugging Face account** and repository names for the models, when there is something to
-   release.
+1. **Native structured outputs**: also pass `response_format` to providers that support it
+   (fewer retries), or keep prompt-plus-validation only (the same on every provider)?
+2. **Tool-calling checks**: tool calls are validated by schema but not judged. Should the text
+   answer that follows a tool result also go through the judge and fix stages (better answers,
+   more free quota used)?
+3. **Tool support flags for seeds**: mark Groq's gpt-oss and Qwen models (and Google's Gemini)
+   as native tool and vision models from the providers' docs now, with source and date, or wait
+   for live data from a keyed sync?
+4. **Consent in the web page**: add a switch and a "delete my data" button to the Keys page?
+5. **oasst2**: add OpenAssistant's `oasst2` (Apache-2.0) to `tempo collect` as the permissive
+   general-questions dataset?
+6. **Error code** when no model produces a valid tool call or JSON: 503 today (like other "no
+   model could answer" cases); OpenAI has no exact equivalent. Keep 503?
 
 ## How the checks were run (for the next session)
 
