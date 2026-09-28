@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any, Literal, Protocol
 
@@ -117,10 +118,21 @@ def _partial_suffix(text: str, tag: str) -> int:
     return 0
 
 
+# How providers word a rejected key. LiteLLM raises some of these as BadRequestError (seen from
+# Groq: "Invalid API Key", Cerebras: "Wrong API Key"), which must still cool the provider down.
+KEY_REJECTED = re.compile(
+    r"invalid[ _]api[ _]key|wrong api key|incorrect api key|api key not valid|api key expired|"
+    r"missing authentication|no auth credentials|invalid x-api-key|invalid authentication",
+    re.IGNORECASE,
+)
+
+
 def classify_exception(exc: BaseException) -> ProviderError:
     import litellm
 
     message = " ".join(str(exc).split())[:300] or type(exc).__name__
+    if KEY_REJECTED.search(message) and not isinstance(exc, litellm.RateLimitError):
+        return ProviderError("auth", message)
     checks: list[tuple[type[BaseException], ErrorKind]] = [
         (litellm.ContextWindowExceededError, "context"),
         (litellm.RateLimitError, "rate_limit"),

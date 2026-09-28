@@ -9,7 +9,7 @@ from tempo.health import HealthTracker
 from tempo.registry import Registry
 from tempo.router import Router
 from tempo.store import Store
-from tempo.sync import RegistrySync, guess_model
+from tempo.sync import RegistrySync, guess_model, verify_key
 from tempo.types import QueryProfile
 
 
@@ -167,7 +167,8 @@ def provider_lists(request: httpx.Request) -> httpx.Response:
             },
         )
     if "generativelanguage" in url:
-        assert request.url.params["key"] == "gm"
+        assert request.headers["x-goog-api-key"] == "gm"
+        assert "key" not in request.url.params  # never in the URL
         return httpx.Response(
             200,
             json={
@@ -234,3 +235,16 @@ def test_guessed_priors_scale_with_size():
     assert small.strength < big.strength
     assert moe.tokens_per_sec > big.tokens_per_sec  # only 22B active parameters
     assert guess_model("qwen3-coder-30b", "groq", None, 1).skills["code"] > 0.6
+
+
+async def test_a_400_that_says_the_key_is_bad_counts_as_rejected():
+    def google(request):
+        message = "API key not valid. Please pass a valid API key."
+        body = {"error": {"code": 400, "message": message}}
+        return httpx.Response(400, json=body)
+
+    registry = Registry.load(env={"GEMINI_API_KEY": "bad"})
+    health = HealthTracker()
+    status = await RegistrySync(registry, health, httpx.MockTransport(google)).run()
+    assert status["gemini"].error == "API key rejected"
+    assert await verify_key(registry, "gemini", "bad", httpx.MockTransport(google)) is False

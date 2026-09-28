@@ -52,6 +52,22 @@ def test_unclosed_think_block_stays_reasoning():
         (litellm.NotFoundError("gone", model="m", llm_provider="groq"), "not_found"),
         (litellm.APIConnectionError("refused", llm_provider="groq", model="m"), "unavailable"),
         (litellm.BadRequestError("bad", model="m", llm_provider="groq"), "bad_request"),
+        # How the real providers reject a key (seen through LiteLLM 1.103 on 2026-09-28).
+        (
+            litellm.BadRequestError(
+                'GroqException - {"error":{"message":"Invalid API Key","type":'
+                '"invalid_request_error","code":"invalid_api_key"}}',
+                model="m",
+                llm_provider="groq",
+            ),
+            "auth",
+        ),
+        (
+            litellm.BadRequestError(
+                "CerebrasException - Wrong API Key", model="m", llm_provider="cerebras"
+            ),
+            "auth",
+        ),
         (ValueError("boom"), "unknown"),
     ],
 )

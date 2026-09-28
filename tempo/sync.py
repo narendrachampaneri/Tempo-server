@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from tempo.health import HealthTracker
+from tempo.providers import KEY_REJECTED
 from tempo.registry import Registry
 from tempo.types import TASKS, ModelInfo
 
@@ -141,17 +142,13 @@ class RegistrySync:
     async def _sync(self, client: httpx.AsyncClient, provider: str) -> ProviderStatus:
         creds = self.registry.credentials(provider)
         base = creds.get("api_base") or DEFAULT_BASES[provider]
-        headers = {}
-        params: dict[str, str] = {}
-        if provider == "gemini":
-            params["key"] = creds.get("api_key", "")
-        elif creds.get("api_key"):
-            headers["Authorization"] = f"Bearer {creds['api_key']}"
+        headers = auth_headers(provider, creds.get("api_key"))
+        params = {"pageSize": "1000"} if provider == "gemini" else {}
         try:
             response = await client.get(f"{base}/models", headers=headers, params=params)
         except httpx.HTTPError as exc:
             return ProviderStatus(provider, False, self._clock(), error=f"unreachable: {exc}")
-        if response.status_code in (401, 403):
+        if key_rejected(response):
             self._reject_key(provider)
             return ProviderStatus(provider, False, self._clock(), error="API key rejected")
         if response.status_code >= 400:
@@ -218,6 +215,23 @@ class RegistrySync:
                 break
 
 
+def key_rejected(response: httpx.Response) -> bool:
+    """401/403, or a 400 whose message says the key is bad (Google answers that way)."""
+    if response.status_code in (401, 403):
+        return True
+    return response.status_code == 400 and bool(KEY_REJECTED.search(response.text[:500]))
+
+
+def auth_headers(provider: str, api_key: str | None) -> dict[str, str]:
+    """The key goes in a header, never in the URL (where logs and proxies would keep it):
+    Google AI Studio reads x-goog-api-key, the others a Bearer token."""
+    if not api_key:
+        return {}
+    if provider == "gemini":
+        return {"x-goog-api-key": api_key}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
 async def verify_key(
     registry: Registry,
     provider: str,
@@ -228,17 +242,13 @@ async def verify_key(
     base = registry.credentials(provider).get("api_base") or DEFAULT_BASES.get(provider)
     if base is None:
         return None
-    headers: dict[str, str] = {}
-    params: dict[str, str] = {}
-    if provider == "gemini":
-        params["key"] = api_key
-    else:
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = auth_headers(provider, api_key)
+    params = {"pageSize": "1000"} if provider == "gemini" else {}
     try:
         async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
             response = await client.get(f"{base}/models", headers=headers, params=params)
     except httpx.HTTPError:
         return None
-    if response.status_code in (401, 403):
+    if key_rejected(response):
         return False
     return True if response.status_code < 400 else None
