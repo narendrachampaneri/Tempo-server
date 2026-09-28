@@ -158,6 +158,14 @@ class ModelInfo(BaseModel):
     max_output: int | None = None
     inputs: list[str] = Field(default_factory=lambda: ["text"])
     tools: bool | None = None
+    # Native JSON-schema output (response_format). None: unknown, so not sent; False: the
+    # provider rejected it once, so it is never sent again.
+    structured_outputs: bool | None = None
+    parallel_tools: bool | None = None  # several tool calls in one reply
+    # Where tools / vision / structured_outputs come from when entered by hand (a keyed sync
+    # overwrites them with the provider's own data).
+    capabilities_source: str | None = None
+    capabilities_checked: str | None = None
     # Preview / experimental / stealth models rank below stable ones and never judge.
     preview: bool = False
     expires: str | None = None  # YYYY-MM-DD; dropped from that day on

@@ -19,6 +19,7 @@ import contextlib
 import json
 import logging
 import math
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -31,6 +32,7 @@ from tempo.checks import (
     combine,
     extract_json,
     parse_judge,
+    quick_checks,
     run_heuristics,
 )
 from tempo.events import Event
@@ -290,7 +292,9 @@ class Pipeline:
             self.stop_reason = f"budget_{stop.reason}"
             self.emit("budget", reason=stop.reason, detail=stop.detail)
         except _NoAnswer as failure:
-            self.emit("error", message=str(failure), kind=failure.kind, tried=failure.tried)
+            # Models answered, but no reply was a valid tool call or JSON: "invalid" (502).
+            kind = "invalid" if self._last_invalid else failure.kind
+            self.emit("error", message=str(failure), kind=kind, tried=failure.tried)
             self._log(error=str(failure))
             return
         self._finish()
@@ -335,7 +339,10 @@ class Pipeline:
         assert p is not None
         parts = prompts.rule_split(self.question)
         if self.tool_req:
-            return Plan("tools", 1, 1, reasons={"strategy": "tool calling: one validated call"})
+            # One validated tool stage; the rest of the budget is for checking a text answer.
+            return Plan(
+                "tools", o.max_stages, 1, reasons={"strategy": "tool calling: one validated call"}
+            )
         if self.json_fmt:
             parts = None  # one JSON answer: no splitting into parts
         if o.strategy in STRATEGIES:
@@ -545,6 +552,9 @@ class Pipeline:
             raise _NoAnswer(
                 self._failure_message(), [c.model.id for c in slots[0]], kind="unavailable"
             )
+        self.answers.append(result)
+        if not result.tool_calls and await self._tool_followup(result):
+            return  # the text answer went through the judge and fix stages
         result.check = CheckResult(score=1.0, passed=True)
         self.emit(
             "check",
@@ -554,9 +564,27 @@ class Pipeline:
             best_score=1.0,
             passed=True,
         )
-        self.answers.append(result)
         self.final = result
         self.stop_reason = "passed"
+
+    async def _tool_followup(self, result: Answer) -> bool:
+        """A text answer to a tool-calling request (TEMPO_TOOL_FOLLOWUP). Returns True when it
+        was handed to the judge and fix stages."""
+        setting = self.e.settings.tool_followup
+        if setting == "off":
+            return False
+        failed = quick_checks(self.question, result.text)
+        if setting == "full" or self.o.mode == "best" or failed.hard_fail:
+            if failed.hard_fail:
+                self.emit(
+                    "note",
+                    message="Quick check failed on the answer after the tool result: "
+                    + "; ".join(failed.issues)
+                    + " · sending it to the judge and fix stages",
+                )
+            await self._improve()
+            return True
+        return False
 
     def _prepare(self, job: str, model: ModelInfo, messages: list[dict[str, Any]]):
         """Per model: the messages and extra arguments for this call (native or emulated tools,
@@ -573,6 +601,12 @@ class Pipeline:
                 messages = compat.emulated_messages(messages, self.tool_req)
         if self.json_fmt and job in ANSWER_JOBS:
             messages = _with_system(messages, compat.json_system_prompt(self.json_fmt))
+            if model.structured_outputs and self.o.response_format:
+                # Native structured output where the provider supports it; the answer is
+                # still validated like every other.
+                extra["response_format"] = self.o.response_format
+        if self.tool_req and job != "tools":
+            messages = compat.flatten_tool_turns(messages)
         if self.tool_req or self.json_fmt:
             messages = _merge_systems(messages)
         return messages, extra
@@ -975,6 +1009,15 @@ class Pipeline:
             except ProviderError as err:
                 if err.kind == "invalid":
                     self._last_invalid = err.message
+                if (
+                    "response_format" in extra
+                    and err.kind == "bad_request"
+                    and _REJECTED_FORMAT.search(err.message)
+                ):
+                    # The provider rejected native structured output: never send it to this
+                    # model again (saved with the catalog); the prompt-and-validate path stays.
+                    model.structured_outputs = False
+                    log.info("%s rejected response_format; not sending it again", model.id)
                 e.health.record_failure(model, err.kind, err.retry_after)
                 self._usage(model, key_id, messages, "", meta)
                 self._log_call(stage, job, model, "error", err.kind, started, first, messages, "")
@@ -1174,6 +1217,9 @@ class _NoAnswer(Exception):
 
 
 ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
+_REJECTED_FORMAT = re.compile(
+    r"response_format|json_schema|structured output|schema", re.IGNORECASE
+)
 
 
 def _with_system(messages: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:

@@ -125,6 +125,10 @@ class Settings:
     # data, and at most this share of answers written by an earlier Tempo-Core.
     min_public_share: float = 0.3
     max_self_share: float = 0.3
+    # Text answers to tool-calling requests (usually after a tool result): "quick" runs the
+    # quick checks (empty, refusal, wrong language) and the judge and fix stages only in best
+    # mode or when a quick check fails; "full" always judges; "off" checks nothing.
+    tool_followup: str = "quick"
 
     @property
     def db_path(self) -> Path | None:
@@ -174,4 +178,5 @@ class Settings:
             sync_interval_s=float(env.get("TEMPO_SYNC_INTERVAL") or 6 * 3600),
             min_public_share=float(env.get("TEMPO_MIN_PUBLIC_SHARE") or 0.3),
             max_self_share=float(env.get("TEMPO_MAX_SELF_SHARE") or 0.3),
+            tool_followup=_choice(env, "TEMPO_TOOL_FOLLOWUP", ("quick", "full", "off"), "quick"),
         )

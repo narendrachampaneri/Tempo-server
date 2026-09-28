@@ -56,6 +56,8 @@ def _plural(n: int, word: str) -> str:
 
 
 def describe(kind: str, d: dict[str, Any]) -> str | None:
+    if kind == "note":  # a plain message for the thinking window
+        return str(d.get("message", ""))
     if kind == "received":
         return f"Received · mode {d.get('mode', 'auto')}"
     if kind == "cache_hit":

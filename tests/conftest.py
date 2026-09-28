@@ -167,7 +167,9 @@ class ScriptedBackend:
         copied = [dict(m) for m in messages]
         self.calls.append((model.id, copied, purpose))
         self.accesses.append(kwargs.get("access"))
-        self.extras.append({k: kwargs.get(k) for k in ("tools", "tool_choice") if kwargs.get(k)})
+        self.extras.append(
+            {k: kwargs.get(k) for k in ("tools", "tool_choice", "response_format") if kwargs.get(k)}
+        )
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:

@@ -24,18 +24,27 @@ from tempo.sync import verify_key
 from tempo.types import MODES, Access, ModelInfo
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-ERROR_STATUS = {"bad_request": 400, "not_found": 404}
+# 502: models answered but none gave a valid tool call or JSON. Everything else that stops an
+# answer (no model available, free quota used up) is 503 with a Retry-After header.
+ERROR_STATUS = {"bad_request": 400, "not_found": 404, "invalid": 502}
 
 
 class APIError(Exception):
     def __init__(
-        self, status: int, message: str, *, kind: str = "invalid_request_error", code: str | None
+        self,
+        status: int,
+        message: str,
+        *,
+        kind: str = "invalid_request_error",
+        code: str | None,
+        retry_after: int | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.message = message
         self.kind = kind
         self.code = code
+        self.retry_after = retry_after
 
     def body(self) -> dict[str, Any]:
         return {"error": {"message": self.message, "type": self.kind, "code": self.code}}
@@ -171,7 +180,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
 
     @app.exception_handler(APIError)
     async def _api_error(_: Request, exc: APIError) -> JSONResponse:
-        return JSONResponse(exc.body(), status_code=exc.status)
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+        return JSONResponse(exc.body(), status_code=exc.status, headers=headers)
 
     def require_key(request: Request, authorization: str | None = Header(default=None)) -> None:
         """Identify the caller. TEMPO_API_KEY is the admin; users have their own keys; with
@@ -277,8 +287,13 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             result = await engine.complete(req.messages, options)
             if result.error:
                 kind = result.error_kind or "unavailable"
+                status = ERROR_STATUS.get(kind, 503)
                 raise APIError(
-                    ERROR_STATUS.get(kind, 503), result.error, kind="tempo_error", code=kind
+                    status,
+                    result.error,
+                    kind="tempo_error",
+                    code=kind,
+                    retry_after=engine.retry_after_s(access) if status == 503 else None,
                 )
             tempo_info: dict[str, Any] = {
                 "requested_model": req.model,

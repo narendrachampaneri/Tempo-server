@@ -80,6 +80,16 @@ class QuotaManager:
         zone = _zone(provider.day_reset_tz if provider else "UTC")
         return datetime.fromtimestamp(self._clock(), zone).strftime("%Y-%m-%d")
 
+    def seconds_to_day_reset(self, provider_id: str) -> float:
+        """Seconds until this provider's daily free quota resets (midnight in its time zone)."""
+        from datetime import timedelta
+
+        provider = self.registry.providers.get(provider_id)
+        zone = _zone(provider.day_reset_tz if provider else "UTC")
+        now = datetime.fromtimestamp(self._clock(), zone)
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return max(1.0, (midnight - now).total_seconds())
+
     def _month(self, provider_id: str) -> str:
         return self._today(provider_id)[:7]
 

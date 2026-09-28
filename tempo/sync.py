@@ -453,6 +453,11 @@ class RegistrySync:
                 max_output=top.get("max_completion_tokens"),
                 inputs=arch.get("input_modalities"),
                 tools=("tools" in params) if isinstance(params, list) else None,
+                structured_outputs=(
+                    bool({"structured_outputs", "response_format"} & set(params))
+                    if isinstance(params, list)
+                    else None
+                ),
                 expires=item.get("expiration_date"),
                 # OpenRouter's own router: only ever the very last fallback.
                 fallback_only=True if raw == "openrouter/free" else None,
@@ -673,7 +678,16 @@ class RegistrySync:
 
 # Fields a provider's live list overrides on seeded models.
 LIVE_FIELDS = frozenset(
-    {"context_window", "max_output", "inputs", "tools", "expires", "reasoning", "vision"}
+    {
+        "context_window",
+        "max_output",
+        "inputs",
+        "tools",
+        "expires",
+        "reasoning",
+        "vision",
+        "structured_outputs",
+    }
 )
 
 

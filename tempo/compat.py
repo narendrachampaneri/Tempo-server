@@ -232,6 +232,13 @@ def emulated_messages(
     return out
 
 
+def flatten_tool_turns(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The conversation with tool calls and results as plain text, for stages that do not call
+    tools (judge, fix): providers reject tool messages sent without tools."""
+    request = ToolRequest(tools=[])
+    return [m for m in emulated_messages(messages, request)[1:]]
+
+
 def _loads_or_raw(value: Any) -> Any:
     if isinstance(value, str):
         try:

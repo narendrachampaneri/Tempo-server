@@ -71,6 +71,7 @@ class ChatBackend(Protocol):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         parallel_tool_calls: bool | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[Delta]: ...
 
 
@@ -242,6 +243,7 @@ class LiteLLMBackend:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any = None,
         parallel_tool_calls: bool | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> AsyncIterator[Delta]:
         litellm = _load_litellm()
         meta = meta if meta is not None else {}
@@ -263,6 +265,9 @@ class LiteLLMBackend:
                 kwargs["tool_choice"] = tool_choice
             if parallel_tool_calls is not None:
                 kwargs["parallel_tool_calls"] = parallel_tool_calls
+
+        if response_format:  # only for models known to support structured outputs
+            kwargs["response_format"] = response_format
 
         splitter = ThinkTagSplitter()
         calls: dict[int, dict[str, Any]] = {}  # streamed tool-call pieces, by index

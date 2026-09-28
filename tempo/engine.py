@@ -224,6 +224,25 @@ class Engine:
                 log.exception("registry sync failed")
             await asyncio.sleep(min(self.settings.sync_interval_s, HEALTH_EVERY_S))
 
+    def retry_after_s(self, access: Access | None = None) -> int:
+        """When to try again after "no model available": 60 s if only per-minute limits or
+        cool-downs block, else the next daily reset among the configured providers."""
+        access = access or Access()
+        best: float | None = None
+        for model in self.registry.all():
+            provider = self.registry.providers[model.provider]
+            if provider.local or not model.chat_capable:
+                continue
+            if not self.registry.is_configured(model.provider, access):
+                continue
+            reason = self.quota.blocked_reason(model, access.key_id(model.provider))
+            if reason is None or "/min" in reason:
+                wait = 60.0
+            else:
+                wait = self.quota.seconds_to_day_reset(model.provider)
+            best = wait if best is None else min(best, wait)
+        return max(1, int(best if best is not None else 60))
+
     def listing_keys(self) -> dict[str, str]:
         """For providers that take only users' own keys: one stored user key each, used only to
         read the provider's model list."""

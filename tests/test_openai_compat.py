@@ -182,7 +182,8 @@ def test_required_tool_call_is_enforced_and_text_answers_pass_on_auto():
     assert auto["choices"][0]["message"]["content"].startswith("It is sunny")
     assert auto["choices"][0]["finish_reason"] == "stop"
     required = post(client, messages=ASK, tools=[WEATHER], tool_choice="required")
-    assert required.status_code == 503
+    assert required.status_code == 502  # models answered, none gave a valid tool call
+    assert "Retry-After" not in required.headers
     assert "No model gave a valid tool call" in required.text
     assert "a tool call was required" in required.text
 
@@ -251,7 +252,7 @@ def test_json_schema_answer_is_validated_and_retried_on_another_model():
 def test_json_that_never_matches_is_an_error_not_a_bad_answer():
     client, _, _ = app_for({"*:draft": [("answer", "I can't do JSON today.")]})
     r = post(client, messages=PERSON, response_format=FORMAT)
-    assert r.status_code == 503 and "No model gave a valid JSON answer" in r.text
+    assert r.status_code == 502 and "No model gave a valid JSON answer" in r.text
 
 
 def test_json_object_mode():
@@ -293,6 +294,7 @@ def test_images_with_no_vision_model_are_refused():
     client, _, _ = app_for()
     r = post(client, messages=IMAGE)
     assert r.status_code == 503 and "no image support" in r.text
+    assert int(r.headers["Retry-After"]) >= 1
 
 
 # --- streaming, with the official OpenAI SDK ------------------------------------------------
@@ -344,3 +346,112 @@ def test_streaming_tool_calls_json_and_images_with_the_openai_sdk():
         if c.choices
     )
     assert text == "A cat on a sofa."
+
+
+# --- native structured outputs ----------------------------------------------------------------
+
+GRADE = {"*:judge": [("answer", '{"grades": [{"id": 1, "score": 9, "issues": []}]}')]}
+
+
+def test_response_format_goes_only_to_models_that_support_it():
+    good = [("answer", '{"name": "Asha", "age": 34}')]
+    client, engine, backend = app_for({"*:draft": good, **GRADE})
+    engine.registry.get("beta/mid").structured_outputs = True
+    post(client, messages=PERSON, response_format=FORMAT)
+    assert backend.extras[0].get("response_format") == FORMAT
+    client, engine, backend = app_for({"*:draft": good, **GRADE})  # unknown: not sent
+    post(client, messages=PERSON, response_format=FORMAT)
+    assert "response_format" not in backend.extras[0]
+
+
+def test_a_provider_that_rejects_response_format_is_remembered():
+    from tempo.providers import ProviderError
+
+    rejected = [ProviderError("bad_request", "response_format json_schema is not supported")]
+    good = [("answer", '{"name": "Asha", "age": 34}')]
+    client, engine, backend = app_for({"beta/mid:draft": rejected, "*:draft": good, **GRADE})
+    model = engine.registry.get("beta/mid")
+    model.structured_outputs = True
+    r = post(client, messages=PERSON, response_format=FORMAT)
+    assert r.status_code == 200 and json.loads(r.json()["choices"][0]["message"]["content"])
+    assert model.structured_outputs is False  # never sent again
+    backend.extras.clear()
+    backend.scripts["beta/mid:draft"] = good
+    post(client, messages=PERSON, response_format=FORMAT)
+    assert "response_format" not in backend.extras[0]
+
+
+def test_groq_and_google_capabilities_come_from_their_docs():
+    from tempo.registry import Registry
+
+    reg = Registry.load(env={})
+    qwen = reg.get("groq/qwen/qwen3.8-27b")
+    assert qwen.tools and qwen.vision and qwen.structured_outputs and qwen.parallel_tools
+    oss = reg.get("groq/openai/gpt-oss-120b")
+    assert oss.tools and not oss.vision and oss.parallel_tools is False
+    assert reg.get("gemini/gemini-2.5-flash").tools
+    gemma = reg.get("gemini/gemma-3-27b-it")
+    assert gemma.tools is None and gemma.structured_outputs is None  # docs unclear: unmarked
+    for m in reg.all():
+        if m.tools is not None or m.structured_outputs is not None:
+            if m.provider in ("groq", "gemini"):
+                assert m.capabilities_source and m.capabilities_checked, m.id
+
+
+# --- text answers to tool-calling requests (TEMPO_TOOL_FOLLOWUP) ------------------------------
+
+FOLLOW_UP = [
+    *ASK,
+    {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [compat.make_call("get_weather", PARIS, "c1")],
+    },
+    {"role": "tool", "tool_call_id": "c1", "content": '{"temp": 21}'},
+]
+
+
+def test_tool_follow_up_passes_the_quick_checks_without_a_judge():
+    client, _, backend = app_for(
+        {"*:draft": [("answer", "It is 21 degrees and sunny in Paris today.")]}
+    )
+    r = post(client, messages=FOLLOW_UP, tools=[WEATHER]).json()
+    assert r["choices"][0]["message"]["content"].startswith("It is 21")
+    assert backend.called_for("judge") == []
+
+
+def test_tool_follow_up_that_fails_a_quick_check_is_judged_and_fixed():
+    refusal = [("answer", "I'm sorry, but I can't help with that.")]
+    fixed = [("answer", "It is 21 degrees and sunny in Paris today, a nice day.")]
+    scripts = {"*:draft": refusal, "*:fix": fixed, "*:polish": fixed, **GRADE}
+    client, _, backend = app_for(scripts)
+    r = post(client, messages=FOLLOW_UP, tools=[WEATHER], tempo={"trace": True}).json()
+    assert r["choices"][0]["message"]["content"].startswith("It is 21")
+    notes = [e["text"] for e in r["tempo"]["trace"] if e["type"] == "note"]
+    assert notes and "refused to answer" in notes[0]
+    assert backend.called_for("judge") or backend.called_for("fix") or backend.called_for("polish")
+    # The fix stage got the tool turns as text, never raw tool messages.
+    for _model, messages, purpose in backend.calls:
+        if purpose in ("fix", "polish", "judge"):
+            assert all(m["role"] != "tool" for m in messages)
+
+
+def test_best_mode_always_judges_tool_follow_ups():
+    client, _, backend = app_for(
+        {"*:draft": [("answer", "It is 21 degrees and sunny in Paris today.")], **GRADE}
+    )
+    post(client, messages=FOLLOW_UP, tools=[WEATHER], tempo={"mode": "best"})
+    assert backend.called_for("judge")
+
+
+def test_quota_used_up_is_503_with_retry_after_until_the_daily_reset():
+    client, engine, _ = app_for()
+    for provider in engine.registry.providers.values():
+        provider.local = False  # no local model to fall back to
+    for model in engine.registry.all():
+        model.free_rpd = 1
+        engine.quota.record(model, "server")
+    r = post(client, messages=ASK)
+    assert r.status_code == 503
+    wait = int(r.headers["Retry-After"])
+    assert 60 < wait <= 24 * 3600  # the next midnight, not a minute

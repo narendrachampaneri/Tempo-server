@@ -158,6 +158,21 @@ def run_heuristics(
     return h
 
 
+def quick_checks(question: str, answer: str) -> Heuristics:
+    """The quick checks: empty, refusal, mostly in the wrong language. All are hard failures."""
+    h = Heuristics()
+    text = answer.strip()
+    if not text:
+        h.fail("empty answer")
+        return h
+    if _REFUSAL.match(text):
+        h.fail("refused to answer")
+    wrong_language = language_mismatch(question, text)
+    if wrong_language:
+        h.fail(wrong_language)
+    return h
+
+
 def combine(
     heuristics: Heuristics,
     mode: str,
