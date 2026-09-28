@@ -189,5 +189,6 @@ ruff check . && ruff format --check .
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/COLLECT_ANYWHERE.md](docs/COLLECT_ANYWHERE.md): step-by-step `tempo collect` on a Windows computer (local open-licence models), and as a scheduled GitHub Actions job that resumes across runs.
 - [docs/RESEARCH.md](docs/RESEARCH.md): existing GitHub projects (routers, gateways, model-mixing methods), the free LLM API providers and their limits, and what to avoid.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the full design: components, request lifecycle, the staged engine, Laya, thinking-window events, the neural router, using Tempo as a skill (API / MCP / CLI), security, tech stack, the roadmap and the planned **Tempo Tune** phase.

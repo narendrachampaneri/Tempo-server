@@ -228,3 +228,16 @@ async def test_logging_can_be_turned_off():
 
 def test_env_all_has_every_provider():
     assert set(ENV_ALL) == {"ALPHA_KEY", "BETA_KEY", "LOCAL_BASE"}
+
+
+async def test_never_reports_a_pass_that_did_not_happen():
+    # Every answer is in English for a Gujarati question: all fail the language check.
+    english = [
+        ("answer", "The capital of Gujarat is Gandhinagar, a planned city near the old town.")
+    ]
+    scripts = {f"*:{job}": english for job in ("draft", "fix", "merge", "polish")}
+    engine, _ = make_engine(scripts, judge_score=9)
+    result = await engine.complete(user("ગુજરાતની રાજધાની કઈ છે? ત્યાં જોવાલાયક સ્થળો જણાવો."))
+    assert result.stop_reason == "not_passed"
+    done = events_of(result, "done")[0]
+    assert "passed its check" not in done.text or "no answer passed" in done.text

@@ -957,6 +957,8 @@ class Pipeline:
             self._log(error="no answer within budget")
             return
         self.final = final
+        if self.stop_reason == "passed" and not (final.check and final.check.passed):
+            self.stop_reason = "not_passed"  # e.g. the last rewrite failed a hard check too
         self.emit(
             "answer_final",
             answer=final.text,

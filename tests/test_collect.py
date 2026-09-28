@@ -247,3 +247,20 @@ async def test_local_only_yes_models_collect_and_export(tmp_path):
 
     est = col.estimate(engine.registry, yes_only=True, per_minute=2)
     assert [p.provider for p in est.providers] == ["local"]
+
+
+async def test_collect_stops_before_its_time_limit(tmp_path):
+    engine, _ = make_engine(data_dir=tmp_path)
+    t = FakeTime()
+    stats = await col.run(
+        engine,
+        items(),
+        per_minute=2,
+        max_minutes=1.2,  # room for three starts: 0 s, 30 s and 60 s
+        say=lambda _: None,
+        sleep=t.sleep,
+        clock=t.clock,
+    )
+    assert stats.stopped == "time" and stats.done == 3
+    again = await col.run(engine, items(), say=lambda _: None, sleep=t.sleep, clock=t.clock)
+    assert again.already == 3  # the next run resumes where this one stopped

@@ -67,19 +67,30 @@ def demo_reply(model: ModelInfo, messages: Sequence[Mapping[str, Any]], purpose:
     if purpose == "parts":
         part = text.rsplit("Answer only this part:", 1)[-1].strip()
         return f"Offline demo answer from **{model.name}** for this part: “{part[:120]}”."
+    # Asked to write code: demo answers include a (placeholder) code block, as real ones would.
+    code = (
+        "\n\n```python\ndef demo():\n    return 'offline demo'\n```"
+        if _WANTS_CODE.search(text)
+        else ""
+    )
     if purpose in ("fix", "merge", "polish", "combine"):
         return (
             f"This is an {IMPROVED} offline demo answer from **{model.name}** (stage job: "
-            f"{purpose}). It addresses the issues the checker found in the earlier draft.\n\n"
+            f"{purpose}). It addresses the issues the checker found in the earlier draft.{code}\n\n"
             "Add a free API key (for example `GROQ_API_KEY`) or point `OLLAMA_API_BASE` at a "
             "local Ollama server to get real answers."
         )
     return (
         f"This is an offline demo answer from **{model.name}**. Tempo analyzed your question, "
         f"ranked the available models, and routed it here.\n\nYou asked: “{text[:300]}”\n\n"
-        "Add a free API key (for example `GROQ_API_KEY`) or point `OLLAMA_API_BASE` at a "
-        "local Ollama server to get real answers."
+        f"Add a free API key (for example `GROQ_API_KEY`) or point `OLLAMA_API_BASE` at a "
+        f"local Ollama server to get real answers.{code}"
     )
+
+
+_WANTS_CODE = re.compile(
+    r"\b(write|fix|implement|convert)\b.*\b(function|code|script|class|program)\b", re.I | re.S
+)
 
 
 class MockBackend:

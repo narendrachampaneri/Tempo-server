@@ -38,7 +38,9 @@ tempo collect --status      # progress per dataset
 - Target: about 7,000 labelled decisions, roughly 800 questions. `tempo collect --estimate`
   replaces the assumed numbers with measured ones after 20 questions.
 
-**Where to run it for free:** the simplest place is your own computer. Collection is slow on
+**Where to run it for free:** the simplest place is your own computer ([step-by-step for
+Windows, and a scheduled GitHub Actions job](./COLLECT_ANYWHERE.md)). `--minutes N` stops
+starting new questions after N minutes, for scheduled runs. Collection is slow on
 purpose, needs no GPU and resumes after any stop, so running it for a few hours a day works.
 Laya itself is not needed for collection (`TEMPO_LAYA=off` saves memory); the labels come from
 outcomes, not from Laya's predictions.

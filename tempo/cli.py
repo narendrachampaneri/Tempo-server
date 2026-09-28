@@ -503,6 +503,10 @@ def collect_data(
         bool,
         typer.Option("--wait/--no-wait", help="When free quota runs out, wait (or stop)."),
     ] = True,
+    minutes: Annotated[
+        float | None,
+        typer.Option("--minutes", help="Stop starting new questions after this many minutes."),
+    ] = None,
     yes_only: Annotated[
         bool,
         typer.Option(
@@ -590,6 +594,7 @@ def collect_data(
             per_minute=per_minute,
             reserve=reserve,
             yes_only=yes_only,
+            max_minutes=minutes,
             providers=providers,
             wait=wait,
             say=lambda line: err.print(line, markup=False),

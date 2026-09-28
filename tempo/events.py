@@ -33,6 +33,7 @@ class Event:
 STOP_REASONS = {
     "passed": "answer passed its check",
     "decided": "decided the answer is good enough",
+    "not_passed": "no answer passed its check; sent the best one",
     "polished": "final rewrite on the last stage",
     "unchecked": "no stage left to check the answer",
     "cache": "answered from cache",

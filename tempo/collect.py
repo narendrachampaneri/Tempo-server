@@ -50,7 +50,7 @@ class CollectStats:
     skipped: int = 0
     already: int = 0
     waited_s: float = 0.0
-    stopped: str = "finished"  # finished | limit | exhausted | interrupted
+    stopped: str = "finished"  # finished | limit | time | exhausted | interrupted
 
 
 def download(name: str, cache_dir: Path, client: httpx.Client | None = None) -> bytes:
@@ -108,6 +108,7 @@ async def run(
     yes_only: bool = False,
     providers: list[str] | None = None,
     wait: bool = True,
+    max_minutes: float | None = None,
     say: Callable[[str], None] = print,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
@@ -128,8 +129,11 @@ async def run(
         access=Access(user_id=COLLECT_USER),
         training_only=yes_only,
     )
+    deadline = clock() + max_minutes * 60 if max_minutes else None
     try:
-        await _run_items(engine, items, stats, limit, gap, options, wait, say, sleep, clock)
+        await _run_items(
+            engine, items, stats, limit, gap, options, wait, say, sleep, clock, deadline
+        )
     finally:
         if engine.laya is not None:  # shadow predictions still running reach the log first
             await engine.laya.drain()
@@ -147,6 +151,7 @@ async def _run_items(
     say: Callable[[str], None],
     sleep: Callable[[float], Awaitable[None]],
     clock: Callable[[], float],
+    deadline: float | None = None,
 ) -> None:
     store = engine.store
     next_start = clock()
@@ -165,6 +170,9 @@ async def _run_items(
             continue
         if limit is not None and stats.done + stats.failed >= limit:
             stats.stopped = "limit"
+            return
+        if deadline is not None and max(clock(), next_start) >= deadline:
+            stats.stopped = "time"  # the next question would start after the time limit
             return
         while True:
             delay = next_start - clock()
@@ -186,6 +194,10 @@ async def _run_items(
                 if not wait:
                     say(f"No free quota left ({result.error}). Stopping; run again to resume.")
                     stats.stopped = "exhausted"
+                    return
+                if deadline is not None and clock() + WAIT_S >= deadline:
+                    say(f"No free quota left ({result.error}). Time is up; run again to resume.")
+                    stats.stopped = "time"
                     return
                 say(f"No free quota left ({result.error}). Waiting {WAIT_S // 60} minutes.")
                 await sleep(WAIT_S)
