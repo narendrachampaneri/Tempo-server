@@ -35,10 +35,10 @@ No keys yet? `TEMPO_ENABLE_MOCK=1 tempo serve` runs offline demo models. One of 
 | Google AI Studio | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
 | OpenRouter (free models) | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | Cloudflare Workers AI (10,000 neurons/day) | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com/profile/api-tokens |
-| Cohere (trial key: 1,000 calls/month; never used for eval) | `COHERE_API_KEY` | https://dashboard.cohere.com/api-keys |
+| Cohere (off by default: each user adds their own trial key; answers only, never judges, never eval or collect) | added per user with `tempo keys add cohere` | https://dashboard.cohere.com/api-keys |
 | Mistral (free plan; limits read from response headers) | `MISTRAL_API_KEY` | https://console.mistral.ai/api-keys |
-| NVIDIA API catalog (off by default: trial terms allow testing and evaluation only; `TEMPO_ENABLE_PROVIDERS=nvidia`) | `NVIDIA_API_KEY` | https://build.nvidia.com |
-| OpenCode Zen (free models only, each user's own key; never a server key) | added per user with `tempo keys add opencode` | https://opencode.ai/auth |
+| NVIDIA API catalog (off by default; the owner's private testing only, never other users or demo mode; `TEMPO_ENABLE_PROVIDERS=nvidia`) | `NVIDIA_API_KEY` | https://build.nvidia.com |
+| OpenCode Zen (off by default, `TEMPO_ENABLE_PROVIDERS=opencode`; free models, each user's own key, answering only) | added per user with `tempo keys add opencode` | https://opencode.ai/auth |
 | Ollama (local) | `OLLAMA_API_BASE=http://localhost:11434` | https://ollama.com/download |
 
 GitHub Models is not offered: GitHub retired it on 30 July 2026 ([docs](https://docs.github.com/en/github-models), checked 2026-09-28).

@@ -96,6 +96,11 @@ providers:
     key_env: OPENROUTER_API_KEY
     base_env: OPENROUTER_API_BASE
     signup_url: https://openrouter.ai/keys
+    # Owner's decision (step 3): every free model counts as may-log unless its provider has a
+    # written no-retention policy (a model's own data_policy with data_policy_url lifts it).
+    data_policy: may-log
+    data_policy_note: "Free models are treated as possibly logging prompts unless the serving provider has a written no-retention policy (owner's rule, 2026-09-28)."
+    data_policy_url: https://openrouter.ai/docs/features/privacy-and-logging
     shared_rpm: 20  # all :free models share one pool
     shared_rpd: 50
     # The docs page draws its numbers with JavaScript; with a key, `tempo sync` reads the live
@@ -122,13 +127,16 @@ providers:
     data_policy: ok
     data_policy_url: https://developers.cloudflare.com/workers-ai/platform/data-usage/
     data_policy_note: "Cloudflare does not use your Customer Content to (1) train any AI models made available on Workers AI or (2) improve any Cloudflare or third-party services, and would not do so unless we received your explicit consent. (page last updated Apr 21, 2026; checked 2026-09-28)"
+    # Owner's decision (step 3): Cloudflare's terms put no limit of their own on outputs, so each
+    # model's licence decides: Apache-2.0 or MIT models are yes, others follow their licence.
+    licence_decides: true
     training_on_outputs: "unclear"
-    training_terms_url: https://developers.cloudflare.com/workers-ai/platform/data-usage/
-    training_terms_checked: "2026-09-28; page last updated Apr 21, 2026"
+    training_terms_url: https://www.cloudflare.com/service-specific-terms-developer-platform/
+    training_terms_checked: "2026-09-28; Service-Specific Terms last updated September 28, 2026"
     training_terms_quote: |
-      Outputs are the customer's, and each model's own licence applies; nothing says outputs may be used to train other models, so Tempo treats this as unclear:
-      "Your inputs (e.g., text prompts, image submissions, audio files, etc.), outputs (e.g., generated text/images, translations, etc.), embeddings, and training data constitute Customer Content. For Workers AI: You own, and are responsible for, all of your Customer Content."
-      "The models constitute Third-Party Services and may be subject to open source or other license terms that apply between you and the model provider. Be sure to review the license terms applicable to each model (if any)."
+      Cloudflare's own terms leave all rights in outputs with the customer and add no limit of their own; each model's terms apply ("unclear" here is for models whose licence Tempo does not know):
+      "you retain all applicable intellectual property or other proprietary rights in Inputs and Outputs to or from the Services."
+      "Where you have not agreed other terms with the model or search service provider, by using such Third-Party Products, you agree to comply with all restrictions, including any acceptable use policies, in the standard terms of the model or search service provider."
   nvidia:
     label: NVIDIA API catalog (trial)
     key_env: NVIDIA_API_KEY
@@ -137,8 +145,11 @@ providers:
     free_tier: trial
     free_tier_note: "Trial terms: internal testing and evaluation only, not production. Off by default (TEMPO_ENABLE_PROVIDERS=nvidia)."
     enabled: false
-    disabled_note: "NVIDIA's trial terms allow internal testing and evaluation only, not production. Off by default (TEMPO_ENABLE_PROVIDERS=nvidia)."
-    blocked_for: [collect]
+    # Owner's decision (step 3): off by default; the owner may turn it on for private testing
+    # only. Never for other users, never in demo mode.
+    owner_only: true
+    disabled_note: "NVIDIA's trial terms allow internal testing and evaluation only, not production. Off by default; the owner may turn it on for private testing (TEMPO_ENABLE_PROVIDERS=nvidia). Never for other users or in demo mode."
+    blocked_for: [collect, export]
     shared_rpm: 40
     limits_source: https://github.com/raullenchai/free-llm-api-resources (NVIDIA NIM, 40 requests/min; NVIDIA publishes no per-model free limits)
     limits_checked: "2026-09-28"
@@ -158,8 +169,10 @@ providers:
     openai_base: https://api.cohere.ai/compatibility/v1
     signup_url: https://dashboard.cohere.com/api-keys
     shared_rpmonth: 1000
-    free_tier_note: "Trial (evaluation) key: 1,000 API calls a month, 20 requests/min per chat model. Cohere's terms forbid benchmarking, so tempo eval never uses it."
-    blocked_for: [eval, collect]
+    free_tier_note: "Trial (evaluation) key: 1,000 API calls a month, 20 requests/min per chat model. Off by default: a user turns it on by adding their own trial key. It only answers: never the judge, never eval or collect (Cohere's terms forbid benchmarking)."
+    # Owner's decision (step 3): only users' own trial keys; answers only.
+    byok_only: true
+    blocked_for: [eval, collect, judge, export]
     limits_source: https://docs.cohere.com/docs/rate-limits
     limits_checked: "2026-09-28"
     data_policy: may-train
@@ -181,19 +194,29 @@ providers:
     limits_source: live response headers (x-ratelimit-*)
     limits_checked: "2026-09-28"
     data_policy: may-train
+    # After the owner opts out in the console and adds mistral to TEMPO_OPTED_OUT: Mistral no
+    # longer trains on prompts, but has not said in writing that it keeps nothing, so may-log.
+    opt_out_data_policy: may-log
     data_policy_url: https://mistral.ai/pricing
-    data_policy_note: "Pricing page, Free plan: 'Model training: Opt-out' (prompts may be used for training unless you opt out in the console; checked 2026-09-28)."
-    training_on_outputs: "unclear"
+    data_policy_note: "Pricing page, Free plan: 'Model training: Opt-out' (prompts may be used for training unless you opt out in the console; checked 2026-09-28). Set TEMPO_OPTED_OUT=mistral once opted out."
+    # Owner's decision (step 3): text outputs count as yes, from the quoted terms (3.3 restricts
+    # image outputs only). `tempo terms --check` runs before every training export.
+    training_on_outputs: "yes"
     training_terms_url: https://legal.mistral.ai/terms/commercial-terms-of-service
     training_terms_checked: "2026-09-28; Commercial Terms of Service effective September 25, 2026"
     training_terms_quote: |
-      Only image outputs are restricted; nothing forbids training on text outputs, but each model's licence applies and the owner treats providers as unclear until they confirm in writing:
+      Only image outputs are restricted, so text outputs may be used for training (owner's decision, step 3); Tempo registers no image-generating Mistral model:
       3.3: "To the extent permitted by applicable law, Customer may not use image Outputs to develop or train any image generation product that competes with a Mistral AI Product."
       4.2: "Mistral AI will not use Customer Data or Outputs to train its artificial intelligence models except (a) when you (i) opted-in to training on a Mistral AI Product set to opt-out by default or (ii) have not opted-out of training on a Mistral AI Product set to opt-in by default"
   opencode:
     label: OpenCode Zen (your own key, free models only)
     key_env: OPENCODE_API_KEY
     byok_only: true  # only a user's own Zen key; Tempo never calls Zen's free pool without one
+    # Owner's decision (step 3): off by default (TEMPO_ENABLE_PROVIDERS=opencode); answering only,
+    # never collect, exports or eval.
+    enabled: false
+    disabled_note: "Off by default (TEMPO_ENABLE_PROVIDERS=opencode); then only each user's own key, for answering only."
+    blocked_for: [eval, collect, export]
     openai_base: https://opencode.ai/zen/v1
     signup_url: https://opencode.ai/auth
     free_tier_note: "Free models are free for a limited time. Only each user's own key is used."

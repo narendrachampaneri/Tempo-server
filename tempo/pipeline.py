@@ -534,8 +534,13 @@ class Pipeline:
         if gradable and self._want_judge():
             families = {self._family(a.model) for a in gradable}
             ranked = self._rank("check", exclude=[a.model for a in gradable]).candidates
-            # Previews and last-resort routers never judge.
-            ranked = [c for c in ranked if not (c.model.preview or c.model.fallback_only)]
+            # Previews, last-resort routers and providers kept out of judging never judge.
+            ranked = [
+                c
+                for c in ranked
+                if not (c.model.preview or c.model.fallback_only)
+                and not self.e.registry.blocked_for(c.model.provider, "judge")
+            ]
             other = [c for c in ranked if c.model.family not in families]
             judge_ranked = other or ranked
             if self.requests_left() <= 0:

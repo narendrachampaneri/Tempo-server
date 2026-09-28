@@ -54,8 +54,24 @@ def page_text(content: bytes, content_type: str) -> str | None:
     return html.unescape(_TAGS.sub(" ", content.decode("utf-8", errors="replace")))
 
 
+def export_gate_providers(registry: Registry) -> set[str]:
+    """Hosted providers whose outputs can count as "yes" because of their terms (Mistral, and
+    Cloudflare whose terms defer to each model's licence): their terms are re-read before every
+    training export."""
+    return {
+        p.id
+        for p in registry.providers.values()
+        if not p.local
+        and p.id != "mock"
+        and "export" not in p.blocked_for
+        and (p.training_on_outputs == "yes" or p.licence_decides)
+    }
+
+
 async def check(
-    registry: Registry, transport: httpx.AsyncBaseTransport | None = None
+    registry: Registry,
+    transport: httpx.AsyncBaseTransport | None = None,
+    only: set[str] | None = None,
 ) -> list[TermsCheck]:
     results = []
     async with httpx.AsyncClient(
@@ -66,6 +82,8 @@ async def check(
     ) as client:
         for provider in registry.providers.values():
             if provider.local or provider.id == "mock" or not provider.training_terms_url:
+                continue
+            if only is not None and provider.id not in only:
                 continue
             url = provider.training_terms_url
             wanted = quotes(provider.training_terms_quote)

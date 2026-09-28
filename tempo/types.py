@@ -90,6 +90,15 @@ class ProviderInfo(BaseModel):
     blocked_for: list[str] = Field(default_factory=list)
     # Only a user's own key may be used (never a server-wide key).
     byok_only: bool = False
+    # Only the owner (the local user or the TEMPO_API_KEY admin) may use it, never other users,
+    # and never in demo mode (NVIDIA: its trial terms allow private testing only).
+    owner_only: bool = False
+    # Outputs' training verdict follows each model's own licence (Apache-2.0/MIT: yes), because
+    # the provider's terms put no limit on using outputs (Cloudflare).
+    licence_decides: bool = False
+    # Data policy once the owner has opted out of training in the provider's console (listed in
+    # TEMPO_OPTED_OUT); applies only to requests using the server's key.
+    opt_out_data_policy: DataPolicy | None = None
     # OpenAI-compatible base URL. {NAME} is filled from the environment (CLOUDFLARE_ACCOUNT_ID).
     openai_base: str | None = None
     # Public model-list URL (read without a key); when unset, listing needs a key.
@@ -156,6 +165,7 @@ class ModelInfo(BaseModel):
     domain: str | None = None
     # Only used as the very last fallback (e.g. OpenRouter's own openrouter/free router).
     fallback_only: bool = False
+    maker_disclosed: bool = True  # False for stealth models whose maker is not named
     licence: str | None = None  # SPDX-style id where known ("Apache-2.0", "MIT", "llama3.2")
     training_on_outputs: Verdict | None = None  # overrides the provider's verdict
     data_policy: DataPolicy | None = None  # overrides the provider's policy

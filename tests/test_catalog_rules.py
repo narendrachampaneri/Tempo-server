@@ -167,3 +167,82 @@ async def test_eval_and_collect_refuse_blocked_providers():
     assert "alpha" not in col.default_providers(engine.registry)
     with pytest.raises(ValueError, match="not allowed for tempo collect: alpha"):
         await col.run(engine, {}, providers=["alpha"])
+
+
+# --- Owner's step-3 decisions on the step-2 providers ------------------------------------------
+
+
+def test_nvidia_is_owner_only_and_never_in_demo_mode():
+    from tempo.types import Access
+
+    env = {"NVIDIA_API_KEY": "placeholder", "TEMPO_ENABLE_PROVIDERS": "nvidia"}
+    reg = Registry.load(env=env)
+    assert reg.is_configured("nvidia", Access(user_id="local"))
+    assert reg.is_configured("nvidia", Access(user_id="admin"))
+    assert not reg.is_configured("nvidia", Access(user_id="some-other-user"))
+    demo = Registry.load(env={**env, "TEMPO_ENABLE_MOCK": "1"})
+    assert not demo.is_configured("nvidia", Access(user_id="local"))
+    assert not Registry.load(env={"NVIDIA_API_KEY": "placeholder"}).is_configured("nvidia")
+
+
+def test_cohere_answers_only_with_a_users_own_key_and_never_judges():
+    from conftest import make_engine
+
+    from tempo.types import Access
+
+    reg = Registry.load(env={"COHERE_API_KEY": "server-key-never-used"})
+    assert not reg.is_configured("cohere")
+    assert reg.is_configured("cohere", Access(user_id="u", user_keys={"cohere": "own-trial"}))
+    for job in ("eval", "collect", "judge", "export"):
+        assert reg.blocked_for("cohere", job)
+
+    engine, backend = make_engine()
+    engine.registry.providers["beta"].blocked_for = ["judge"]
+    import asyncio
+
+    # A cascade: draft, then a judge from another family, which must not be beta.
+    asyncio.run(engine.complete([{"role": "user", "content": "Explain why the sky is blue"}]))
+    judges = backend.called_for("judge")
+    assert judges and not any(m.startswith("beta/") for m in judges)
+
+
+def test_mistral_text_outputs_are_yes_and_opting_out_needs_the_setting():
+    reg = Registry.load(env={"MISTRAL_API_KEY": "placeholder"})
+    small = model("mistral/mistral-small-latest")
+    assert reg.training_verdict(small) == "yes"
+    assert reg.data_policy(small) == "may-train"
+    opted = Registry.load(env={"MISTRAL_API_KEY": "placeholder", "TEMPO_OPTED_OUT": "mistral"})
+    assert opted.data_policy(small) == "may-log"  # no written zero-retention: still flagged
+    from tempo.types import Access
+
+    own = Access(user_id="u", user_keys={"mistral": "their-own"})
+    assert opted.data_policy(small, own) == "may-train"  # the owner's opt-out isn't theirs
+
+
+def test_cloudflare_open_licence_models_are_yes_others_follow_their_licence():
+    reg = Registry.load(env={})
+    assert reg.training_verdict(model("cloudflare/@cf/a", licence="Apache-2.0")) == "yes"
+    assert reg.training_verdict(model("cloudflare/@cf/b", licence="MIT")) == "yes"
+    assert reg.training_verdict(model("cloudflare/@cf/c", licence="llama")) == "unclear"
+    assert reg.training_verdict(model("cloudflare/@cf/d")) == "unclear"
+    from tempo.sync import licence_from_hint
+
+    assert licence_from_hint("https://www.apache.org/licenses/LICENSE-2.0") == "Apache-2.0"
+    assert licence_from_hint("https://opensource.org/licenses/MIT") == "MIT"
+    assert licence_from_hint("https://llama.meta.com/llama3/license/") == "llama"
+
+
+def test_openrouter_free_models_may_log_unless_lifted_with_a_source():
+    reg = Registry.load(env={})
+    assert reg.data_policy(model("openrouter/x/y:free")) == "may-log"
+    for m in reg.all():
+        if m.provider == "openrouter" and m.data_policy == "ok":
+            assert m.data_policy_note, f"{m.id}: a lifted flag needs its written source"
+
+
+def test_zen_is_off_and_out_of_eval_collect_and_exports():
+    reg = Registry.load(env={"TEMPO_ENABLE_PROVIDERS": "opencode"})
+    assert not reg.providers["opencode"].enabled
+    for job in ("eval", "collect", "export"):
+        assert reg.blocked_for("opencode", job)
+    assert reg.training_verdict(model("opencode/big-pickle", training_on_outputs="yes")) == "no"

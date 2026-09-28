@@ -197,3 +197,14 @@ async def test_cli_export_and_compare(tmp_path, monkeypatch):
     assert compared.exit_code == 0 and "should_stop" in compared.stdout
     status = runner.invoke(app, ["laya", "status"])
     assert status.exit_code == 0 and "next_model" in status.stdout
+
+
+async def test_providers_whose_terms_check_failed_are_left_out_of_the_export():
+    engine, _ = await logged_engine()
+    for provider in engine.registry.providers.values():
+        provider.training_on_outputs = "yes"
+    all_rows, _ = build_rows(engine.store, engine.registry)
+    rows, _ = build_rows(engine.store, engine.registry, unverified={"beta"})
+    assert len(rows) < len(all_rows)
+    for row in rows:
+        assert not any(m.startswith("beta/") for m in json.loads(row["factors"])["output_models"])

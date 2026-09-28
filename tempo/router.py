@@ -168,7 +168,7 @@ class Router:
             return "expired"
         if model.domain and model.domain != profile.domain and not explicit:
             return f"{model.domain} specialist; question is not about {model.domain}"
-        if no_logging and self.registry.data_policy(model) in FLAGGED_POLICIES:
+        if no_logging and self.registry.data_policy(model, access) in FLAGGED_POLICIES:
             return "may log or train on prompts"
         if training_only and self.registry.training_verdict(model) != "yes":
             return "outputs not allowed as training data"

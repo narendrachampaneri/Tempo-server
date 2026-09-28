@@ -393,6 +393,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             if verified is False:
                 raise APIError(400, f"{info.label} rejected this key.", code="key_rejected")
         engine.accounts.set_key(request.state.user_id, provider, req.api_key, verified)
+        if engine.registry.providers[provider].byok_only:
+            await engine.refresh_provider(provider, req.api_key)
         return {"ok": True, "provider": provider, "verified": verified}
 
     @api.delete("/keys/{provider}")

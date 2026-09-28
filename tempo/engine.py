@@ -208,7 +208,7 @@ class Engine:
         while True:
             try:
                 if time.monotonic() - last_full >= self.settings.sync_interval_s:
-                    status = await self.sync.run()
+                    status = await self.sync.run(self.listing_keys())
                     last_full = time.monotonic()
                     self.save_catalog(status)
                 else:  # between full syncs: OpenRouter endpoint health only
@@ -216,6 +216,28 @@ class Engine:
             except Exception:  # a sync problem must never take the server down
                 log.exception("registry sync failed")
             await asyncio.sleep(min(self.settings.sync_interval_s, HEALTH_EVERY_S))
+
+    def listing_keys(self) -> dict[str, str]:
+        """For providers that take only users' own keys: one stored user key each, used only to
+        read the provider's model list."""
+        wanted = {p.id for p in self.registry.providers.values() if p.byok_only}
+        keys: dict[str, str] = {}
+        for row in self.store.query("SELECT DISTINCT user_id, provider FROM user_keys"):
+            if row["provider"] in wanted and row["provider"] not in keys:
+                key = self.accounts.keys(row["user_id"]).get(row["provider"])
+                if key:
+                    keys[row["provider"]] = key
+        return keys
+
+    async def refresh_provider(self, provider: str, api_key: str) -> None:
+        """A user just added a key: read that provider's model list with it."""
+        if self.sync is None:
+            self.sync = RegistrySync(self.registry, self.health)
+        try:
+            status = await self.sync.run({provider: api_key}, only={provider})
+            self.save_catalog(status)
+        except Exception:  # a list that can't be read must never fail adding a key
+            log.exception("model list refresh for %s failed", provider)
 
     def save_catalog(self, status: dict[str, Any]) -> None:
         if self.settings.data_dir is not None:

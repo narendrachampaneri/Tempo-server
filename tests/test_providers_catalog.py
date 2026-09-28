@@ -125,10 +125,11 @@ def handler(seen: list[httpx.Request]):
     return respond
 
 
-async def synced(env=KEYS):
+async def synced(env=KEYS, user_keys=None):
     seen: list[httpx.Request] = []
     registry = Registry.load(env=env)
-    status = await RegistrySync(registry, transport=httpx.MockTransport(handler(seen))).run()
+    sync = RegistrySync(registry, transport=httpx.MockTransport(handler(seen)))
+    status = await sync.run({"cohere": "users-own-trial-key"} if user_keys is None else user_keys)
     return registry, status, seen
 
 
@@ -209,9 +210,17 @@ async def test_opencode_zen_free_models_only_with_a_users_own_key():
     policy = {m: registry.data_policy(zen[m]) for m in zen}
     assert policy["opencode/big-pickle"] == "may-train"
     assert policy["opencode/nemotron-3.5-lightning-free"] == "may-train"
-    assert policy["opencode/space-bunny-free"] == "may-log"
+    # Stealth, but Zen states zero retention in writing: not flagged, maker not disclosed.
+    assert policy["opencode/space-bunny-free"] == "ok"
+    assert not zen["opencode/space-bunny-free"].maker_disclosed
     assert policy["opencode/longcat-2.5-preview-free"] == "ok"
-    # A server-wide key is never used; only a user's own.
+    # Off by default; once turned on, a server-wide key is never used, only a user's own.
+    assert not registry.is_configured("opencode")
+    registry = Registry(
+        registry.providers,
+        registry.all(),
+        env={"OPENCODE_API_KEY": "server-key-never-used", "TEMPO_ENABLE_PROVIDERS": "opencode"},
+    )
     assert not registry.is_configured("opencode")
     from tempo.types import Access
 
@@ -284,11 +293,11 @@ async def test_free_catalog_rows():
     command = by_id["cohere/command-a-03-2025"]
     assert command["limits"] == "20/min · 1,000/month shared"
     assert command["data_policy"] == "may-train" and command["flagged"]
-    assert command["status"] == "ready" and command["last_check"]
+    assert command["status"] == "your own key" and command["last_check"]
     assert by_id["nvidia/nvidia/nemotron-3-super-120b-a12b"]["context"] is None  # not listed
     assert by_id["cloudflare/@cf/openai/whisper"]["status"] == "ready (not chat)"
     assert "cloudflare/@cf/old/model" not in by_id  # expired
-    assert by_id["opencode/big-pickle"]["status"] == "your own key"
+    assert by_id["opencode/big-pickle"]["status"] == "off by default"
 
 
 def test_models_free_cli_reads_lists_and_saves_the_catalog(tmp_path, monkeypatch):
@@ -312,5 +321,5 @@ def test_models_free_cli_reads_lists_and_saves_the_catalog(tmp_path, monkeypatch
     monkeypatch.setenv("TEMPO_EMBEDDINGS", "off")
     result = CliRunner().invoke(app, ["models", "--free", "--json"])
     assert result.exit_code == 0, result.stdout
-    assert '"cohere/command-a-03-2025"' in result.stdout
+    assert '"cloudflare/@cf/meta/llama-4-scout-17b-16e-instruct"' in result.stdout
     assert (tmp_path / "catalog.json").exists()

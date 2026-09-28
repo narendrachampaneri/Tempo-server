@@ -19,6 +19,9 @@ from tempo.types import OPEN_LICENCES, TASKS, Access, DataPolicy, ModelInfo, Pro
 
 log = logging.getLogger(__name__)
 
+# Who counts as the owner: the implicit local user and the TEMPO_API_KEY admin.
+OWNER_IDS = frozenset({"local", "admin"})
+
 OLLAMA_DEFAULT_BASE = "http://localhost:11434"
 
 
@@ -73,19 +76,28 @@ class Registry:
             raise ValueError(f"Model {model.id} uses unknown provider {model.provider!r}")
         self._models.setdefault(model.id, model)
 
+    def _env_list(self, name: str) -> set[str]:
+        return {p.strip().lower() for p in self._env.get(name, "").split(",") if p.strip()}
+
+    @property
+    def demo_mode(self) -> bool:
+        return self._env.get("TEMPO_ENABLE_MOCK", "").strip().lower() in ("1", "true", "yes", "on")
+
     def is_enabled(self, provider_id: str) -> bool:
-        """Providers marked ``enabled: false`` run only when TEMPO_ENABLE_PROVIDERS names them."""
+        """Providers marked ``enabled: false`` run only when TEMPO_ENABLE_PROVIDERS names them.
+        Owner-only providers never run in demo mode."""
         provider = self.providers[provider_id]
-        if provider.enabled:
-            return True
-        wanted = self._env.get("TEMPO_ENABLE_PROVIDERS", "")
-        return provider_id in {p.strip().lower() for p in wanted.split(",") if p.strip()}
+        if provider.owner_only and self.demo_mode:
+            return False
+        return provider.enabled or provider_id in self._env_list("TEMPO_ENABLE_PROVIDERS")
 
     def is_configured(self, provider_id: str, access: Access | None = None) -> bool:
         provider = self.providers[provider_id]
         if provider.id == "mock":
             return True
         if not self.is_enabled(provider_id):
+            return False
+        if provider.owner_only and access is not None and access.user_id not in OWNER_IDS:
             return False
         if provider.key_env:
             if access is not None and access.user_keys.get(provider_id):
@@ -139,20 +151,33 @@ class Registry:
     def training_verdict(self, model: ModelInfo) -> Verdict:
         """May this model's outputs be used as training data? A model's own verdict wins; a
         local model decides by its licence (Apache-2.0 or MIT: yes); else the provider's."""
+        provider = self.providers.get(model.provider)
+        if provider is not None and "export" in provider.blocked_for:
+            return "no"  # the owner keeps this provider out of every training export
         if model.training_on_outputs is not None:
             return model.training_on_outputs
-        provider = self.providers.get(model.provider)
-        if provider is not None and provider.local and model.licence:
+        if provider is not None and (provider.local or provider.licence_decides) and model.licence:
             return "yes" if model.licence in OPEN_LICENCES else "unclear"
         return provider.training_on_outputs if provider else "unclear"
 
-    def data_policy(self, model: ModelInfo) -> DataPolicy:
+    def data_policy(self, model: ModelInfo, access: Access | None = None) -> DataPolicy:
+        """What the free tier may do with prompts. A provider the owner opted out of training
+        (TEMPO_OPTED_OUT) gets its opt-out policy, for requests on the server's key only."""
         if model.data_policy is not None:
             return model.data_policy
         provider = self.providers.get(model.provider)
         if provider is None:
             return "unknown"
-        return "ok" if provider.local else provider.data_policy
+        if provider.local:
+            return "ok"
+        on_own_key = access is not None and bool(access.user_keys.get(model.provider))
+        if (
+            provider.opt_out_data_policy is not None
+            and provider.id in self._env_list("TEMPO_OPTED_OUT")
+            and not on_own_key
+        ):
+            return provider.opt_out_data_policy
+        return provider.data_policy
 
     def blocked_for(self, provider_id: str, job: str) -> bool:
         provider = self.providers.get(provider_id)

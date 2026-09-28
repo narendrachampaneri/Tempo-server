@@ -128,6 +128,22 @@ def classify_type(model_id: str, inputs: list[str] | None = None) -> ModelType:
     return "chat"
 
 
+def licence_from_hint(value: Any) -> str | None:
+    """A licence id from a provider's licence field or link (Cloudflare lists a terms link)."""
+    if not value:
+        return None
+    text = str(value).lower()
+    if "apache" in text:
+        return "Apache-2.0"
+    if re.search(r"\bmit\b|licenses/mit", text):
+        return "MIT"
+    if "llama" in text:
+        return "llama"
+    if "gemma" in text:
+        return "gemma"
+    return "other"
+
+
 def classify_domain(model_id: str) -> str | None:
     for domain, pattern in DOMAIN_PATTERNS.items():
         if pattern.search(model_id):
@@ -255,7 +271,9 @@ ZEN_DATA_POLICY: dict[str, str] = {
     "ling-3.0-flash-fin-free": "may-train",
     "nemotron-3-ultra-free": "may-train",  # NVIDIA free endpoints: logged, used to improve
     "nemotron-3.5-lightning-free": "may-train",
-    "space-bunny-free": "may-log",  # stealth (owner's rule), though Zen says zero retention
+    # Stealth, but Zen states zero retention in writing ("Its provider follows a zero-retention
+    # policy and does not use your data for model training"): not flagged (owner, step 3).
+    "space-bunny-free": "ok",
     "longcat-2.5-preview-free": "ok",  # "zero-retention policy and does not use your data"
 }
 COHERE_TRIAL_CHAT_RPM = 20
@@ -278,6 +296,7 @@ class RegistrySync:
         self._clock = clock
         self.status: dict[str, ProviderStatus] = {}
         self._live: dict[str, dict[str, Any]] = {}  # model id -> fields the provider reported
+        self._user_keys: dict[str, str] = {}
 
     def list_url(self, provider: str) -> str | None:
         template = MODEL_LISTS.get(provider)
@@ -291,23 +310,34 @@ class RegistrySync:
             return None
         return template.format(**values)
 
-    def wanted(self, provider: str) -> bool:
+    def wanted(self, provider: str, user_keys: dict[str, str] | None = None) -> bool:
         if provider not in self.registry.providers:
             return False
         if provider in PUBLIC_LISTS:
             return True  # public data, read even for providers that are off (the catalog)
         if not self.registry.is_enabled(provider):
             return False
+        if provider in (user_keys or {}):
+            return True  # a user's own key lists this provider's models
         return self.registry.is_configured(provider)
 
-    async def run(self) -> dict[str, ProviderStatus]:
+    async def run(
+        self, user_keys: dict[str, str] | None = None, only: set[str] | None = None
+    ) -> dict[str, ProviderStatus]:
+        """Read every list. ``user_keys``: for providers that take only users' own keys
+        (Cohere, Zen), one user's key reads the model list; listing uses no free quota."""
+        self._user_keys = dict(user_keys or {})
         async with httpx.AsyncClient(transport=self.transport, timeout=15.0) as client:
             for provider in MODEL_LISTS.keys() | {
                 p for p, info in self.registry.providers.items() if info.openai_base
             }:
-                if not self.wanted(provider):
+                if only is not None and provider not in only:
+                    continue
+                if not self.wanted(provider, self._user_keys):
                     continue
                 self.status[provider] = await self._sync(client, provider)
+            if only is not None:
+                return self.status
             if "openrouter" in self.status and self.status["openrouter"].ok:
                 await self.check_openrouter_health(client)
                 await self._openrouter_key_limit(client)
@@ -321,7 +351,8 @@ class RegistrySync:
         if url is None:
             return ProviderStatus(provider, False, self._clock(), error="not configured")
         creds = self.registry.credentials(provider)
-        headers = auth_headers(provider, creds.get("api_key"))
+        api_key = self._user_keys.get(provider) or creds.get("api_key")
+        headers = auth_headers(provider, api_key)
         try:
             response = await client.get(url, headers=headers, params=LIST_PARAMS.get(provider))
         except httpx.HTTPError as exc:
@@ -427,6 +458,7 @@ class RegistrySync:
                 fallback_only=True if raw == "openrouter/free" else None,
                 family="openrouter-router" if raw == "openrouter/free" else None,
                 preview=True if stealth else None,
+                maker_disclosed=False if stealth else None,
                 data_policy="may-log" if stealth else None,
             )
 
@@ -453,6 +485,9 @@ class RegistrySync:
                 preview=str(props.get("beta", "")).lower() == "true" or None,
                 expires=props.get("planned_deprecation_date"),
                 type=by_name if by_name != "chat" else kind,
+                licence=licence_from_hint(
+                    props.get("license") or props.get("licence") or props.get("terms")
+                ),
             )
 
     def _parse_cohere(self, provider: str, data: Any, out: dict[str, ModelInfo]) -> None:
@@ -524,6 +559,7 @@ class RegistrySync:
                 raw,
                 provider,
                 preview=True if raw in ZEN_STEALTH else None,
+                maker_disclosed=False if raw in ZEN_STEALTH else None,
                 data_policy=ZEN_DATA_POLICY.get(raw),
             )
 
@@ -659,6 +695,7 @@ SAVED_FIELDS = LIVE_FIELDS | {
     "limits_source",
     "limits_checked",
     "licence",
+    "maker_disclosed",
 }
 
 

@@ -283,7 +283,7 @@ def _free_catalog(engine: Engine, as_json: bool, everything: bool) -> None:
     from tempo import catalog
     from tempo.sync import RegistrySync
 
-    status = asyncio.run(RegistrySync(engine.registry, engine.health).run())
+    status = asyncio.run(RegistrySync(engine.registry, engine.health).run(engine.listing_keys()))
     engine.save_catalog(status)
     checked = {p: s.checked_at for p, s in status.items()}
     found = catalog.rows(engine.registry, engine.health, checked, everything)
@@ -462,7 +462,7 @@ def sync() -> None:
     from tempo.sync import RegistrySync
 
     engine = _engine()
-    status = asyncio.run(RegistrySync(engine.registry, engine.health).run())
+    status = asyncio.run(RegistrySync(engine.registry, engine.health).run(engine.listing_keys()))
     engine.save_catalog(status)
     table = Table(title="Provider sync", header_style="bold")
     for column in ("provider", "status", "models listed", "new", "no longer listed"):
@@ -664,6 +664,34 @@ def terms(
         out.print()
 
 
+def _terms_gate(engine: Engine) -> set[str]:
+    """Before every training export: re-read the terms of hosted providers whose outputs count
+    as yes. Providers whose quotes changed, or whose pages can't be read, are left out."""
+    from tempo.terms import check, export_gate_providers
+
+    logged = {
+        row["provider"]
+        for row in engine.store.query("SELECT DISTINCT provider FROM calls WHERE status = 'ok'")
+    }
+    wanted = export_gate_providers(engine.registry) & logged  # only providers in the log
+    if not wanted:
+        return set()
+    err.print(f"Checking terms before export: {', '.join(sorted(wanted))}", markup=False)
+    failed = set()
+    for result in asyncio.run(check(engine.registry, only=wanted)):
+        if result.status != "ok":
+            failed.add(result.provider)
+            err.print(
+                f"  {result.provider}: {result.status}; its rows are left out of this export "
+                "(run `tempo terms --check`, re-read the terms, update models.yaml).",
+                style="yellow",
+                markup=False,
+            )
+        else:
+            err.print(f"  {result.provider}: ok ({result.found} quotes found)", markup=False)
+    return failed
+
+
 @app.command(name="export-laya")
 def export_laya(
     out_dir: Annotated[
@@ -691,6 +719,7 @@ def export_laya(
         out_dir,
         test_percent=test_percent,
         include_unclear=include_unclear,
+        unverified=_terms_gate(engine),
     )
     err.print(
         f"Wrote {stats.rows} rows ({stats.decisions} labelled decisions from "
@@ -905,6 +934,8 @@ def keys_add(
             err.print(f"{info.label} rejected this key; nothing stored.", style="red")
             raise typer.Exit(1)
     engine.accounts.set_key(_user_id(engine, user), provider, api_key, verified)
+    if info.byok_only:  # the server has no key of its own: read the model list with this one
+        asyncio.run(engine.refresh_provider(provider, api_key))
     note = (
         "verified" if verified else "stored (could not verify now)" if not no_verify else "stored"
     )

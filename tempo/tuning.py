@@ -276,16 +276,25 @@ class ExportStats:
     by_workflow: dict[str, int] = field(default_factory=dict)
     skipped_terms: int = 0
     unclear_terms_providers: set[str] = field(default_factory=set)
+    unverified_providers: set[str] = field(default_factory=set)  # terms check did not pass
     sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo collect)
 
 
-def _terms(registry: Registry | None, model_id: str | None, recorded: str | None = None) -> str:
+def _terms(
+    registry: Registry | None,
+    model_id: str | None,
+    recorded: str | None = None,
+    unverified: frozenset[str] | set[str] = frozenset(),
+) -> str:
     """yes / no / unclear: may this model's outputs be used for training? Combines the verdict
     logged with the call (it knew a local model's licence) with today's registry: "no" from
     either wins, then "yes" from either, else unclear."""
     if registry is None or not model_id:
         return "yes"
     model = registry.get(model_id)
+    provider_id = model.provider if model is not None else model_id.split("/")[0]
+    if provider_id in unverified:
+        return "no"  # its terms could not be confirmed just before this export
     if model is not None:
         current = registry.training_verdict(model)
     else:
@@ -317,6 +326,7 @@ def build_rows(
     test_percent: int = 10,
     include_unclear: bool = False,
     check_terms: bool = True,
+    unverified: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[dict[str, Any]], ExportStats]:
     """Typed-decision rows from the log. Rows containing text written by a model whose
     provider's terms say "no" are left out, and so are "unclear" ones unless
@@ -400,7 +410,8 @@ def build_rows(
                 continue
 
             def verdict(model_id: str, qid: str = question_id) -> str:
-                return _terms(registry, model_id, recorded.get((qid, model_id), (None, None))[1])
+                logged = recorded.get((qid, model_id), (None, None))[1]
+                return _terms(registry, model_id, logged, unverified)
 
             verdicts = {verdict(m) for m in sources if m}
             for model_id in sources:
@@ -519,10 +530,16 @@ def export(
     *,
     test_percent: int = 10,
     include_unclear: bool = False,
+    unverified: frozenset[str] | set[str] = frozenset(),
 ) -> ExportStats:
     rows, stats = build_rows(
-        store, registry, test_percent=test_percent, include_unclear=include_unclear
+        store,
+        registry,
+        test_percent=test_percent,
+        include_unclear=include_unclear,
+        unverified=unverified,
     )
+    stats.unverified_providers = set(unverified)
     out_dir.mkdir(parents=True, exist_ok=True)
     counts = {"train": 0, "test": 0}
     for split in ("train", "test"):
