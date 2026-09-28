@@ -437,6 +437,18 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         mode = "local" if user_id == LOCAL_USER else "admin" if user_id == ADMIN_USER else "user"
         return {"user": request.state.user_name, "mode": mode}
 
+    @api.get("/quota")
+    async def quota(access: AccessDep) -> dict[str, Any]:
+        from tempo import budget
+
+        view = budget.quota_view(engine, access)
+        return {
+            "providers": [
+                {**q.as_dict(), "resets_in": budget.resets_text(q.resets_in_s)} for q in view
+            ],
+            "all_used_up": budget.all_used_up(view),
+        }
+
     @api.get("/keys")
     async def list_keys(request: Request) -> dict[str, Any]:
         stored = {k["provider"]: k for k in engine.accounts.key_info(request.state.user_id)}

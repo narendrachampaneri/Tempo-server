@@ -255,6 +255,7 @@ class Pipeline:
                 return
 
         route = self._rank("draft")
+        self._note_quota_fallback(route)
         if not route.candidates:
             self.emit(
                 "error",
@@ -507,6 +508,7 @@ class Pipeline:
                 chosen = self.e.router.candidate(requested, profile, mode, access)
                 chosen.why = "requested by caller"
                 ranked = [chosen, *[c for c in ranked if c.model.id != requested.id]]
+        ranked = self._local_first(ranked)
         count = self._affordable(count, ranked)
         slots = await self._pick("draft", ranked, count)
         if not slots:
@@ -528,6 +530,49 @@ class Pipeline:
         if not outputs:
             raise _NoAnswer(self._failure_message(), [c.model.id for s in slots for c in s])
         self.answers.extend(outputs)
+
+    def _note_quota_fallback(self, route: Any) -> None:
+        """When every free quota is used up, say so: local models (and the cache, already
+        checked) answer instead."""
+        used_up = [
+            m
+            for reason, ids in route.skipped.items()
+            if "used up" in reason or "kept for users" in reason
+            for m in ids
+        ]
+        hosted_left = [
+            c for c in route.candidates if not self.e.registry.providers[c.model.provider].local
+        ]
+        if not used_up or hosted_left:
+            return
+        if route.candidates:
+            self.emit(
+                "note",
+                message="Free quota is used up on every provider: answering with local model "
+                f"{route.candidates[0].model.id} (the cache was checked first).",
+            )
+        else:
+            self.emit(
+                "note",
+                message="Free quota is used up on every provider and no local model is running "
+                "(the cache was checked first).",
+            )
+
+    def _local_first(self, ranked: list[Candidate]) -> list[Candidate]:
+        """Simple questions go to a local model first when Ollama has one (TEMPO_LOCAL_FIRST)."""
+        s, p = self.e.settings, self.profile
+        if s.local_first == "off" or p is None or self.o.mode in ("best", "private"):
+            return ranked
+        if self.o.model or self.tool_req or self.json_fmt or self.answers:
+            return ranked
+        if p.complexity > s.local_first_max_complexity:
+            return ranked
+        local = [c for c in ranked if self.e.registry.providers[c.model.provider].local]
+        if not local or local[0] is ranked[0]:
+            return ranked
+        best = local[0]
+        best.why = "simple question: a local model saves free quota"
+        return [best, *[c for c in ranked if c is not best]]
 
     async def _tools(self) -> None:
         """Tool calling: one model reply, validated (functions exist, arguments match their

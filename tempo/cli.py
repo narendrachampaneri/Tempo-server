@@ -475,6 +475,47 @@ def sync() -> None:
         err.print("No providers configured.", style="dim")
 
 
+@app.command()
+def quota(
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
+) -> None:
+    """Show how many free requests each provider has left today."""
+    from tempo import budget
+
+    engine = _engine()
+    asyncio.run(engine.startup(oneshot=True))
+    view = budget.quota_view(engine)
+    if as_json:
+        out.print_json(json.dumps([q.as_dict() for q in view]))
+        return
+    table = Table(title="Free requests left today", header_style="bold")
+    for column in ("provider", "left today", "per day", "per minute", "resets in", "note"):
+        table.add_column(column)
+    for q in view:
+        left = "-" if q.left_today is None else f"{q.left_today:,}"
+        per_day = "-" if q.per_day is None else f"{q.per_day:,}"
+        per_minute = "-" if q.per_minute is None else str(q.per_minute)
+        style = "red" if q.used_up else None
+        table.add_row(
+            q.label,
+            left,
+            per_day,
+            per_minute,
+            budget.resets_text(q.resets_in_s),
+            q.note,
+            style=style,
+        )
+    out.print(table)
+    if not view:
+        err.print("No providers configured. Run: tempo setup", style="dim")
+    elif budget.all_used_up(view):
+        err.print(
+            "Every free quota is used up: Tempo answers with local models (Ollama) and the cache"
+            " until the limits reset.",
+            style="yellow",
+        )
+
+
 @app.command(name="collect")
 def collect_data(
     dataset: Annotated[

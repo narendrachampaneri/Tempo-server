@@ -244,12 +244,18 @@ class Engine:
         return max(1, int(best if best is not None else 60))
 
     def listing_keys(self) -> dict[str, str]:
-        """For providers that take only users' own keys: one stored user key each, used only to
-        read the provider's model list."""
-        wanted = {p.id for p in self.registry.providers.values() if p.byok_only}
+        """Keys used only to read providers' model lists: the owner's keys from the vault (what
+        `tempo setup` stores), and for providers that take only users' own keys, one user's."""
+        from tempo.accounts import ADMIN_USER, LOCAL_USER
+
+        byok = {p.id for p in self.registry.providers.values() if p.byok_only}
         keys: dict[str, str] = {}
+        for owner in (LOCAL_USER, ADMIN_USER):
+            for provider, key in self.accounts.keys(owner).items():
+                if provider not in byok:
+                    keys.setdefault(provider, key)
         for row in self.store.query("SELECT DISTINCT user_id, provider FROM user_keys"):
-            if row["provider"] in wanted and row["provider"] not in keys:
+            if row["provider"] in byok and row["provider"] not in keys:
                 key = self.accounts.keys(row["user_id"]).get(row["provider"])
                 if key:
                     keys[row["provider"]] = key
@@ -313,9 +319,14 @@ class Engine:
         reasons = route.skipped_summary()
         if set(reasons) <= {"provider not configured"}:
             return (
-                "No model providers are configured. Set at least one free API key "
-                "(GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY), "
-                "add your own key, or set OLLAMA_API_BASE. See .env.example."
+                "No model providers are configured. Run `tempo setup` to add your free keys "
+                "(or set them in .env), or start Ollama for local models."
+            )
+        if any("used up" in reason for reason in reasons):
+            return (
+                "Free quota is used up on every provider for now, and no local model is "
+                "running. Start Ollama for local answers (tempo setup), or try again later "
+                "(see Retry-After and `tempo quota`)."
             )
         detail = ", ".join(f"{n} {reason}" for reason, n in reasons.items())
         return f"No available model can handle this request ({detail})."

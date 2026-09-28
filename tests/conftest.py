@@ -199,6 +199,7 @@ def make_engine(
     **settings: Any,
 ) -> tuple[Engine, ScriptedBackend]:
     backend = ScriptedBackend(scripts, judge_score=judge_score)
+    settings.setdefault("local_first", "off")  # tests of local first turn it on themselves
     engine = Engine(
         make_registry(env),
         lambda model: backend,

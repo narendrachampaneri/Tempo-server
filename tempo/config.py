@@ -75,6 +75,9 @@ def parse_takeover(spec: str) -> dict[str, str]:
     return modes
 
 
+SETTINGS_FILE = "settings.env"  # non-secret settings `tempo setup` writes in the data directory
+
+
 @dataclass(frozen=True)
 class Settings:
     api_key: str | None = None
@@ -129,6 +132,10 @@ class Settings:
     # quick checks (empty, refusal, wrong language) and the judge and fix stages only in best
     # mode or when a quick check fails; "full" always judges; "off" checks nothing.
     tool_followup: str = "quick"
+    # Local first: when Ollama has a model, simple questions (complexity up to this) go to it
+    # first to save free quota. "off" disables it.
+    local_first: str = "auto"
+    local_first_max_complexity: float = 0.3
 
     @property
     def db_path(self) -> Path | None:
@@ -141,6 +148,13 @@ class Settings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         if env is None:
             load_dotenv(override=False)
+            # Non-secret settings written by `tempo setup` (never keys: those are encrypted in
+            # the vault). The environment and .env win over them.
+            chosen = os.environ.get("TEMPO_DATA_DIR", "").strip()
+            if chosen.lower() != "memory":
+                home = Path(chosen).expanduser() if chosen else Path.home() / ".tempo"
+                if (home / SETTINGS_FILE).exists():
+                    load_dotenv(home / SETTINGS_FILE, override=False)
             env = os.environ
         models_file = env.get("TEMPO_MODELS_FILE")
         data_dir = env.get("TEMPO_DATA_DIR", "").strip()
@@ -179,4 +193,6 @@ class Settings:
             min_public_share=float(env.get("TEMPO_MIN_PUBLIC_SHARE") or 0.3),
             max_self_share=float(env.get("TEMPO_MAX_SELF_SHARE") or 0.3),
             tool_followup=_choice(env, "TEMPO_TOOL_FOLLOWUP", ("quick", "full", "off"), "quick"),
+            local_first=_choice(env, "TEMPO_LOCAL_FIRST", ("auto", "off"), "auto"),
+            local_first_max_complexity=float(env.get("TEMPO_LOCAL_FIRST_MAX_COMPLEXITY") or 0.3),
         )
