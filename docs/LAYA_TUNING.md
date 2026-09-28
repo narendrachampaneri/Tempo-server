@@ -32,6 +32,9 @@ tempo collect --status      # progress per dataset
   licence). With only Ollama running, nothing leaves your computer and no free quota is used;
   the pace (`--per-minute`) and your CPU are the only limits.
 - Cerebras is never used for collecting.
+- Datasets: GSM8K (MIT), MBPP (CC-BY-4.0), HumanEval (MIT), OpenAssistant oasst2
+  (Apache-2.0: first user turns only, skipping deleted, rejected, synthetic, toxic and flagged
+  messages, scrubbed), and Dolly (CC-BY-SA-3.0, test splits only, never training).
 - Items that look like they contain an email, phone number, IP address or card number are
   skipped. Each question keeps its dataset's name, and every exported row says which licence
   its text came under.

@@ -129,7 +129,9 @@ print(reply.tempo["trace"])  # thinking-window events
 
 - **Conditions** go in the `tempo` field: `mode`, `privacy` (`"local_only"`, or `"no_logging"`: never a model whose free tier may log or train on prompts), `allow_providers`, `trace`, `max_stages` (1–50), `time_budget_s`, `quota_budget`, `max_parallel`, `strategy` (`single`, `cascade`, `mixture`, `decompose`).
 - **Tool calling** (`tools`, `tool_choice`, `parallel_tool_calls`) works the same on every provider: models with native tool support get the tools as is; every other model gets them described in its prompt, and replies in the text formats open models print (Hermes/Qwen `<tool_call>`, Mistral `[TOOL_CALLS]`, Llama `<|python_tag|>` and `<function=…>`, JSON) become normal OpenAI `tool_calls`. Every call is validated (known function, arguments matching its JSON schema, `tool_choice` honoured); a bad reply is retried on another model. Send tool results back as `role: "tool"` messages as usual.
-- **Strict JSON** (`response_format` `json_schema` or `json_object`): the answer is validated against the schema and retried on another model when it doesn't match; you get clean JSON. If no model manages it, the request fails with 503 and the reason, never with invalid JSON.
+- **Strict JSON** (`response_format` `json_schema` or `json_object`): passed natively to models that support structured outputs (a provider that rejects it is remembered and never sent it again), and every answer is validated against the schema and retried on another model when it doesn't match; you get clean JSON.
+- **Errors**: `502` with the reason when models answered but none gave a valid tool call or JSON; `503` with a `Retry-After` header (a minute, or the next daily reset) when no model is available or the free quota is used up.
+- **Text answers after tool results** get the quick checks (empty, refusal, wrong language); the judge and fix stages run only in `best` mode or when a quick check fails (`TEMPO_TOOL_FOLLOWUP=quick|full|off`).
 - **Images** (`image_url` parts): sent only to vision models, at every stage.
 - **Streaming** works (`stream=True`), for all of the above; tool calls stream as OpenAI `tool_calls` deltas, and tool-call and JSON answers are streamed after they are validated. OpenAI clients can't take back text, so a multi-stage question streams the checked final answer. With `max_stages: 1` it streams live from the model. Trace events arrive as chunks with empty `choices`, and model reasoning arrives as `delta.reasoning_content`.
 - `POST /api/ask` streams every engine event as server-sent events, including live drafts and `answer_reset` when a later stage replaces a draft. The web app uses it. `POST /api/feedback` records 👍/👎, and `GET /api/usage?hours=24` returns the dashboard numbers.
@@ -198,6 +200,7 @@ All optional; put them in `.env` or the environment.
 | `TEMPO_SECRET_KEY` | generated | Key-vault secret (otherwise a 0600 `secret.key` file in the data dir) |
 | `TEMPO_SYNC_INTERVAL` | `21600` | Seconds between registry syncs (`0` = off) |
 | `TEMPO_API_KEY` | none | Admin key for the API and web app |
+| `TEMPO_TOOL_FOLLOWUP` | `quick` | Checks for text answers to tool-calling requests: `quick`, `full` (always judge) or `off` |
 | `TEMPO_MIN_PUBLIC_SHARE` / `TEMPO_MAX_SELF_SHARE` | `0.3` / `0.3` | Training data mix: at least this share from public or human data, at most this share written by an earlier Tempo-Core (exports warn) |
 | `TEMPO_ENABLE_PROVIDERS` / `TEMPO_OPTED_OUT` | none | Providers that are off by default to turn on (e.g. `nvidia`); providers whose "train on my data" setting you turned off (e.g. `mistral`) |
 | `TEMPO_REQUEST_TIMEOUT` / `TEMPO_MAX_ATTEMPTS` | `60` / `4` | Per-call timeout and fallback attempts |
