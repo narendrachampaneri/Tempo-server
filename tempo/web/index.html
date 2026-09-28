@@ -763,7 +763,8 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
         remove.addEventListener("click", async () => { await api(`/api/keys/${encodeURIComponent(p.provider)}`, { method: "DELETE" }); loadKeys(); refreshStatus(); });
         side.append(remove);
       } else if (p.signup_url) {
-        const a = document.createElement("a"); a.href = p.signup_url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = "Get a free key";
+        const a = document.createElement("a"); a.href = p.signup_url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = p.free_tier === "trial" ? "Get trial credits" : "Get a free key";
+        if (p.free_tier_note) a.title = p.free_tier_note;
         side.append(a);
       }
       form.addEventListener("submit", async e => {
@@ -808,7 +809,8 @@ details.tableview table { margin-top: 6px; font-size: 12.5px; }
     for (const p of data.providers) {
       const card = document.createElement("div"); card.className = "card";
       card.innerHTML = `<div class="name"></div><div class="row"><span class="status"></span><span class="env"></span></div>`;
-      $(".name", card).textContent = p.label;
+      $(".name", card).textContent = p.label + (p.free_tier === "trial" ? " · trial credits" : "");
+      if (p.free_tier_note) card.title = p.free_tier_note;
       const st = $(".status", card); st.textContent = p.configured ? "configured" : "not configured"; st.className = "status " + (p.configured ? "ready" : "");
       const env = $(".env", card);
       if (p.configured) env.textContent = p.env ? `${p.env} is set` : "";
@@ -868,7 +870,7 @@ print(reply.tempo["trace"])              # the thinking-window events`;
 model: "tempo/fast"      prefer the fastest capable model
 model: "tempo/best"      prefer the strongest model
 model: "tempo/private"   local models only (Ollama)
-model: "<registry id>"   try that model first, e.g. "groq/llama-3.3-70b-versatile"
+model: "<registry id>"   try that model first, e.g. "groq/openai/gpt-oss-120b"
 
 "tempo": {
   "mode": "fast",                          // overrides the mode in "model"

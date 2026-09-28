@@ -368,6 +368,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                     "provider": p.id,
                     "label": p.label,
                     "signup_url": p.signup_url,
+                    "free_tier": p.free_tier,
+                    "free_tier_note": p.free_tier_note,
                     "has_key": mine is not None,
                     "last4": mine["last4"] if mine else None,
                     "verified": None
@@ -506,6 +508,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                 "local": p.local,
                 "env": p.key_env or p.base_env,
                 "signup_url": p.signup_url,
+                "free_tier": p.free_tier,
+                "free_tier_note": p.free_tier_note,
             }
             for p in registry.providers.values()
         ]

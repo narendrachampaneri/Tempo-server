@@ -364,6 +364,7 @@ class Pipeline:
             local_only=o.local_only,
             access=o.access,
             exclude=exclude,
+            reserve=o.quota_reserve,
         )
 
     def _slots(self, ranked: list[Candidate], count: int) -> list[list[Candidate]]:

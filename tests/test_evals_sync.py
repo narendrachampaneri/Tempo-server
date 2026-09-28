@@ -160,7 +160,7 @@ def provider_lists(request: httpx.Request) -> httpx.Response:
             200,
             json={
                 "data": [
-                    {"id": "llama-3.3-70b-versatile", "context_window": 131072, "active": True},
+                    {"id": "qwen/qwen3.8-27b", "context_window": 131072, "active": True},
                     {"id": "whisper-large-v3", "active": True},
                     {"id": "moonshotai/kimi-k2-instruct", "context_window": 131072, "active": True},
                 ]
@@ -198,7 +198,7 @@ async def test_sync_adds_new_free_models_and_retires_missing_ones():
     assert status["groq"].ok and status["groq"].listed == 2
     assert "groq/moonshotai/kimi-k2-instruct" in status["groq"].added
     assert registry.get("groq/whisper-large-v3") is None  # not a chat model
-    assert registry.get("groq/llama-3.3-70b-versatile").listed is True
+    assert registry.get("groq/qwen/qwen3.8-27b").listed is True
     assert registry.get("groq/openai/gpt-oss-120b").listed is False  # no longer offered
     assert "groq/openai/gpt-oss-120b" in status["groq"].removed
 
@@ -209,7 +209,7 @@ async def test_sync_adds_new_free_models_and_retires_missing_ones():
 
     assert not status["cerebras"].ok and status["cerebras"].error == "API key rejected"
     assert (
-        health.unavailable_reason(registry.get("cerebras/llama3.1-8b")) == "provider key rejected"
+        health.unavailable_reason(registry.get("cerebras/gpt-oss-120b")) == "provider key rejected"
     )
 
     router = Router(registry, health)
@@ -224,7 +224,7 @@ async def test_sync_reports_outages_without_changing_the_registry():
     registry = Registry.load(env={"GROQ_API_KEY": "gk"})
     status = await RegistrySync(registry, transport=httpx.MockTransport(down)).run()
     assert not status["groq"].ok and status["groq"].error.startswith("unreachable")
-    assert registry.get("groq/llama-3.3-70b-versatile").listed is None
+    assert registry.get("groq/qwen/qwen3.8-27b").listed is None
 
 
 def test_guessed_priors_scale_with_size():

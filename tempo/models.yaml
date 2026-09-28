@@ -9,6 +9,8 @@
 #   key_env / base_env       environment variables holding the API key / base URL
 #   shared_rpm / shared_rpd  free limits shared by all of the provider's models
 #   requests_header_window   what x-ratelimit-remaining-requests counts: minute or day
+#   day_reset_tz             IANA time zone in which daily free quotas reset (default UTC)
+#   free_tier                free (renews) | trial (one-off credits); free_tier_note says more
 #   training_on_outputs      may this provider's outputs be used to train models?
 #                            yes | no | unclear (quote yes/no: bare YAML yes/no are booleans).
 #                            training_terms_url / _quote / _checked record where the verdict
@@ -48,6 +50,8 @@ providers:
     key_env: CEREBRAS_API_KEY
     base_env: CEREBRAS_API_BASE
     signup_url: https://cloud.cerebras.ai
+    free_tier: trial
+    free_tier_note: "No permanently free tier: $5 of credits after adding a payment method, expiring after 30 days (inference-docs.cerebras.ai/support/rate-limits, checked 2026-09-28)."
     training_on_outputs: "unclear"
     training_terms_url: https://d7umqicpi7263.cloudfront.net/eula/4rCqa7snChhObjYFAYH325D2kcqkCRpGXBZYsSMc3mg
     training_terms_checked: "2026-09-28; the Inference Terms and Conditions PDF carries no date"
@@ -61,6 +65,7 @@ providers:
     key_env: GEMINI_API_KEY
     base_env: GEMINI_API_BASE
     signup_url: https://aistudio.google.com/apikey
+    day_reset_tz: America/Los_Angeles  # "Requests per day (RPD) quotas reset at midnight Pacific time."
     training_on_outputs: "no"
     training_terms_url: https://ai.google.dev/gemini-api/terms
     training_terms_checked: "2026-09-28; terms last updated 2026-04-28"
@@ -97,32 +102,9 @@ providers:
 
 models:
   # --- Groq -------------------------------------------------------------------
-  - id: groq/llama-3.3-70b-versatile
-    provider: groq
-    name: Llama 3.3 70B
-    family: llama
-    context_window: 131072
-    strength: 0.70
-    free_rpm: 30
-    free_rpd: 1000
-    free_tpm: 12000
-    ttft_ms: 400
-    tokens_per_sec: 280
-    skills: {chat: 0.80, code: 0.70, math: 0.62, reasoning: 0.68, writing: 0.78, summarize: 0.78, translate: 0.72, extract: 0.75}
-
-  - id: groq/llama-3.1-8b-instant
-    provider: groq
-    name: Llama 3.1 8B
-    family: llama
-    context_window: 131072
-    strength: 0.35
-    free_rpm: 30
-    free_rpd: 14400
-    free_tpm: 6000
-    ttft_ms: 250
-    tokens_per_sec: 750
-    skills: {chat: 0.65, code: 0.45, math: 0.35, reasoning: 0.40, writing: 0.60, summarize: 0.65, translate: 0.55, extract: 0.60}
-
+  # Free plan (console.groq.com/docs/rate-limits, 2026-09-28): these chat models, each 30 req/min,
+  # 1,000 req/day, 8,000 tokens/min, 200,000 tokens/day. Llama 3.x and Qwen3-32B are no longer
+  # on it.
   - id: groq/openai/gpt-oss-120b
     provider: groq
     name: gpt-oss 120B
@@ -133,25 +115,44 @@ models:
     free_rpm: 30
     free_rpd: 1000
     free_tpm: 8000
+    free_tpd: 200000
     ttft_ms: 500
     tokens_per_sec: 450
     skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
 
-  - id: groq/qwen/qwen3-32b
+  - id: groq/openai/gpt-oss-20b
     provider: groq
-    name: Qwen3 32B
+    name: gpt-oss 20B
+    family: gpt-oss
+    context_window: 131072
+    strength: 0.68
+    reasoning: true
+    free_rpm: 30
+    free_rpd: 1000
+    free_tpm: 8000
+    free_tpd: 200000
+    ttft_ms: 300
+    tokens_per_sec: 900
+    skills: {chat: 0.72, code: 0.74, math: 0.80, reasoning: 0.76, writing: 0.66, summarize: 0.72, translate: 0.62, extract: 0.74}
+
+  - id: groq/qwen/qwen3.8-27b
+    provider: groq
+    name: Qwen3.8 27B
     family: qwen
     context_window: 131072
     strength: 0.72
-    reasoning: true
-    free_rpm: 60
+    free_rpm: 30
     free_rpd: 1000
-    free_tpm: 6000
+    free_tpm: 8000
+    free_tpd: 200000
     ttft_ms: 450
     tokens_per_sec: 400
-    skills: {chat: 0.75, code: 0.78, math: 0.80, reasoning: 0.78, writing: 0.70, summarize: 0.75, translate: 0.78, extract: 0.78}
+    skills: {chat: 0.74, code: 0.78, math: 0.78, reasoning: 0.74, writing: 0.70, summarize: 0.74, translate: 0.76, extract: 0.76}
 
   # --- Cerebras ---------------------------------------------------------------
+  # Free Trial only (inference-docs.cerebras.ai/support/rate-limits, 2026-09-28): 5 req/min,
+  # 30,000 uncached tokens/min, 1M tokens/hour and 1M tokens/day per model, paid from $5 of
+  # credits that expire after 30 days.
   - id: cerebras/gpt-oss-120b
     provider: cerebras
     name: gpt-oss 120B
@@ -159,27 +160,26 @@ models:
     context_window: 65536
     strength: 0.85
     reasoning: true
-    free_rpm: 30
-    free_rpd: 14400
-    free_tpm: 60000
+    free_rpm: 5
+    free_tpm: 30000
     free_tpd: 1000000
     ttft_ms: 300
     tokens_per_sec: 2000
     skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
 
-  - id: cerebras/llama3.1-8b
+  - id: cerebras/qwen-3.8-27b
     provider: cerebras
-    name: Llama 3.1 8B
-    family: llama
-    context_window: 8192
-    strength: 0.35
-    free_rpm: 30
-    free_rpd: 14400
-    free_tpm: 60000
+    name: Qwen3.8 27B
+    family: qwen
+    context_window: 65536
+    strength: 0.72
+    vision: true
+    free_rpm: 5
+    free_tpm: 30000
     free_tpd: 1000000
-    ttft_ms: 200
-    tokens_per_sec: 2200
-    skills: {chat: 0.65, code: 0.45, math: 0.35, reasoning: 0.40, writing: 0.60, summarize: 0.65, translate: 0.55, extract: 0.60}
+    ttft_ms: 250
+    tokens_per_sec: 1500
+    skills: {chat: 0.74, code: 0.78, math: 0.78, reasoning: 0.74, writing: 0.70, summarize: 0.74, translate: 0.76, extract: 0.76}
 
   # --- Google AI Studio -------------------------------------------------------
   - id: gemini/gemini-2.5-flash

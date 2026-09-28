@@ -61,6 +61,9 @@ class RunOptions:
     restart_on_partial_failure: bool = True
     use_cache: bool = True
     access: Access = field(default_factory=Access)
+    # Share of each model's daily free quota to leave untouched (tempo collect keeps some for
+    # real users); 0 uses everything.
+    quota_reserve: float = 0.0
 
 
 @dataclass

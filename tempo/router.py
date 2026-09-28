@@ -143,6 +143,7 @@ class Router:
         local_only: bool = False,
         allow_providers: Iterable[str] | None = None,
         access: Access | None = None,
+        reserve: float = 0.0,
     ) -> str | None:
         provider = self.registry.providers[model.provider]
         if not self.registry.is_configured(model.provider, access):
@@ -167,7 +168,7 @@ class Router:
             return "request exceeds free tokens/min"
         if self.quota is not None:
             key_id = (access or Access()).key_id(model.provider)
-            return self.quota.blocked_reason(model, key_id, tokens=needed)
+            return self.quota.blocked_reason(model, key_id, tokens=needed, reserve=reserve)
         return None
 
     def candidate(
@@ -198,6 +199,7 @@ class Router:
         local_only: bool = False,
         access: Access | None = None,
         exclude: Iterable[str] = (),
+        reserve: float = 0.0,
     ) -> RouteResult:
         local_only = local_only or mode == "private"
         allowed = list(allow_providers) if allow_providers is not None else None
@@ -209,7 +211,12 @@ class Router:
             if model.id in excluded:
                 continue
             reason = self.skip_reason(
-                model, profile, local_only=local_only, allow_providers=allowed, access=access
+                model,
+                profile,
+                local_only=local_only,
+                allow_providers=allowed,
+                access=access,
+                reserve=reserve,
             )
             if reason:
                 skipped.setdefault(reason, []).append(model.id)

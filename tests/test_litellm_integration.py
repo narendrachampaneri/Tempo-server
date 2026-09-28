@@ -34,7 +34,7 @@ async def _chat(req: Request):
             status_code=429,
             headers={"retry-after": "7"},
         )
-    if model == "llama-3.1-8b-instant":
+    if model == "openai/gpt-oss-20b":
         return JSONResponse({"error": {"message": "Invalid API Key"}}, status_code=401)
     pieces = ["<thi", "nk>Plan.</th", "ink>\n\n", "Hello ", "from ", model]
 
@@ -138,17 +138,17 @@ async def _collect(backend, model_id, registry):
 
 async def test_streams_answer_and_splits_think_tags(env):
     registry = Registry.load(env=env)
-    deltas = await _collect(LiteLLMBackend(registry, timeout=10), "groq/qwen/qwen3-32b", registry)
+    deltas = await _collect(LiteLLMBackend(registry, timeout=10), "groq/qwen/qwen3.8-27b", registry)
     answer = "".join(t for k, t in deltas if k == "answer")
     reasoning = "".join(t for k, t in deltas if k == "reasoning")
-    assert answer == "Hello from qwen/qwen3-32b"
+    assert answer == "Hello from qwen/qwen3.8-27b"
     assert reasoning == "Plan."
-    assert seen[-1] == {"model": "qwen/qwen3-32b", "auth": "Bearer test-key"}
+    assert seen[-1] == {"model": "qwen/qwen3.8-27b", "auth": "Bearer test-key"}
 
 
 @pytest.mark.parametrize(
     ("model_id", "kind", "retry_after"),
-    [("groq/openai/gpt-oss-120b", "rate_limit", 7.0), ("groq/llama-3.1-8b-instant", "auth", None)],
+    [("groq/openai/gpt-oss-120b", "rate_limit", 7.0), ("groq/openai/gpt-oss-20b", "auth", None)],
 )
 async def test_provider_errors_are_classified(env, model_id, kind, retry_after):
     registry = Registry.load(env=env)
@@ -183,7 +183,7 @@ async def test_rate_limit_headers_reach_the_quota_manager(env):
     from tempo.quota import QuotaManager
 
     registry = Registry.load(env=env)
-    model = registry.get("groq/llama-3.3-70b-versatile")
+    model = registry.get("groq/qwen/qwen3.8-27b")
     meta: dict = {}
     backend = LiteLLMBackend(registry, timeout=10)
     async for _ in backend.stream(model, [{"role": "user", "content": "hi"}], meta=meta):

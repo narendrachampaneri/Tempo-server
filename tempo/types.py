@@ -35,6 +35,11 @@ class ProviderInfo(BaseModel):
     shared_rpd: int | None = None
     # What the provider's x-ratelimit-remaining-requests header counts: "minute" or "day".
     requests_header_window: Literal["minute", "day"] = "minute"
+    # When daily free quotas reset: an IANA time zone (Google resets at midnight Pacific).
+    day_reset_tz: str = "UTC"
+    # "free": a free allowance that renews; "trial": one-off credits that run out.
+    free_tier: Literal["free", "trial"] = "free"
+    free_tier_note: str | None = None
     # May outputs from this provider's models be used to train other models? "yes", "no" or
     # "unclear", read from the provider's terms (training_terms_url; the deciding sentences are
     # quoted in training_terms_quote). Each model's own licence applies as well. Dataset exports
@@ -43,6 +48,17 @@ class ProviderInfo(BaseModel):
     training_terms_url: str | None = None
     training_terms_quote: str | None = None
     training_terms_checked: str | None = None  # when the quote was last checked
+
+    @field_validator("day_reset_tz")
+    @classmethod
+    def _known_zone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(value)
+        except (KeyError, ValueError) as exc:  # ZoneInfoNotFoundError is a KeyError
+            raise ValueError(f"unknown time zone {value!r}") from exc
+        return value
 
     @field_validator("training_on_outputs", mode="before")
     @classmethod

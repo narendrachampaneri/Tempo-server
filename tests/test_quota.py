@@ -140,3 +140,27 @@ def test_router_skips_exhausted_models_and_uses_remaining_quota():
     quota.record(strong)
     result = router.rank(profile)
     assert result.skipped["free requests/day used up"] == ["alpha/strong"]
+
+
+def test_daily_quota_resets_in_the_providers_time_zone():
+    from datetime import UTC, datetime
+
+    import pytest
+
+    providers = {
+        "pac": ProviderInfo(
+            id="pac", label="Pacific", key_env="PAC_KEY", day_reset_tz="America/Los_Angeles"
+        )
+    }
+    model = ModelInfo(id="pac/m", provider="pac", name="m", free_rpd=10)
+    registry = Registry(providers, [model], env={"PAC_KEY": "x"})
+    # 06:30 UTC on 28 Sep is still 27 Sep in California; 07:30 UTC is past midnight there.
+    clock = Clock(datetime(2026, 9, 28, 6, 30, tzinfo=UTC).timestamp())
+    quota = QuotaManager(registry, clock=clock)
+    quota.record(model)
+    quota.record(model)
+    assert quota.left(model).rpd == 8
+    clock.t += 30 * 60  # 07:00 UTC = 00:00 PDT
+    assert quota.left(model).rpd == 10
+    with pytest.raises(ValueError):
+        ProviderInfo(id="bad", label="Bad", day_reset_tz="Mars/Olympus")
