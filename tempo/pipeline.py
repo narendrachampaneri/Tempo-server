@@ -24,8 +24,16 @@ from typing import TYPE_CHECKING, Any
 
 from tempo import prompts
 from tempo.analyzer import analyze
-from tempo.checks import CheckResult, combine, extract_json, parse_judge, run_heuristics
+from tempo.checks import (
+    PASS_THRESHOLD,
+    CheckResult,
+    combine,
+    extract_json,
+    parse_judge,
+    run_heuristics,
+)
 from tempo.events import Event
+from tempo.laya_decider import DIFFICULTY_COMPLEXITY, complexity_level, quality_level
 from tempo.providers import ERROR_LABELS, ProviderError
 from tempo.router import Candidate
 from tempo.types import ModelInfo, QueryProfile
@@ -186,6 +194,15 @@ class Pipeline:
 
         self.profile, source = await e.understand(self.messages)
         p = self.profile
+        task = await e.decide(self, "task_type", 0, p.task)
+        rules_level = complexity_level(p.complexity)
+        level = await e.decide(self, "difficulty", 0, rules_level)
+        if task != p.task or level != rules_level:
+            update: dict[str, Any] = {"task": task}
+            if level != rules_level:
+                update["complexity"] = DIFFICULTY_COMPLEXITY[level]
+            self.profile = p = p.model_copy(update=update)
+            source = f"{source} + Laya"
         self.emit(
             "analyze",
             task=p.task,
@@ -238,6 +255,7 @@ class Pipeline:
             time_budget_s=o.time_budget_s,
             quota_budget=o.quota_budget,
             reason=self.plan.reasons.get("strategy", ""),
+            laya=e.laya.status_text() if e.laya is not None else None,
         )
 
         try:
@@ -573,7 +591,15 @@ class Pipeline:
             await self._check()
             best = self.best()
             assert best is not None and best.check is not None
+            rules_level = quality_level(best.check.score)
+            level = await self.e.decide(self, "quality", self.stage, rules_level)
+            if level != rules_level:  # Laya has taken over grading
+                best.check.score = level / 4
+                threshold = PASS_THRESHOLD.get(self.o.mode, PASS_THRESHOLD["auto"])
+                best.check.passed = best.check.score >= threshold and not best.check.hard_fail
             stop = await self.e.decide(self, "should_stop", self.stage, best.check.passed)
+            # Never stop on an answer that failed a hard check (empty, refusal, broken JSON...).
+            stop = bool(stop) and not best.check.hard_fail
             if stop:
                 self.stop_reason = "passed" if best.check.passed else "decided"
                 return

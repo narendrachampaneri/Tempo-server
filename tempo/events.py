@@ -92,7 +92,8 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         )
         if d.get("parts"):
             line += f" · {d['parts']} parts"
-        return line + (f" · {d['reason']}" if d.get("reason") else "")
+        line += f" · {d['reason']}" if d.get("reason") else ""
+        return line + (f" · {d['laya']}" if d.get("laya") else "")
     if kind == "stage_start":
         models = ", ".join(d.get("models") or []) or "no model"
         line = f"Stage {d['stage']}/{d['max_stages']} · {d['job']} · {models}"

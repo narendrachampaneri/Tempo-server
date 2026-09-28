@@ -23,6 +23,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+# Laya decision engine (pulls in torch + transformers; ~2.3 GB of checkpoints on first load).
+laya = ["laya>=0.3.21"]
 
 [project.scripts]
 tempo = "tempo.cli:main"

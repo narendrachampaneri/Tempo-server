@@ -17,6 +17,7 @@ from tempo.analyzer import analyze
 from tempo.config import MAX_STAGES_LIMIT, Settings
 from tempo.events import STREAM_EVENTS, Event
 from tempo.health import HealthTracker
+from tempo.laya_decider import LayaDecider
 from tempo.mock import MockBackend
 from tempo.prompts import TEMPO_SYSTEM
 from tempo.providers import ChatBackend, LiteLLMBackend
@@ -122,7 +123,8 @@ class Engine:
         self.quota = QuotaManager(registry, self.store)
         self.router = Router(registry, self.health, self.quota)
         self.cache: Any = None  # semantic cache, attached in Engine.from_settings
-        self.laya: Any = None  # Laya decider, attached in Engine.from_settings
+        self.laya: LayaDecider | None = None  # attached in Engine.from_settings
+        self._laya_loading: Any = None
         self.classifier: Any = None  # embedding classifier
         self._warm_up = warm_up
         self._clock = clock
@@ -136,11 +138,16 @@ class Engine:
         def backend_for(model: ModelInfo) -> ChatBackend:
             return mock_backend if model.provider == "mock" else litellm_backend
 
-        return cls(registry, backend_for, settings=settings, warm_up=litellm_backend.warm_up)
+        engine = cls(registry, backend_for, settings=settings, warm_up=litellm_backend.warm_up)
+        engine.laya = LayaDecider(settings, engine.store)
+        return engine
 
     async def startup(self) -> None:
-        """One-time async setup: discover local Ollama models and load provider libraries."""
+        """One-time async setup: discover local Ollama models, load provider libraries, and
+        start loading Laya in the background (questions meanwhile use the rules)."""
         await self.registry.discover_ollama()
+        if self.laya is not None:
+            self._laya_loading = self.laya.start()
         if self._warm_up:
             await self._warm_up()
 

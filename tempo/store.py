@@ -202,14 +202,22 @@ class Store:
             f"UPDATE questions SET {columns} WHERE id = ?", (*encoded.values(), question_id)
         )
 
-    def add_decision(self, question_id: str, **fields: Any) -> None:
+    def add_decision(self, question_id: str, **fields: Any) -> int:
         encoded = _encode("decisions", fields)
         encoded["created_at"] = time.time()
         columns = ", ".join(["question_id", *encoded])
         marks = ", ".join("?" for _ in range(len(encoded) + 1))
-        self.execute(
+        cursor = self.execute(
             f"INSERT INTO decisions ({columns}) VALUES ({marks})",
             (question_id, *encoded.values()),
+        )
+        return int(cursor.lastrowid or 0)
+
+    def update_decision(self, decision_id: int, **fields: Any) -> None:
+        encoded = _encode("decisions", fields)
+        columns = ", ".join(f"{name} = ?" for name in encoded)
+        self.execute(
+            f"UPDATE decisions SET {columns} WHERE id = ?", (*encoded.values(), decision_id)
         )
 
     def add_stage(self, question_id: str, **fields: Any) -> None:
