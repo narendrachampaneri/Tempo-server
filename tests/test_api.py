@@ -248,3 +248,24 @@ def test_feedback_is_recorded():
         client.post("/api/feedback", json={"question_id": question_id, "rating": 5}).status_code
         == 422
     )
+
+
+def test_usage_dashboard_numbers():
+    client, _ = client_for()
+    ids = []
+    for prompt in ("hi", "Write a Python function that reverses a string"):
+        events = sse_payloads(client.post("/api/ask", json={"prompt": prompt}).text)
+        ids.append(next(e for e in events if e["type"] == "done")["question_id"])
+    client.post("/api/feedback", json={"question_id": ids[0], "rating": 1})
+
+    usage = client.get("/api/usage").json()
+    assert usage["scope"] == "all" and usage["hours"] == 24
+    assert usage["questions"] == 2 and usage["errors"] == 0 and usage["passed"] == 2
+    assert usage["stop_reasons"] == {"passed": 2} and usage["thumbs_up"] == 1
+    assert usage["p50_ms"] is not None and usage["requests_used"] == 3
+    assert sum(m["calls"] for m in usage["models"]) == 3
+    quota = {row["model"]: row for row in usage["quota"]}
+    assert quota["beta/mid"]["rpd_left"] == quota["beta/mid"]["free_rpd"] - 2
+    shares = [row["rpd_left"] / row["free_rpd"] for row in usage["quota"]]
+    assert shares == sorted(shares)  # scarcest first
+    assert client.get("/api/usage?hours=0").json()["hours"] == 1

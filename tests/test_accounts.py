@@ -174,3 +174,14 @@ def test_cli_users_and_keys(tmp_path, monkeypatch):
     assert runner.invoke(app, ["keys", "remove", "groq"]).exit_code == 0
     assert runner.invoke(app, ["keys", "add", "nope", "--no-verify"], input="x\n").exit_code != 0
     assert "lina" in runner.invoke(app, ["users", "list"]).stdout
+
+
+def test_usage_shows_users_only_their_own_questions():
+    client, engine, _ = client_for()
+    _, a = engine.accounts.create_user("a")
+    _, b = engine.accounts.create_user("b")
+    client.post("/api/ask", json={"prompt": "hi"}, headers={"Authorization": f"Bearer {a}"})
+    usage_a = client.get("/api/usage", headers={"Authorization": f"Bearer {a}"}).json()
+    usage_b = client.get("/api/usage", headers={"Authorization": f"Bearer {b}"}).json()
+    assert usage_a["scope"] == usage_b["scope"] == "mine"
+    assert usage_a["questions"] == 1 and usage_b["questions"] == 0 and usage_b["models"] == []

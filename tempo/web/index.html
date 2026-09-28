@@ -149,10 +149,78 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
 .snippet pre { background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 12px 14px; overflow-x: auto; font: 13px/1.55 var(--mono); margin: 0; }
 .muted { color: var(--muted); }
 
+/* stage progress + thinking lines */
+.stage-dots { display: inline-flex; gap: 3px; margin-left: 2px; }
+.stage-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.stage-dots i.done { background: var(--accent); }
+.stage-dots i.now { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.line.stage { color: var(--text); font-weight: 600; }
+.line.decision { color: var(--faint); }
+.fb { display: inline-flex; gap: 4px; margin-left: 6px; }
+.fb button { border: 1px solid var(--border) !important; border-radius: 6px; padding: 0 7px !important; line-height: 20px; }
+.fb button[aria-pressed="true"] { border-color: var(--accent) !important; color: var(--accent) !important; }
+
+/* stage settings */
+.gear { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 7px; }
+.gear[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.settings-panel { display: flex; flex-wrap: wrap; gap: 10px 16px; padding: 8px 2px 2px; font-size: 13px; color: var(--muted); }
+.settings-panel[hidden] { display: none; }
+.settings-panel label { display: inline-flex; align-items: center; gap: 6px; }
+.settings-panel input { width: 64px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: 13px var(--sans); }
+
+/* usage dashboard */
+.range { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 9px; padding: 2px; margin-bottom: 18px; }
+.range button { border: 0; background: none; padding: 4px 12px; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.range button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.tile .label { font-size: 12.5px; color: var(--muted); }
+.tile .value { font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin-top: 2px; }
+.tile .note { font-size: 12px; color: var(--faint); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin: 0; position: relative; }
+.chart-card figcaption { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.chart-card figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.hbar-row { display: grid; grid-template-columns: minmax(0, 11rem) 1fr auto; align-items: center; gap: 10px; padding: 3px 0; font-size: 12.5px; }
+.hbar-row .name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.hbar-row .track { height: 12px; position: relative; }
+.hbar-row .fill { height: 12px; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+.hbar-row:hover .fill, .hbar-row:focus .fill { filter: brightness(1.15); }
+.hbar-row .val { color: var(--text); font-variant-numeric: tabular-nums; }
+.hbar-row:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+#usage { position: relative; }
+.tip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); font-size: 12px; padding: 5px 8px; border-radius: 6px; white-space: nowrap; z-index: 5; }
+.tip b { font-weight: 700; }
+.tip[hidden] { display: none; }
+.meter { height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; width: 100%; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; }
+.meter.low i { background: var(--warn); } .meter.empty i { background: var(--bad); }
+.hbar-row.quota { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; padding: 4px 0; }
+.hbar-row.quota .meter { grid-column: 1 / -1; }
+details.tableview { margin-top: 10px; font-size: 12.5px; }
+details.tableview summary { cursor: pointer; color: var(--muted); }
+details.tableview table { margin-top: 6px; font-size: 12.5px; }
+.empty-note { color: var(--faint); font-size: 13px; padding: 6px 0; }
+
+/* keys */
+.key-row { display: grid; grid-template-columns: minmax(0, 12rem) 1fr auto; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.key-row:last-child { border-bottom: 0; }
+.key-row .who { font-weight: 600; }
+.key-row .who small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.key-row form { display: flex; gap: 6px; }
+.key-row input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: 13px var(--mono); }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.key-msg { font-size: 12px; }
+
 @media (max-width: 640px) {
+  .key-row { grid-template-columns: 1fr; }
   .features { grid-template-columns: 1fr; }
   .top-inner { gap: 8px; }
-  nav.tabs { margin-left: 0; }
+  nav.tabs { margin-left: 0; overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  .spacer { display: none; }
   nav.tabs button { padding: 6px 8px; }
   #status-text { display: none; }
   .pill { padding: 4px 8px; }
@@ -173,6 +241,8 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
     <nav class="tabs" role="tablist">
       <button role="tab" data-view="ask" aria-selected="true">Ask</button>
       <button role="tab" data-view="models" aria-selected="false">Models</button>
+      <button role="tab" data-view="usage" aria-selected="false">Usage</button>
+      <button role="tab" data-view="keys" aria-selected="false">Keys</button>
       <button role="tab" data-view="developers" aria-selected="false">Developers</button>
     </nav>
     <div class="spacer"></div>
@@ -211,8 +281,14 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
             <button type="button" data-mode="best" aria-pressed="false" title="Prefer the strongest model, even if its free quota is small">Best</button>
             <button type="button" data-mode="private" aria-pressed="false" title="Only local models (Ollama)">Private</button>
           </div>
+          <button type="button" class="gear" id="gear" aria-expanded="false" aria-controls="settings" title="Stages and budgets">⚙</button>
           <span class="hint">Enter to send · Shift+Enter for a new line</span>
           <button class="send" id="send" type="submit" disabled>Send ↑</button>
+        </div>
+        <div class="settings-panel" id="settings" hidden>
+          <label title="Most stages (draft, check, fix, merge...) for one question">Max stages <input id="set-stages" type="number" min="1" max="50" placeholder="5"></label>
+          <label title="Seconds allowed per question">Time budget (s) <input id="set-time" type="number" min="1" max="600" placeholder="60"></label>
+          <label title="Most free provider requests to spend per question">Free requests <input id="set-quota" type="number" min="1" max="200" placeholder="12"></label>
         </div>
       </form>
     </div>
@@ -226,6 +302,30 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
       <thead><tr><th>Status</th><th>Model</th><th>Free / day</th><th>Context</th><th>Strength</th><th>Best at</th><th>Features</th></tr></thead>
       <tbody id="model-rows"></tbody>
     </table></div>
+  </section>
+
+  <section id="usage" class="view page" hidden>
+    <h2>Usage</h2>
+    <p class="sub" id="usage-scope">How questions went, which models answered, and how much free quota is left.</p>
+    <div class="range" id="range" role="group" aria-label="Time range">
+      <button type="button" data-hours="24" aria-pressed="true">24 hours</button>
+      <button type="button" data-hours="168" aria-pressed="false">7 days</button>
+      <button type="button" data-hours="720" aria-pressed="false">30 days</button>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="charts">
+      <figure class="chart-card" id="chart-models"><figcaption>Models used<span>Model calls, including checks and fallbacks</span></figcaption><div class="bars"></div></figure>
+      <figure class="chart-card" id="chart-stops"><figcaption>How questions ended<span>Why the engine stopped</span></figcaption><div class="bars"></div></figure>
+      <figure class="chart-card" id="chart-quota"><figcaption>Free quota left today<span>Requests left per model, lowest first</span></figcaption><div class="bars"></div></figure>
+      <figure class="chart-card" id="chart-laya"><figcaption>Laya<span>Predictions logged for tuning</span></figcaption><div class="bars"></div></figure>
+    </div>
+    <div class="tip" id="tip" hidden></div>
+  </section>
+
+  <section id="keys" class="view page" hidden>
+    <h2>Your provider keys</h2>
+    <p class="sub">Add your own free keys. Tempo then uses them for your questions, with their own free-tier limits. Keys are encrypted at rest and never shown again; only the last four characters are displayed.</p>
+    <div class="table-wrap" id="key-list"></div>
   </section>
 
   <section id="developers" class="view page" hidden>
@@ -264,6 +364,8 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
     document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === name)));
     document.querySelectorAll(".view").forEach(v => { v.hidden = v.id !== name; });
     if (name === "models") loadModels();
+    if (name === "usage") loadUsage();
+    if (name === "keys") loadKeys();
     if (name === "ask") input.focus();
   }
   document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
@@ -363,7 +465,7 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
       <div class="assistant">
         <div class="thinking">
           <button class="thinking-head" type="button" aria-expanded="true">
-            <span class="spinner"></span><span class="title">Thinking</span><span class="summary">Starting…</span><span class="chev">▾</span>
+            <span class="spinner"></span><span class="title">Thinking</span><span class="stage-dots" aria-hidden="true"></span><span class="summary">Starting…</span><span class="chev">▾</span>
           </button>
           <div class="thinking-body"></div>
         </div>
@@ -381,12 +483,35 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
     return turn;
   }
 
-  const lineClass = { call_error: "warn", fallback: "warn", answer_reset: "warn", error: "bad", done: "good" };
+  const lineClass = { call_error: "warn", fallback: "warn", answer_reset: "warn", budget: "warn", error: "bad", done: "good", stage_start: "stage", decision: "decision" };
+
+  // ---- stage settings (remembered per browser) --------------------------------
+  const settingInputs = { max_stages: $("#set-stages"), time_budget_s: $("#set-time"), quota_budget: $("#set-quota") };
+  for (const [key, el] of Object.entries(settingInputs)) {
+    el.value = store.get("tempo_" + key) || "";
+    el.addEventListener("change", () => store.set("tempo_" + key, el.value));
+  }
+  $("#gear").addEventListener("click", e => {
+    const panel = $("#settings"); panel.hidden = !panel.hidden;
+    e.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+  });
+  function stageSettings() {
+    const out = {};
+    for (const [key, el] of Object.entries(settingInputs)) {
+      const n = Number(el.value);
+      if (el.value !== "" && Number.isFinite(n) && n > 0) out[key] = n;
+    }
+    return out;
+  }
 
   async function ask(text) {
     const turn = newTurn(text);
     const body = $(".thinking-body", turn), summary = $(".summary", turn), answerEl = $(".answer", turn), meta = $(".meta", turn), box = $(".thinking", turn);
     let answer = "", reasoningPre = null, model = null, frame = 0, finished = false;
+    let questionId = null, stages = 0, score = null;
+    const dots = $(".stage-dots", turn);
+    const setDots = (max) => { dots.replaceChildren(...Array.from({ length: max }, () => document.createElement("i"))); };
+    const markDot = (n, cls) => { const d = dots.children[n - 1]; if (d) d.className = cls; };
 
     const nearBottom = el => el.scrollHeight - el.scrollTop - el.clientHeight < 24;
     const sticky = (change) => {  // apply a change, keeping the window pinned to the bottom if it was
@@ -422,8 +547,12 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
         }); break;
         case "call_start": reasoningPre = null; break;
         case "answer_reset": answer = ""; scheduleRender(); break;
-        case "answer_final": answer = ev.answer; model = ev.model; scheduleRender(); break;
-        case "done": model = ev.model || model; break;
+        case "answer_final": answer = ev.answer; model = ev.model; score = ev.score; scheduleRender(); break;
+        case "received": questionId = ev.question_id; break;
+        case "plan": setDots(ev.max_stages); break;
+        case "stage_start": markDot(ev.stage, "now"); break;
+        case "stage_end": markDot(ev.stage, "done"); break;
+        case "done": model = ev.model || model; stages = ev.stages; questionId = ev.question_id || questionId; break;
       }
     };
 
@@ -433,7 +562,7 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
     try {
       const res = await api("/api/ask", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, mode }), signal: controller.signal,
+        body: JSON.stringify({ messages: history, mode, ...stageSettings() }), signal: controller.signal,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -475,10 +604,184 @@ td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; over
         const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = model || "unknown model";
         const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy answer";
         copy.addEventListener("click", () => { navigator.clipboard?.writeText(answer); copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy answer"; }, 1200); });
-        meta.append("Answered by", badge, copy);
+        const details = [stages ? `${stages} stage${stages === 1 ? "" : "s"}` : null,
+                         score != null ? `score ${Number(score).toFixed(2)}` : null].filter(Boolean).join(" · ");
+        meta.append("Answered by", badge);
+        if (details) meta.append(details);
+        meta.append(copy);
+        if (questionId) meta.append(feedbackButtons(questionId));
       }
       refreshStatus();
       input.focus();
+    }
+  }
+
+  // ---- feedback ---------------------------------------------------------------
+  function feedbackButtons(questionId) {
+    const wrap = document.createElement("span"); wrap.className = "fb";
+    wrap.append("Helpful?");
+    for (const [rating, label, title] of [[1, "👍", "Yes"], [-1, "👎", "No"]]) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+      b.title = title; b.setAttribute("aria-label", title); b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", async () => {
+        const res = await api("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question_id: questionId, rating }) });
+        if (res.ok) wrap.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      });
+      wrap.append(b);
+    }
+    return wrap;
+  }
+
+  // ---- usage dashboard ------------------------------------------------------------
+  let usageHours = 24;
+  $("#range").addEventListener("click", e => {
+    const b = e.target.closest("button[data-hours]"); if (!b) return;
+    usageHours = Number(b.dataset.hours);
+    document.querySelectorAll("#range button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    loadUsage();
+  });
+  const compact = n => n >= 10000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K" : n.toLocaleString();
+  const seconds = ms => ms == null ? "–" : (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + " s";
+  const STOP_LABELS = { passed: "passed its check", cache: "from cache", polished: "final rewrite", unchecked: "unchecked (1 stage)",
+    decided: "decided good enough", budget_stages: "stage budget used", budget_time: "time budget reached", budget_quota: "quota budget used" };
+
+  function tile(label, value, note) {
+    const el = document.createElement("div"); el.className = "tile";
+    const l = document.createElement("div"); l.className = "label"; l.textContent = label;
+    const v = document.createElement("div"); v.className = "value"; v.textContent = value;
+    el.append(l, v);
+    if (note) { const n = document.createElement("div"); n.className = "note"; n.textContent = note; el.append(n); }
+    return el;
+  }
+
+  // One-series horizontal bars: value at the tip, per-bar tooltip, and a table view.
+  function bars(figure, rows, { format = compact, tip = r => `${format(r.value)}` } = {}) {
+    const holder = $(".bars", figure); holder.replaceChildren();
+    figure.querySelector("details")?.remove();
+    if (!rows.length) { const p = document.createElement("div"); p.className = "empty-note"; p.textContent = "No data in this range yet."; holder.append(p); return; }
+    const max = Math.max(...rows.map(r => r.value), 1);
+    const tipEl = $("#tip");
+    for (const r of rows) {
+      const row = document.createElement("div"); row.className = "hbar-row"; row.tabIndex = 0;
+      const name = document.createElement("span"); name.className = "name"; name.textContent = r.label; name.title = r.label;
+      const track = document.createElement("span"); track.className = "track";
+      const fill = document.createElement("span"); fill.className = "fill"; fill.style.display = "block";
+      fill.style.width = `${Math.max(1, (r.value / max) * 100)}%`; track.append(fill);
+      const val = document.createElement("span"); val.className = "val"; val.textContent = format(r.value);
+      row.append(name, track, val);
+      const show = () => {
+        tipEl.replaceChildren(); const strong = document.createElement("b"); strong.textContent = tip(r);
+        tipEl.append(strong, " " + r.label); tipEl.hidden = false;
+        const box = row.getBoundingClientRect(), host = $("#usage").getBoundingClientRect();
+        tipEl.style.left = `${box.left - host.left + 12}px`; tipEl.style.top = `${box.top - host.top - 30}px`;
+      };
+      row.addEventListener("pointerenter", show); row.addEventListener("focus", show);
+      row.addEventListener("pointerleave", () => { tipEl.hidden = true; }); row.addEventListener("blur", () => { tipEl.hidden = true; });
+      holder.append(row);
+    }
+    const details = document.createElement("details"); details.className = "tableview";
+    const summary = document.createElement("summary"); summary.textContent = "Show as table";
+    const table = document.createElement("table");
+    for (const r of rows) {
+      const tr = document.createElement("tr");
+      const a = document.createElement("td"); a.textContent = r.label;
+      const b = document.createElement("td"); b.textContent = tip(r);
+      tr.append(a, b); table.append(tr);
+    }
+    details.append(summary, table); figure.append(details);
+  }
+
+  function meters(figure, rows) {
+    const holder = $(".bars", figure); holder.replaceChildren();
+    figure.querySelector("details")?.remove();
+    if (!rows.length) { const p = document.createElement("div"); p.className = "empty-note"; p.textContent = "No daily limits tracked for your ready models."; holder.append(p); return; }
+    for (const r of rows) {
+      const share = r.free_rpd ? r.rpd_left / r.free_rpd : 1;
+      const row = document.createElement("div"); row.className = "hbar-row quota";
+      const name = document.createElement("span"); name.className = "name"; name.textContent = r.model + (r.own_key ? " (your key)" : ""); name.title = name.textContent;
+      const meter = document.createElement("span"); meter.className = "meter" + (share <= 0 ? " empty" : share < 0.2 ? " low" : "");
+      const fill = document.createElement("i"); fill.style.width = `${Math.max(0, Math.min(1, share)) * 100}%`; meter.append(fill);
+      const val = document.createElement("span"); val.className = "val"; val.textContent = `${compact(r.rpd_left)} / ${compact(r.free_rpd)}`;
+      row.append(name, val, meter); holder.append(row);
+    }
+  }
+
+  async function loadUsage() {
+    const usage = $("#usage");
+    usage.style.opacity = ".6";  // keep the previous frame while refetching
+    const res = await api(`/api/usage?hours=${usageHours}`);
+    usage.style.opacity = "";
+    if (!res.ok) return;
+    const u = await res.json();
+    $("#usage-scope").textContent = u.scope === "mine" ? "Your questions only." : "All questions on this server.";
+    const passRate = u.questions ? Math.round((u.passed / Math.max(1, u.questions - u.errors)) * 100) + "%" : "–";
+    $("#kpis").replaceChildren(
+      tile("Questions", compact(u.questions), u.errors ? `${u.errors} failed` : null),
+      tile("Passed their check", passRate),
+      tile("Median time", seconds(u.p50_ms), u.p95_ms != null ? `p95 ${seconds(u.p95_ms)}` : null),
+      tile("Average stages", u.avg_stages ?? "–", u.questions ? `${u.escalated} needed 3+` : null),
+      tile("Free requests used", compact(u.requests_used), u.cache_hits ? `${u.cache_hits} answered from cache` : null),
+      tile("Feedback", `👍 ${u.thumbs_up}  👎 ${u.thumbs_down}`),
+    );
+    bars($("#chart-models"), u.models.map(m => ({ label: m.model, value: m.calls, errors: m.errors, avg: m.avg_ms })),
+      { tip: r => `${r.value} calls · ${r.errors} failed · ${seconds(r.avg)} avg` });
+    bars($("#chart-stops"), Object.entries(u.stop_reasons).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: STOP_LABELS[k] || k, value: v })),
+      { tip: r => `${r.value} question${r.value === 1 ? "" : "s"}` });
+    meters($("#chart-quota"), u.quota);
+    const laya = u.laya;
+    const layaRows = Object.entries(laya.by_status).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, value: v }));
+    bars($("#chart-laya"), layaRows, { tip: r => `${r.value} decisions` });
+    const cap = $("#chart-laya figcaption span");
+    cap.textContent = `Status: ${laya.status} · ${laya.predicted} of ${laya.decisions} decisions predicted · ` +
+      `${laya.predicted ? Math.round(laya.agree_with_rules / laya.predicted * 100) : 0}% agree with the rules`;
+  }
+
+  // ---- your provider keys -------------------------------------------------------
+  async function loadKeys() {
+    const list = $("#key-list");
+    const res = await api("/api/keys");
+    if (!res.ok) return;
+    const data = await res.json();
+    list.replaceChildren();
+    for (const p of data.providers) {
+      const row = document.createElement("div"); row.className = "key-row";
+      const who = document.createElement("div"); who.className = "who"; who.textContent = p.label;
+      const small = document.createElement("small");
+      small.textContent = p.has_key
+        ? `Your key …${p.last4}${p.verified === true ? " · verified" : p.verified === false ? " · rejected" : ""}`
+        : p.server_key ? "Using the server's key" : "No key yet";
+      who.append(small);
+      const form = document.createElement("form");
+      const field = document.createElement("input"); field.type = "password"; field.autocomplete = "off";
+      field.placeholder = p.has_key ? "Replace with a new key" : "Paste your API key"; field.setAttribute("aria-label", `${p.label} API key`);
+      const save = document.createElement("button"); save.className = "btn primary"; save.type = "submit"; save.textContent = "Save";
+      form.append(field, save);
+      const side = document.createElement("div"); side.className = "key-msg";
+      if (p.has_key) {
+        const remove = document.createElement("button"); remove.className = "btn"; remove.type = "button"; remove.textContent = "Remove";
+        remove.addEventListener("click", async () => { await api(`/api/keys/${encodeURIComponent(p.provider)}`, { method: "DELETE" }); loadKeys(); refreshStatus(); });
+        side.append(remove);
+      } else if (p.signup_url) {
+        const a = document.createElement("a"); a.href = p.signup_url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = "Get a free key";
+        side.append(a);
+      }
+      form.addEventListener("submit", async e => {
+        e.preventDefault();
+        if (!field.value.trim()) return;
+        save.disabled = true; save.textContent = "Checking…";
+        const r = await api(`/api/keys/${encodeURIComponent(p.provider)}`, { method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: field.value.trim() }) });
+        field.value = "";
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          save.disabled = false; save.textContent = "Save";
+          side.textContent = err?.error?.message || err?.detail?.[0]?.msg || "Could not save the key.";
+          return;
+        }
+        loadKeys(); refreshStatus();
+      });
+      row.append(who, form, side); list.append(row);
     }
   }
 
@@ -571,14 +874,24 @@ model: "<registry id>"   try that model first, e.g. "groq/llama-3.3-70b-versatil
   "mode": "fast",                          // overrides the mode in "model"
   "privacy": "local_only",                 // or "default"
   "allow_providers": ["groq", "cerebras"], // only route to these
-  "trace": true                            // include thinking-window events
-}`;
+  "trace": true,                           // include thinking-window events
+  "max_stages": 8,                         // draft, check, fix, merge... (1-50)
+  "time_budget_s": 45,                     // stop and return the best answer so far
+  "quota_budget": 10,                      // most free provider requests to spend
+  "strategy": "mixture"                    // or single / cascade / decompose
+}
+
+Streams carry the checked final answer; with "max_stages": 1 tokens stream live.`;
   $("#snip-cli").textContent =
 `tempo ask "What is the capital of Australia?"
 tempo ask --mode best "Prove that the square root of 2 is irrational"
 tempo ask --private "Summarize this" < notes.txt
+tempo ask --max-stages 10 --time-budget 90 "Plan a 3-day trip to Jaipur with a budget"
 tempo chat
 tempo models
+tempo keys add groq          # your own key, stored encrypted
+tempo eval --limit 2         # measure models on the probe set
+tempo export-laya --out ds   # decisions for Laya's fine-tuning notebook
 tempo serve --port 8000`;
 
   refreshStatus();

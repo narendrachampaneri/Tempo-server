@@ -397,6 +397,103 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             raise APIError(404, f"No stored key for {provider!r}.", code="key_not_found")
         return {"ok": True}
 
+    @api.get("/usage")
+    async def usage(request: Request, access: AccessDep, hours: int = 24) -> dict[str, Any]:
+        """Dashboard numbers for the last ``hours``. Users see their own questions; the local
+        user and the admin see everything."""
+        hours = max(1, min(hours, 24 * 90))
+        since = time.time() - hours * 3600
+        user_id = request.state.user_id
+        mine = user_id not in (LOCAL_USER, ADMIN_USER)
+        where = "created_at >= ?" + (" AND user_id = ?" if mine else "")
+        params: tuple[Any, ...] = (since, user_id) if mine else (since,)
+        store = engine.store
+        questions = store.query(
+            "SELECT id, stages_used, requests_used, total_ms, stop_reason, cache_hit, feedback, "
+            f"error FROM questions WHERE {where}",
+            params,
+        )
+        ids = [q["id"] for q in questions]
+        finished = [q for q in questions if q["error"] is None and q["total_ms"] is not None]
+        times = sorted(q["total_ms"] for q in finished)
+
+        def pct(values: list[int], p: float) -> int | None:
+            return values[min(len(values) - 1, int(p * len(values)))] if values else None
+
+        stop_reasons: dict[str, int] = {}
+        for q in finished:
+            reason = q["stop_reason"] or "unknown"
+            stop_reasons[reason] = stop_reasons.get(reason, 0) + 1
+        models: list[dict[str, Any]] = []
+        decisions: list[dict[str, Any]] = []
+        if ids:
+            marks = ",".join("?" for _ in ids)
+            models = store.query(
+                "SELECT model, COUNT(*) AS calls, SUM(status != 'ok') AS errors, "
+                f"AVG(ms) AS avg_ms FROM calls WHERE question_id IN ({marks}) "
+                "GROUP BY model ORDER BY calls DESC LIMIT 10",
+                ids,
+            )
+            decisions = store.query(
+                "SELECT laya_status AS status, COUNT(*) AS n, "
+                "SUM(laya_value IS NOT NULL AND laya_value = rules_value) AS agree "
+                f"FROM decisions WHERE question_id IN ({marks}) GROUP BY laya_status",
+                ids,
+            )
+        quota = []
+        for m in engine.registry.all():
+            provider = engine.registry.providers[m.provider]
+            if provider.local or model_status(m, access) != "ready":
+                continue
+            left = engine.quota.left(m, access.key_id(m.provider))
+            if left.rpd is None:
+                continue
+            quota.append(
+                {
+                    "model": m.id,
+                    "rpd_left": left.rpd,
+                    "free_rpd": m.free_rpd or left.rpd,
+                    "own_key": m.provider in access.user_keys,
+                }
+            )
+        quota.sort(key=lambda row: row["rpd_left"] / max(1, row["free_rpd"]))
+        predicted = [d for d in decisions if d["status"] in ("ok", "late")]
+        return {
+            "hours": hours,
+            "scope": "mine" if mine else "all",
+            "questions": len(questions),
+            "errors": sum(1 for q in questions if q["error"]),
+            "passed": sum(1 for q in finished if q["stop_reason"] in ("passed", "cache")),
+            "escalated": sum(1 for q in finished if (q["stages_used"] or 0) > 2),
+            "avg_stages": round(sum(q["stages_used"] or 0 for q in finished) / len(finished), 2)
+            if finished
+            else None,
+            "p50_ms": pct(times, 0.5),
+            "p95_ms": pct(times, 0.95),
+            "requests_used": sum(q["requests_used"] or 0 for q in finished),
+            "cache_hits": sum(q["cache_hit"] or 0 for q in finished),
+            "thumbs_up": sum(1 for q in questions if q["feedback"] == 1),
+            "thumbs_down": sum(1 for q in questions if q["feedback"] == -1),
+            "stop_reasons": stop_reasons,
+            "models": [
+                {
+                    "model": m["model"],
+                    "calls": m["calls"],
+                    "errors": m["errors"] or 0,
+                    "avg_ms": round(m["avg_ms"] or 0),
+                }
+                for m in models
+            ],
+            "laya": {
+                "status": engine.laya.status if engine.laya is not None else "off",
+                "decisions": sum(d["n"] for d in decisions),
+                "predicted": sum(d["n"] for d in predicted),
+                "agree_with_rules": sum(d["agree"] or 0 for d in predicted),
+                "by_status": {d["status"]: d["n"] for d in decisions},
+            },
+            "quota": quota[:12],
+        }
+
     @api.get("/models")
     async def models(access: AccessDep) -> dict[str, Any]:
         registry = engine.registry
