@@ -637,7 +637,7 @@ tempo-server/
 |---|---|---|
 | **1. MVP** ✅ done | FastAPI + LiteLLM with 5 sources (Groq, Cerebras, Google AI Studio, OpenRouter free, Ollama with auto-discovery). Rule-based analyzer, G1 router, fallbacks with cool-downs, SSE trace, CLI, web app, OpenAI-compatible API. | You type a question in CLI or web, see which model was picked and why, the answer streams, and a provider failure falls back automatically. |
 | **2. Smart** ✅ done | Staged engine (draft → check → fix → merge/polish, parallel models per stage, early stop, stage/time/quota budgets, live replacement). Quota manager, answer checker, cascade, mixture, decompose. Embedding classifier, semantic cache. Measured skill scores, registry auto-sync and health checks. BYOK key vault with users. Laya in shadow mode at every stage, full logging for tuning, Laya dataset export and comparison. Usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
-| **3. Learning** (4–6 weeks) | Consent and PII scrubbing for logs. Fine-tune Laya on the exported logs (offline, on a free notebook) and let it take over the decisions where it wins. kNN, then two-tower routers trained on judged outcomes (served on CPU). Exploration traffic, Arch-Router for user-defined routes, A/B framework. **Run code in a WebAssembly sandbox** in the checker: wasmtime (a pip package) runs a WASI build of CPython with no network, a scratch folder only, and memory, time (epoch interruption) and output limits, so answers' Python code and tests really run without Docker or any special machine. Standard-library Python first; JavaScript through a QuickJS WebAssembly build later. | Learned router beats G1 rules on your eval set at equal or lower quota use; generated code is executed and its tests counted in the check. |
+| **3. Learning** (4–6 weeks) | Consent and PII scrubbing for logs. Fine-tune Laya on the exported logs (offline, on a free notebook) and let it take over the decisions where it wins (Tempo-Router and Tempo-Judge, §14). Tempo-Core v1 (SFT, then DPO) from `tempo export-sft` and `tempo export-pairs`, behind the promotion gate. kNN, then two-tower routers trained on judged outcomes (served on CPU). Exploration traffic, Arch-Router for user-defined routes, A/B framework. **Run code in a WebAssembly sandbox** in the checker: wasmtime (a pip package) runs a WASI build of CPython with no network, a scratch folder only, and memory, time (epoch interruption) and output limits, so answers' Python code and tests really run without Docker or any special machine. Standard-library Python first; JavaScript through a QuickJS WebAssembly build later. | Learned router beats G1 rules on your eval set at equal or lower quota use; generated code is executed and its tests counted in the check. |
 | **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (CPU-sized speech and vision models, e.g. whisper.cpp), a CPU-sized self-hosted Tempo core (§4.7), GraphRouter trained offline, LoRA fine-tune of Tempo core. Shared state (Redis) so several servers share quota counters and the cache. | External developers use Tempo as a model or tool in their own apps. |
 | **5. Tempo Tune** (roadmap only, see §13) | A user describes a scenario in plain English. Tempo builds and checks a labelled dataset with stronger models, and trains in an offline job on a free notebook. **Laya decision models come first**, because they run on CPU (§4.12). Writing models (LoRA on a small open model) come only if the result is small enough to run on CPU (§1.1); several such adapters share one base model in llama.cpp. Tuned models are available through the API, MCP server and SDK. | A user goes from a one-paragraph scenario to a tuned specialist that beats the general models on that scenario's held-out set, without writing code or owning a GPU. |
 
@@ -693,3 +693,34 @@ flowchart LR
 **5. Serve many specialists cheaply, on CPU.** Laya specialists are checkpoints of about 0.8 GB that load in a few seconds on CPU; the most used stay in memory and the rest load on demand. Only questions whose decisions a specialist has taken over are waited for, as in §4.12. Writing specialists built on the same base model share **one** copy of the base weights: llama.cpp's server loads several LoRA adapters next to one GGUF base and picks them per request (its `lora` request field), all on CPU. Requests for different adapters are not batched together, so writing specialists suit light traffic; rarely used adapters are unloaded when idle.
 
 **6. Use it anywhere.** Specialists appear in `/v1/models` and can be called by id (for example `tune/<owner>/<name>`) through the OpenAI-compatible API, as MCP tools (one tool per specialist, with the scenario description as the tool description), and through the SDK. The owner's settings decide who else may use them, and usage counts toward the owner's quota.
+
+---
+
+## 14. Tempo models: open models trained from Tempo's own checked runs
+
+Tempo is **open models plus the system that runs and trains them**. The staged engine already
+produces what training needs: every answer is checked (heuristics plus a judge from another
+family), every decision is logged with its outcome, and every row knows which models shaped it
+and under which terms. Tempo's own models are trained from those checked runs, offline on a
+free notebook, and shipped in CPU formats. The full plan (data, methods, estimates, promotion
+gate, collapse protection, release) is in [TEMPO_MODELS.md](./TEMPO_MODELS.md).
+
+| Model | Job in Tempo | Base | Data | CPU format |
+|---|---|---|---|---|
+| **Tempo-Router** | pick the model for each stage; stop or continue | Laya (Apache-2.0) | `tempo export-laya` | Laya checkpoint (PyTorch fp32) |
+| **Tempo-Judge** | grade answers (Laya's score type), saving judge calls to big models | Laya (Apache-2.0) | graded answers from the log | same |
+| **Tempo-Core** | write answers on CPU | a 1–4B Apache-2.0 or MIT model (first choice Qwen3-1.7B) | `tempo export-sft`, then `tempo export-pairs` (DPO), later rewards from sandboxed checks (GRPO) | GGUF Q4_K_M |
+| **Tempo Tune add-ons** | one small adapter per scenario (§13) | Laya, or a LoRA on Tempo-Core | per scenario | Laya checkpoint or GGUF LoRA |
+
+- **Only checked, "yes" data**: an exported row needs every model that wrote or graded its text
+  to be "yes" (`tempo terms`), carries its source and licences, and is left out after a 👎.
+  The terms of hosted "yes" providers are re-read before every export.
+- **Promotion gate**: a new version replaces the old one only if it wins on a fixed held-out set
+  (the exports' test split, the same questions in every export) with no drop on any task type,
+  runs fast enough on a 4-core CPU, and is not more repetitive; otherwise the old one stays and
+  the reason is logged.
+- **Collapse protection**: only checked answers; at least 30% public or human data in every
+  run; at most 30% of answers written by an earlier Tempo-Core; a repetition check between
+  versions (`tempo export-sft` reports it).
+- **Serving order**: Tempo's own models first; free APIs only when they are not confident or
+  an answer fails its check. A missing or slow model never blocks an answer.
