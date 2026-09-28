@@ -506,6 +506,8 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 
 ## 10. Proposed repository layout
 
+Phase 1 keeps a flat `tempo/` package (one module per component; see the README). It will grow into this layout as the later phases land.
+
 ```
 tempo-server/
 ├── tempo/
@@ -536,8 +538,8 @@ tempo-server/
 
 | Phase | Scope | Done when |
 |---|---|---|
-| **1. MVP** (2–3 weeks) | FastAPI + LiteLLM with 5 sources (Groq, Cerebras, Google AI Studio, OpenRouter free, Ollama). Rules + embedding analyzer, G1 router, fallbacks, SSE trace, CLI, basic web page. | You type a question in CLI or web, see which model was picked and why, the answer streams, and a provider failure falls back automatically. |
-| **2. Smart** (3–4 weeks) | Registry auto-sync + health checks, quota manager, verifier, cascade + MoA, semantic cache, BYOK key vault, usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
+| **1. MVP** ✅ done | FastAPI + LiteLLM with 5 sources (Groq, Cerebras, Google AI Studio, OpenRouter free, Ollama with auto-discovery). Rule-based analyzer, G1 router, fallbacks with cool-downs, SSE trace, CLI, web app, OpenAI-compatible API. | You type a question in CLI or web, see which model was picked and why, the answer streams, and a provider failure falls back automatically. |
+| **2. Smart** (3–4 weeks) | Embedding classifier in the analyzer (moved from Phase 1), registry auto-sync + health checks, quota manager, verifier, cascade + MoA, semantic cache, BYOK key vault, usage dashboard. | Hard questions escalate visibly to multiple models; no user-visible 429 errors under normal load. |
 | **3. Learning** (4–6 weeks) | Trace logging with consent, judge labelling, feedback buttons, kNN then two-tower router, Arch-Router for user-defined routes, A/B framework. | Learned router beats G1 rules on your eval set at equal or lower quota use. |
 | **4. Platform** (ongoing) | MCP server, SDKs, A2A card, skill file, decomposition for multimodal tasks (Whisper, vision), self-hosted Tempo core, GraphRouter, LoRA fine-tune of Tempo core. | External developers use Tempo as a model or tool in their own apps. |
 

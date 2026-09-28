@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tempo</title>
+<meta name="description" content="Ask once. Tempo picks the best available free or open-source model and shows every decision.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 11h14M16 11v12' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f7f7f8; --surface: #ffffff; --surface-2: #f1f1f4; --border: #e3e3e8;
+  --text: #17171c; --muted: #62626f; --faint: #8b8b98;
+  --accent: #4f46e5; --accent-soft: #eef0ff; --accent-text: #ffffff;
+  --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+  --code-bg: #0f1117; --code-text: #e6e6ef;
+  --shadow: 0 1px 2px rgba(16,16,24,.06), 0 4px 16px rgba(16,16,24,.06);
+  --radius: 14px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0e12; --surface: #15161c; --surface-2: #1c1d25; --border: #2a2b36;
+    --text: #ececf1; --muted: #a2a2b0; --faint: #767684;
+    --accent: #8b87ff; --accent-soft: #23234a; --accent-text: #0d0e12;
+    --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    --code-bg: #0a0b0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0e12; --surface: #15161c; --surface-2: #1c1d25; --border: #2a2b36;
+  --text: #ececf1; --muted: #a2a2b0; --faint: #767684;
+  --accent: #8b87ff; --accent-soft: #23234a; --accent-text: #0d0e12;
+  --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+  --code-bg: #0a0b0f; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; }
+
+/* header */
+header.top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.top-inner { max-width: 1040px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+.brand .mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; }
+.brand .mark svg { width: 16px; height: 16px; }
+nav.tabs { display: flex; gap: 2px; margin-left: 8px; }
+nav.tabs button { background: none; border: 0; padding: 6px 12px; border-radius: 8px; color: var(--muted); cursor: pointer; }
+nav.tabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.spacer { flex: 1; }
+.pill { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--surface); cursor: pointer; white-space: nowrap; }
+.pill .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--faint); vertical-align: 1px; }
+.pill.ok .dot { background: var(--ok); } .pill.bad .dot { background: var(--bad); }
+.icon-btn { background: none; border: 1px solid var(--border); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; display: grid; place-items: center; color: var(--muted); }
+
+main { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+#ask, #developers { max-width: 860px; margin: 0 auto; }
+.view[hidden] { display: none !important; }
+
+/* ask view */
+#ask { display: flex; flex-direction: column; min-height: calc(100vh - 53px); }
+.hero { text-align: center; padding: 11vh 0 28px; }
+.hero h1 { font-size: clamp(28px, 5vw, 40px); letter-spacing: -.025em; margin: 0 0 8px; }
+.hero p { color: var(--muted); margin: 0 auto; max-width: 560px; }
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 28px 0 8px; text-align: left; }
+.feature { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.feature b { display: block; font-size: 14px; margin-bottom: 2px; }
+.feature span { color: var(--muted); font-size: 13px; }
+.suggestions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 20px; }
+.suggestions button { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 7px 14px; cursor: pointer; font-size: 13.5px; color: var(--muted); }
+.suggestions button:hover { border-color: var(--accent); color: var(--text); }
+
+#thread { flex: 1; padding: 24px 0 8px; }
+.turn { margin-bottom: 26px; }
+.user-msg { margin-left: auto; max-width: 85%; width: fit-content; background: var(--accent-soft); border-radius: var(--radius) var(--radius) 4px var(--radius); padding: 10px 14px; white-space: pre-wrap; word-wrap: break-word; }
+.assistant { margin-top: 14px; }
+
+.thinking { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+.thinking-head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12.5px; color: var(--muted); cursor: pointer; user-select: none; background: var(--surface-2); border: 0; width: 100%; text-align: left; }
+.thinking-head .title { font-weight: 600; color: var(--text); }
+.thinking-head .chev { margin-left: auto; transition: transform .15s; }
+.thinking.collapsed .chev { transform: rotate(-90deg); }
+.thinking.collapsed .thinking-body { display: none; }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+.thinking.finished .spinner { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.thinking-body { max-height: 168px; overflow-y: auto; padding: 8px 12px; font: 12.5px/1.65 var(--mono); }
+.line { display: flex; gap: 10px; color: var(--muted); }
+.line .t { color: var(--faint); min-width: 44px; text-align: right; flex: none; }
+.line.warn { color: var(--warn); } .line.bad { color: var(--bad); } .line.good { color: var(--ok); }
+.reasoning { margin: 4px 0 4px 54px; }
+.reasoning summary { cursor: pointer; color: var(--faint); }
+.reasoning pre { white-space: pre-wrap; margin: 4px 0 0; color: var(--faint); font: inherit; max-height: 120px; overflow: auto; }
+
+.answer { word-wrap: break-word; }
+.answer p { margin: 0 0 12px; }
+.answer h3, .answer h4 { margin: 18px 0 8px; line-height: 1.3; }
+.answer ul, .answer ol { margin: 0 0 12px; padding-left: 22px; }
+.answer code { font: 13px var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+.answer pre.code { background: var(--code-bg); color: var(--code-text); border-radius: 10px; margin: 0 0 14px; overflow: hidden; }
+.answer pre.code .code-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; font: 12px var(--sans); color: #9a9aad; border-bottom: 1px solid #22232d; }
+.answer pre.code code { display: block; padding: 12px; overflow-x: auto; background: none; color: inherit; font-size: 13px; line-height: 1.55; }
+.answer .caret { display: inline-block; width: 7px; height: 16px; background: var(--accent); vertical-align: -3px; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.copy { background: none; border: 1px solid #33343f; color: #b7b7c6; border-radius: 6px; padding: 1px 8px; font-size: 12px; cursor: pointer; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; font-size: 12.5px; color: var(--faint); }
+.badge { border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; font: 12px var(--mono); color: var(--muted); }
+.meta button { background: none; border: 0; color: var(--faint); cursor: pointer; padding: 0; font-size: 12.5px; }
+.meta button:hover { color: var(--text); }
+.error-box { border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--border)); background: color-mix(in srgb, var(--bad) 8%, var(--surface)); border-radius: 10px; padding: 10px 14px; color: var(--text); }
+
+/* composer */
+.composer-wrap { position: sticky; bottom: 0; padding: 10px 0 18px; background: linear-gradient(transparent, var(--bg) 28%); }
+.composer { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 10px 10px 8px 14px; }
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea { width: 100%; border: 0; outline: 0; resize: none; background: none; color: var(--text); font: 15px/1.5 var(--sans); max-height: 220px; min-height: 26px; padding: 2px 0; }
+.composer-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.modes { display: inline-flex; background: var(--surface-2); border-radius: 9px; padding: 2px; gap: 2px; }
+.modes button { border: 0; background: none; padding: 4px 10px; border-radius: 7px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.modes button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.hint { font-size: 12px; color: var(--faint); }
+.send { margin-left: auto; background: var(--accent); color: var(--accent-text); border: 0; border-radius: 10px; height: 34px; padding: 0 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.send:disabled { opacity: .45; cursor: default; }
+
+/* models + developers */
+.page { padding: 28px 0 60px; }
+.page h2 { font-size: 22px; letter-spacing: -.015em; margin: 0 0 4px; }
+.page .sub { color: var(--muted); margin: 0 0 20px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 26px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.card .name { font-weight: 600; }
+.card .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 6px; }
+.card .env { font: 12px var(--mono); color: var(--muted); }
+.status { font-size: 12px; border-radius: 999px; padding: 1px 8px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.status.ready { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.status.cool { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); font-weight: 600; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td.mono { font-family: var(--mono); font-size: 12.5px; white-space: normal; overflow-wrap: anywhere; min-width: 200px; }
+.bar { display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: var(--surface-2); vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.snippet { margin-bottom: 22px; }
+.snippet h3 { font-size: 15px; margin: 0 0 8px; }
+.snippet pre { background: var(--code-bg); color: var(--code-text); border-radius: 10px; padding: 12px 14px; overflow-x: auto; font: 13px/1.55 var(--mono); margin: 0; }
+.muted { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .features { grid-template-columns: 1fr; }
+  .top-inner { gap: 8px; }
+  nav.tabs { margin-left: 0; }
+  nav.tabs button { padding: 6px 8px; }
+  #status-text { display: none; }
+  .pill { padding: 4px 8px; }
+  .pill .dot { margin-right: 0; }
+  .hint { display: none; }
+  .brand span.word { display: none; }
+  .hero { padding-top: 6vh; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 4.5h10M8 4.5V13" stroke="white" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></div>
+      <span class="word">Tempo</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="ask" aria-selected="true">Ask</button>
+      <button role="tab" data-view="models" aria-selected="false">Models</button>
+      <button role="tab" data-view="developers" aria-selected="false">Developers</button>
+    </nav>
+    <div class="spacer"></div>
+    <button class="pill" id="status-pill" title="Model status"><span class="dot"></span><span id="status-text">Checking…</span></button>
+    <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main>
+  <section id="ask" class="view">
+    <div id="empty">
+      <div class="hero">
+        <h1>Ask anything.</h1>
+        <p>Tempo reads your question, picks the best free or open-source model for it, and shows you every decision as it happens.</p>
+        <div class="features">
+          <div class="feature"><b>Smart routing</b><span>Scores every available model for your exact question.</span></div>
+          <div class="feature"><b>Never stuck</b><span>If a model fails or hits its limit, Tempo switches automatically.</span></div>
+          <div class="feature"><b>Nothing hidden</b><span>The thinking window shows each step and why it was taken.</span></div>
+        </div>
+        <div class="suggestions" id="suggestions">
+          <button>Write a Python function that checks if a string is a palindrome, with tests</button>
+          <button>Explain the difference between TCP and UDP</button>
+          <button>What is 17% of 2,340?</button>
+          <button>Translate "Where is the railway station?" into Hindi and Gujarati</button>
+        </div>
+      </div>
+    </div>
+    <div id="thread" aria-live="polite"></div>
+    <div class="composer-wrap">
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" placeholder="Ask Tempo anything…" aria-label="Your question"></textarea>
+        <div class="composer-row">
+          <div class="modes" id="modes" role="group" aria-label="Routing mode">
+            <button type="button" data-mode="auto" aria-pressed="true" title="Balanced quality, speed and free quota">Auto</button>
+            <button type="button" data-mode="fast" aria-pressed="false" title="Prefer the fastest capable model">Fast</button>
+            <button type="button" data-mode="best" aria-pressed="false" title="Prefer the strongest model, even if its free quota is small">Best</button>
+            <button type="button" data-mode="private" aria-pressed="false" title="Only local models (Ollama)">Private</button>
+          </div>
+          <span class="hint">Enter to send · Shift+Enter for a new line</span>
+          <button class="send" id="send" type="submit" disabled>Send ↑</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section id="models" class="view page" hidden>
+    <h2>Models</h2>
+    <p class="sub">Tempo routes only to models whose provider is configured. Every provider below has a free tier.</p>
+    <div class="cards" id="provider-cards"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Status</th><th>Model</th><th>Free / day</th><th>Context</th><th>Strength</th><th>Best at</th><th>Features</th></tr></thead>
+      <tbody id="model-rows"></tbody>
+    </table></div>
+  </section>
+
+  <section id="developers" class="view page" hidden>
+    <h2>Use Tempo from your code</h2>
+    <p class="sub">Tempo speaks the OpenAI API. Point any OpenAI-compatible client at it and use the model <code>tempo/auto</code>.</p>
+    <div class="snippet"><h3>curl</h3><pre id="snip-curl"></pre></div>
+    <div class="snippet"><h3>Python (OpenAI SDK)</h3><pre id="snip-python"></pre></div>
+    <div class="snippet"><h3>Models and conditions</h3><pre id="snip-models"></pre></div>
+    <div class="snippet"><h3>Command line</h3><pre id="snip-cli"></pre></div>
+  </section>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const store = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch { /* storage unavailable */ } },
+  };
+
+  // ---- theme ----------------------------------------------------------------
+  const savedTheme = store.get("tempo_theme");
+  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+  $("#theme-btn").addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme
+      ? document.documentElement.dataset.theme === "dark"
+      : matchMedia("(prefers-color-scheme: dark)").matches;
+    const next = dark ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    store.set("tempo_theme", next);
+  });
+
+  // ---- tabs -----------------------------------------------------------------
+  function showView(name) {
+    document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === name)));
+    document.querySelectorAll(".view").forEach(v => { v.hidden = v.id !== name; });
+    if (name === "models") loadModels();
+    if (name === "ask") input.focus();
+  }
+  document.querySelectorAll("nav.tabs button").forEach(b => b.addEventListener("click", () => showView(b.dataset.view)));
+  $("#status-pill").addEventListener("click", () => showView("models"));
+
+  // ---- API helper with optional key -----------------------------------------
+  async function api(path, init = {}, retried = false) {
+    const headers = new Headers(init.headers || {});
+    const key = store.get("tempo_api_key");
+    if (key) headers.set("Authorization", "Bearer " + key);
+    const res = await fetch(path, { ...init, headers });
+    if (res.status === 401 && !retried) {
+      const entered = prompt("This Tempo server requires an API key:");
+      if (entered) { store.set("tempo_api_key", entered.trim()); return api(path, init, true); }
+    }
+    return res;
+  }
+
+  // ---- markdown (escape first, then a small safe subset) --------------------
+  const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function inline(s) {
+    return esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+  function blocks(text) {
+    let html = "", list = null, para = [];
+    const flushPara = () => { if (para.length) { html += "<p>" + para.map(inline).join("<br>") + "</p>"; para = []; } };
+    const flushList = () => { if (list) { html += `<${list.tag}>` + list.items.map(i => "<li>" + inline(i) + "</li>").join("") + `</${list.tag}>`; list = null; } };
+    for (const line of text.split("\n")) {
+      let m;
+      if (!line.trim()) { flushPara(); flushList(); continue; }
+      if ((m = line.match(/^(#{1,4})\s+(.*)$/))) { flushPara(); flushList(); const h = m[1].length < 3 ? 3 : 4; html += `<h${h}>${inline(m[2])}</h${h}>`; continue; }
+      if ((m = line.match(/^\s*[-*•]\s+(.*)$/))) { flushPara(); if (!list || list.tag !== "ul") { flushList(); list = { tag: "ul", items: [] }; } list.items.push(m[1]); continue; }
+      if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { flushPara(); if (!list || list.tag !== "ol") { flushList(); list = { tag: "ol", items: [] }; } list.items.push(m[1]); continue; }
+      flushList(); para.push(line);
+    }
+    flushPara(); flushList();
+    return html;
+  }
+  function markdown(src) {
+    return src.split("```").map((part, i) => {
+      if (i % 2 === 0) return blocks(part);
+      const nl = part.indexOf("\n");
+      const lang = nl >= 0 ? part.slice(0, nl).trim() : "";
+      const code = (nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, "");
+      return `<pre class="code"><div class="code-head"><span>${esc(lang || "code")}</span><button class="copy" type="button">Copy</button></div><code>${esc(code)}</code></pre>`;
+    }).join("");
+  }
+  document.addEventListener("click", e => {
+    const btn = e.target.closest("pre.code .copy");
+    if (!btn) return;
+    navigator.clipboard?.writeText(btn.closest("pre").querySelector("code").textContent);
+    btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+  });
+
+  // ---- composer -------------------------------------------------------------
+  const input = $("#input"), send = $("#send"), thread = $("#thread");
+  let mode = "auto", history = [], controller = null;
+  const autosize = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 220) + "px"; };
+  input.addEventListener("input", () => { autosize(); if (!controller) send.disabled = !input.value.trim(); });
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#composer").requestSubmit(); }
+  });
+  $("#modes").addEventListener("click", e => {
+    const b = e.target.closest("button[data-mode]"); if (!b) return;
+    mode = b.dataset.mode;
+    document.querySelectorAll("#modes button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  });
+  $("#suggestions").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    input.value = b.textContent; autosize(); send.disabled = false; $("#composer").requestSubmit();
+  });
+  $("#composer").addEventListener("submit", e => {
+    e.preventDefault();
+    if (controller) { controller.abort(); return; }
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ""; autosize();
+    ask(text);
+  });
+
+  function setBusy(busy) {
+    send.textContent = busy ? "Stop ■" : "Send ↑";
+    send.disabled = busy ? false : !input.value.trim();
+  }
+
+  // ---- one question -> one turn ---------------------------------------------
+  function newTurn(text) {
+    $("#empty").hidden = true;
+    const turn = document.createElement("div");
+    turn.className = "turn";
+    turn.innerHTML = `
+      <div class="user-msg"></div>
+      <div class="assistant">
+        <div class="thinking">
+          <button class="thinking-head" type="button" aria-expanded="true">
+            <span class="spinner"></span><span class="title">Thinking</span><span class="summary">Starting…</span><span class="chev">▾</span>
+          </button>
+          <div class="thinking-body"></div>
+        </div>
+        <div class="answer"></div>
+        <div class="meta" hidden></div>
+      </div>`;
+    $(".user-msg", turn).textContent = text;
+    const box = $(".thinking", turn);
+    $(".thinking-head", turn).addEventListener("click", ev => {
+      box.classList.toggle("collapsed");
+      ev.currentTarget.setAttribute("aria-expanded", String(!box.classList.contains("collapsed")));
+    });
+    thread.appendChild(turn);
+    turn.scrollIntoView({ block: "end", behavior: "smooth" });
+    return turn;
+  }
+
+  const lineClass = { call_error: "warn", fallback: "warn", answer_reset: "warn", error: "bad", done: "good" };
+
+  async function ask(text) {
+    const turn = newTurn(text);
+    const body = $(".thinking-body", turn), summary = $(".summary", turn), answerEl = $(".answer", turn), meta = $(".meta", turn), box = $(".thinking", turn);
+    let answer = "", reasoningPre = null, model = null, frame = 0, finished = false;
+
+    const nearBottom = el => el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    const sticky = (change) => {  // apply a change, keeping the window pinned to the bottom if it was
+      const stick = nearBottom(body);
+      change();
+      if (stick) body.scrollTop = body.scrollHeight;
+    };
+    const addLine = (ev) => sticky(() => {
+      const line = document.createElement("div");
+      line.className = "line " + (lineClass[ev.type] || "");
+      const t = document.createElement("span"); t.className = "t"; t.textContent = ev.t.toFixed(2) + "s";
+      const msg = document.createElement("span"); msg.textContent = ev.text;
+      line.append(t, msg); body.appendChild(line);
+    });
+    const renderAnswer = () => {
+      frame = 0;
+      answerEl.innerHTML = markdown(answer) + (finished ? "" : '<span class="caret"></span>');
+      if (nearBottom(document.scrollingElement)) window.scrollTo({ top: document.body.scrollHeight });
+    };
+    const scheduleRender = () => { if (!frame) frame = requestAnimationFrame(renderAnswer); };
+
+    const handle = ev => {
+      if (ev.text) { addLine(ev); summary.textContent = ev.text; }
+      switch (ev.type) {
+        case "answer_delta": answer += ev.delta; break;
+        case "reasoning_delta": sticky(() => {
+          if (!reasoningPre) {
+            const d = document.createElement("details"); d.className = "reasoning";
+            d.innerHTML = "<summary>Model reasoning</summary><pre></pre>";
+            body.appendChild(d); reasoningPre = $("pre", d);
+          }
+          reasoningPre.textContent += ev.delta;
+        }); break;
+        case "call_start": reasoningPre = null; break;
+        case "answer_reset": answer = ""; scheduleRender(); break;
+        case "done": model = ev.model; break;
+      }
+    };
+
+    history.push({ role: "user", content: text });
+    controller = new AbortController(); setBusy(true);
+    let error = null;
+    try {
+      const res = await api("/api/ask", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history, mode }), signal: controller.signal,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error?.message || `Request failed (${res.status})`);
+      }
+      const reader = res.body.getReader(), decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+          for (const l of raw.split("\n")) {
+            if (!l.startsWith("data: ")) continue;
+            const ev = JSON.parse(l.slice(6));
+            if (ev.type === "error") error = ev.message;
+            handle(ev);
+            if (ev.type === "answer_delta" || ev.type === "answer_reset") scheduleRender();
+          }
+        }
+      }
+    } catch (e) {
+      error = e.name === "AbortError" ? "Stopped." : (e.message || String(e));
+    } finally {
+      finished = true; controller = null; setBusy(false);
+      box.classList.add("finished");
+      if (frame) cancelAnimationFrame(frame);
+      renderAnswer();
+      if (error && !answer) {
+        const div = document.createElement("div"); div.className = "error-box"; div.textContent = error;
+        answerEl.replaceChildren(div);
+        summary.textContent = error;
+        history.pop();
+      } else {
+        history.push({ role: "assistant", content: answer });
+        meta.hidden = false;
+        const badge = document.createElement("span"); badge.className = "badge"; badge.textContent = model || "unknown model";
+        const copy = document.createElement("button"); copy.type = "button"; copy.textContent = "Copy answer";
+        copy.addEventListener("click", () => { navigator.clipboard?.writeText(answer); copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy answer"; }, 1200); });
+        meta.append("Answered by", badge, copy);
+      }
+      refreshStatus();
+      input.focus();
+    }
+  }
+
+  // ---- status pill + models page --------------------------------------------
+  async function refreshStatus() {
+    const pill = $("#status-pill"), textEl = $("#status-text");
+    try {
+      const res = await fetch("/health");
+      const data = await res.json();
+      const n = data.models_ready;
+      pill.className = "pill " + (n ? "ok" : "bad");
+      textEl.textContent = n ? `${n} model${n === 1 ? "" : "s"} ready` : "No providers configured";
+    } catch {
+      pill.className = "pill bad"; textEl.textContent = "Server unreachable";
+    }
+  }
+
+  const statusClass = s => s === "ready" ? "ready" : (s === "cooling down" || s === "provider key rejected") ? "cool" : "";
+  async function loadModels() {
+    const res = await api("/api/models");
+    if (!res.ok) return;
+    const data = await res.json();
+    const cards = $("#provider-cards"); cards.replaceChildren();
+    for (const p of data.providers) {
+      const card = document.createElement("div"); card.className = "card";
+      card.innerHTML = `<div class="name"></div><div class="row"><span class="status"></span><span class="env"></span></div>`;
+      $(".name", card).textContent = p.label;
+      const st = $(".status", card); st.textContent = p.configured ? "configured" : "not configured"; st.className = "status " + (p.configured ? "ready" : "");
+      const env = $(".env", card);
+      if (p.configured) env.textContent = p.env ? `${p.env} is set` : "";
+      else {
+        env.textContent = `Set ${p.env} · `;
+        if (p.signup_url) { const a = document.createElement("a"); a.href = p.signup_url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = p.local ? "install" : "get a free key"; env.append(a); }
+      }
+      cards.appendChild(card);
+    }
+    const rows = $("#model-rows"); rows.replaceChildren();
+    const order = { ready: 0 };
+    data.models.sort((a, b) => ((order[a.status] ?? 1) - (order[b.status] ?? 1)) || b.strength - a.strength);
+    for (const m of data.models) {
+      const tr = document.createElement("tr");
+      const top = Object.entries(m.skills || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k).join(", ");
+      const features = [m.reasoning && "thinks", m.vision && "images"].filter(Boolean).join(", ") || "–";
+      const ctx = m.context_window >= 1048576 ? Math.round(m.context_window / 1048576) + "M" : Math.round(m.context_window / 1024) + "k";
+      const cells = [
+        ["", null], [m.id, "mono"],
+        [m.local ? "local" : (m.free_rpd ? m.free_rpd.toLocaleString() : "–"), null],
+        [ctx, null], ["", null], [top, "muted"], [features, "muted"],
+      ];
+      cells.forEach(([text, cls], i) => {
+        const td = document.createElement("td");
+        if (cls) td.className = cls;
+        if (i === 0) { const s = document.createElement("span"); s.className = "status " + statusClass(m.status); s.textContent = m.status; td.append(s); }
+        else if (i === 4) { td.innerHTML = `<span class="bar"><i style="width:${Math.round(m.strength * 100)}%"></i></span>`; td.append(m.strength.toFixed(2)); }
+        else td.textContent = text;
+        tr.appendChild(td);
+      });
+      rows.appendChild(tr);
+    }
+  }
+
+  // ---- developer snippets ---------------------------------------------------
+  const base = location.origin;
+  $("#snip-curl").textContent =
+`curl ${base}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $TEMPO_API_KEY" \\
+  -d '{"model": "tempo/auto", "messages": [{"role": "user", "content": "Hello!"}]}'`;
+  $("#snip-python").textContent =
+`from openai import OpenAI
+
+client = OpenAI(base_url="${base}/v1", api_key="YOUR_TEMPO_API_KEY")  # any string if the server has no key
+
+reply = client.chat.completions.create(
+    model="tempo/auto",
+    messages=[{"role": "user", "content": "Explain recursion in one paragraph."}],
+    extra_body={"tempo": {"privacy": "default", "trace": True}},
+)
+print(reply.model)                       # the model Tempo routed to
+print(reply.choices[0].message.content)
+print(reply.tempo["trace"])              # the thinking-window events`;
+  $("#snip-models").textContent =
+`model: "tempo/auto"      balanced quality, speed and free quota
+model: "tempo/fast"      prefer the fastest capable model
+model: "tempo/best"      prefer the strongest model
+model: "tempo/private"   local models only (Ollama)
+model: "<registry id>"   try that model first, e.g. "groq/llama-3.3-70b-versatile"
+
+"tempo": {
+  "mode": "fast",                          // overrides the mode in "model"
+  "privacy": "local_only",                 // or "default"
+  "allow_providers": ["groq", "cerebras"], // only route to these
+  "trace": true                            // include thinking-window events
+}`;
+  $("#snip-cli").textContent =
+`tempo ask "What is the capital of Australia?"
+tempo ask --mode best "Prove that the square root of 2 is irrational"
+tempo ask --private "Summarize this" < notes.txt
+tempo chat
+tempo models
+tempo serve --port 8000`;
+
+  refreshStatus();
+  input.focus();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+# Tempo model registry (Phase 1 seed).
+#
+# Skill scores are rough 0..1 priors that the rule-based router uses until Phase 2
+# replaces them with measured eval results. Free-tier limits come from
+# docs/RESEARCH.md (September 2026) and change often.
+#
+# Fields:
+#   id              LiteLLM model string; also the id clients use to request this model directly
+#   strength        general capability, 0..1 (matters more for complex queries)
+#   free_rpd        free requests per day (omit for local models: unlimited)
+#   free_tpm        free tokens per minute; a single request larger than this cannot succeed
+#   ttft_ms         typical time to first token
+#   tokens_per_sec  typical output speed
+#   reasoning       model thinks before answering (better on hard problems, slower)
+#   vision          accepts images
+
+providers:
+  groq:
+    label: Groq
+    key_env: GROQ_API_KEY
+    base_env: GROQ_API_BASE
+    signup_url: https://console.groq.com/keys
+  cerebras:
+    label: Cerebras
+    key_env: CEREBRAS_API_KEY
+    base_env: CEREBRAS_API_BASE
+    signup_url: https://cloud.cerebras.ai
+  gemini:
+    label: Google AI Studio
+    key_env: GEMINI_API_KEY
+    base_env: GEMINI_API_BASE
+    signup_url: https://aistudio.google.com/apikey
+  openrouter:
+    label: OpenRouter (free models)
+    key_env: OPENROUTER_API_KEY
+    base_env: OPENROUTER_API_BASE
+    signup_url: https://openrouter.ai/keys
+  ollama:
+    label: Ollama (local)
+    base_env: OLLAMA_API_BASE
+    local: true
+    discover: true
+    signup_url: https://ollama.com/download
+
+models:
+  # --- Groq -------------------------------------------------------------------
+  - id: groq/llama-3.3-70b-versatile
+    provider: groq
+    name: Llama 3.3 70B
+    family: llama
+    context_window: 131072
+    strength: 0.70
+    free_rpd: 1000
+    free_tpm: 12000
+    ttft_ms: 400
+    tokens_per_sec: 280
+    skills: {chat: 0.80, code: 0.70, math: 0.62, reasoning: 0.68, writing: 0.78, summarize: 0.78, translate: 0.72, extract: 0.75}
+
+  - id: groq/llama-3.1-8b-instant
+    provider: groq
+    name: Llama 3.1 8B
+    family: llama
+    context_window: 131072
+    strength: 0.35
+    free_rpd: 14400
+    free_tpm: 6000
+    ttft_ms: 250
+    tokens_per_sec: 750
+    skills: {chat: 0.65, code: 0.45, math: 0.35, reasoning: 0.40, writing: 0.60, summarize: 0.65, translate: 0.55, extract: 0.60}
+
+  - id: groq/openai/gpt-oss-120b
+    provider: groq
+    name: gpt-oss 120B
+    family: gpt-oss
+    context_window: 131072
+    strength: 0.85
+    reasoning: true
+    free_rpd: 1000
+    free_tpm: 8000
+    ttft_ms: 500
+    tokens_per_sec: 450
+    skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
+
+  - id: groq/qwen/qwen3-32b
+    provider: groq
+    name: Qwen3 32B
+    family: qwen
+    context_window: 131072
+    strength: 0.72
+    reasoning: true
+    free_rpd: 1000
+    free_tpm: 6000
+    ttft_ms: 450
+    tokens_per_sec: 400
+    skills: {chat: 0.75, code: 0.78, math: 0.80, reasoning: 0.78, writing: 0.70, summarize: 0.75, translate: 0.78, extract: 0.78}
+
+  # --- Cerebras ---------------------------------------------------------------
+  - id: cerebras/gpt-oss-120b
+    provider: cerebras
+    name: gpt-oss 120B
+    family: gpt-oss
+    context_window: 65536
+    strength: 0.85
+    reasoning: true
+    free_rpd: 14400
+    free_tpm: 60000
+    ttft_ms: 300
+    tokens_per_sec: 2000
+    skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
+
+  - id: cerebras/llama3.1-8b
+    provider: cerebras
+    name: Llama 3.1 8B
+    family: llama
+    context_window: 8192
+    strength: 0.35
+    free_rpd: 14400
+    free_tpm: 60000
+    ttft_ms: 200
+    tokens_per_sec: 2200
+    skills: {chat: 0.65, code: 0.45, math: 0.35, reasoning: 0.40, writing: 0.60, summarize: 0.65, translate: 0.55, extract: 0.60}
+
+  # --- Google AI Studio -------------------------------------------------------
+  - id: gemini/gemini-2.5-flash
+    provider: gemini
+    name: Gemini 2.5 Flash
+    family: gemini
+    context_window: 1048576
+    strength: 0.85
+    reasoning: true
+    vision: true
+    free_rpd: 20
+    free_tpm: 250000
+    ttft_ms: 800
+    tokens_per_sec: 200
+    skills: {chat: 0.85, code: 0.83, math: 0.85, reasoning: 0.85, writing: 0.85, summarize: 0.88, translate: 0.88, extract: 0.86}
+
+  - id: gemini/gemma-3-27b-it
+    provider: gemini
+    name: Gemma 3 27B
+    family: gemma
+    context_window: 131072
+    strength: 0.60
+    vision: true
+    free_rpd: 14400
+    free_tpm: 15000
+    ttft_ms: 600
+    tokens_per_sec: 100
+    skills: {chat: 0.75, code: 0.60, math: 0.58, reasoning: 0.60, writing: 0.75, summarize: 0.75, translate: 0.80, extract: 0.70}
+
+  # --- OpenRouter free models (all share one 50 requests/day quota) ----------
+  - id: openrouter/openai/gpt-oss-120b:free
+    provider: openrouter
+    name: gpt-oss 120B (free)
+    family: gpt-oss
+    context_window: 131072
+    strength: 0.85
+    reasoning: true
+    free_rpd: 50
+    ttft_ms: 1500
+    tokens_per_sec: 150
+    skills: {chat: 0.80, code: 0.85, math: 0.88, reasoning: 0.87, writing: 0.75, summarize: 0.80, translate: 0.72, extract: 0.82}
+
+  - id: openrouter/meta-llama/llama-3.3-70b-instruct:free
+    provider: openrouter
+    name: Llama 3.3 70B (free)
+    family: llama
+    context_window: 131072
+    strength: 0.70
+    free_rpd: 50
+    ttft_ms: 1500
+    tokens_per_sec: 100
+    skills: {chat: 0.80, code: 0.70, math: 0.62, reasoning: 0.68, writing: 0.78, summarize: 0.78, translate: 0.72, extract: 0.75}
+
+  - id: openrouter/qwen/qwen3-coder:free
+    provider: openrouter
+    name: Qwen3 Coder (free)
+    family: qwen
+    context_window: 262144
+    strength: 0.80
+    free_rpd: 50
+    ttft_ms: 1500
+    tokens_per_sec: 100
+    skills: {chat: 0.65, code: 0.90, math: 0.72, reasoning: 0.72, writing: 0.60, summarize: 0.68, translate: 0.60, extract: 0.80}
+
+  # --- Ollama (local) ---------------------------------------------------------
+  # Ollama's default context is 4096 tokens unless you raise num_ctx.
+  # Other installed models are discovered at startup with priors based on their size.
+  - id: ollama_chat/llama3.2
+    provider: ollama
+    name: Llama 3.2 3B (local)
+    family: llama
+    context_window: 4096
+    strength: 0.30
+    ttft_ms: 800
+    tokens_per_sec: 40
+    skills: {chat: 0.55, code: 0.35, math: 0.30, reasoning: 0.30, writing: 0.50, summarize: 0.55, translate: 0.45, extract: 0.50}
