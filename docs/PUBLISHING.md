@@ -67,25 +67,25 @@ Before going public:
       detect` or GitHub's secret scanning report), and rotate any key ever committed.
 - [ ] Keep the rule in CONTRIBUTING.md: no real keys in code, tests, issues or logs.
 
-## 3. The `tempo terms` table in the README
+## 3. The `tempo-server terms` table in the README
 
 The README carries a table of every provider's training verdict and data policy, generated
-from `models.yaml` (the same facts `tempo terms` prints), with the date the quotes were last
+from `models.yaml` (the same facts `tempo-server terms` prints), with the date the quotes were last
 checked. Before each release:
 
-- [ ] `tempo terms --check` (every quote still on its provider's page)
-- [ ] update the table and its date from `tempo terms`
+- [ ] `tempo-server terms --check` (every quote still on its provider's page)
+- [ ] update the table and its date from `tempo-server terms`
 
 ## 4. Examples folder
 
 `examples/` holds short, runnable examples: the OpenAI Python client, curl, streaming with the
 thinking window, privacy options, and a bring-your-own-key request. Each runs against a local
-`tempo serve`, in demo mode (`TEMPO_ENABLE_MOCK=1`) if no key is set, so anyone can try them
+`tempo-server serve`, in demo mode (`TEMPO_ENABLE_MOCK=1`) if no key is set, so anyone can try them
 without an account.
 
 ## 5. A demo
 
-- **Local demo (works today):** `TEMPO_ENABLE_MOCK=1 tempo serve`, then open
+- **Local demo (works today):** `TEMPO_ENABLE_MOCK=1 tempo-server serve`, then open
   http://127.0.0.1:8000. The demo models show every stage, a rate-limit fallback, a fix, and
   the language check, with no keys and no network.
 - **Public demo (ready):** `docs/demo/index.html` replays `docs/demo/recording.js`, made by
@@ -117,7 +117,7 @@ without an account.
 - [ ] Secret scanning on; history scanned.
 - [ ] README: the one-line description, quick start, the terms table, links to USE_CASES.md and
       TEMPO_MODELS.md.
-- [ ] `tempo terms --check` clean; STATUS.md current.
+- [ ] `tempo-server terms --check` clean; STATUS.md current.
 - [ ] Tests and lint green on a clean checkout (`pip install -e ".[dev]" && pytest -q`).
 - [ ] Tag `v0.x` and write release notes (what works, what needs keys, what is planned).
 - [ ] Docker image: publishing the GitHub release runs `.github/workflows/docker-publish.yml`

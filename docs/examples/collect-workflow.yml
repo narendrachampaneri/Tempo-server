@@ -1,4 +1,4 @@
-# Example: run `tempo collect` every 6 hours on GitHub Actions, resuming across runs.
+# Example: run `tempo-server collect` every 6 hours on GitHub Actions, resuming across runs.
 # Not active here. To use it, copy it to .github/workflows/collect.yml in a PRIVATE repository
 # and add your own keys as repository secrets (see docs/COLLECT_ANYWHERE.md).
 name: Tempo collect
@@ -50,10 +50,10 @@ jobs:
           restore-keys: tempo-collect-
 
       - name: Refresh the free-model catalog
-        run: tempo sync
+        run: tempo-server sync
 
       - name: Collect (stops when free quota runs out or time is up)
-        run: tempo collect --no-wait --minutes 45 --per-minute 2 --reserve 0.5
+        run: tempo-server collect --no-wait --minutes 45 --per-minute 2 --reserve 0.5
 
       - name: Save progress and quota counters
         if: always()
@@ -64,11 +64,11 @@ jobs:
 
       - name: Progress
         if: always()
-        run: tempo collect --status
+        run: tempo-server collect --status
 
       - name: Export the "yes" rows
         if: always()
-        run: tempo export-laya --out laya-dataset || true
+        run: tempo-server export-laya --out laya-dataset || true
 
       - uses: actions/upload-artifact@v4
         if: always()

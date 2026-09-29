@@ -12,16 +12,74 @@ Tempo is also meant to be **used by other tools**: it exposes itself as an OpenA
 
 ## Quick start (under 5 minutes)
 
-Requires Python 3.11+ on any ordinary computer (Windows, macOS or Linux; no GPU).
+Works on Windows, macOS and Linux, on any ordinary computer (no GPU). You never create a Python
+environment by hand: Tempo-server installs as its own isolated tool.
 
-**1. Install** (about a minute)
+### 1. Install (about a minute)
+
+<details open>
+<summary><b>macOS and Linux</b></summary>
+
+One line (installs [uv](https://docs.astral.sh/uv/) if needed, then Tempo-server, then runs the
+setup):
 
 ```bash
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install git+https://github.com/narendrachampaneri/Tempo-server   # `pip install tempo-server` once it is on PyPI
+curl -LsSf https://raw.githubusercontent.com/narendrachampaneri/Tempo-server/main/install.sh | sh
 ```
 
-**2. Add your free keys** (2–3 minutes)
+Or with a tool you already have:
+
+```bash
+pipx install tempo-server        # or: uv tool install tempo-server
+```
+
+</details>
+
+<details>
+<summary><b>Windows</b> (PowerShell)</summary>
+
+One line (installs [uv](https://docs.astral.sh/uv/) if needed, then Tempo-server, then runs the
+setup):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/narendrachampaneri/Tempo-server/main/install.ps1 | iex"
+```
+
+Or with a tool you already have:
+
+```powershell
+pipx install tempo-server        # or: uv tool install tempo-server
+```
+
+</details>
+
+<details>
+<summary><b>Docker</b> (any system)</summary>
+
+```bash
+docker build -t tempo-server https://github.com/narendrachampaneri/Tempo-server.git   # until the image is published
+docker run -it --rm -v tempo-data:/data tempo-server setup                   # your keys, in the volume
+docker run -d -p 127.0.0.1:8000:8000 -v tempo-data:/data tempo-server        # http://localhost:8000
+```
+
+Once published: `ghcr.io/narendrachampaneri/tempo-server`. Set `-e TEMPO_API_KEY=...` before
+exposing the port beyond your own computer. Ollama on the host is
+`-e OLLAMA_API_BASE=http://host.docker.internal:11434` (Linux: add
+`--add-host=host.docker.internal:host-gateway`).
+
+</details>
+
+> **Until the first PyPI release** (0.1.0, coming soon), `pipx install tempo-server` and
+> `uv tool install tempo-server` aren't available yet. Install from GitHub with the same tools:
+>
+> ```bash
+> pipx install https://github.com/narendrachampaneri/Tempo-server/archive/refs/heads/main.zip
+> uv tool install https://github.com/narendrachampaneri/Tempo-server/archive/refs/heads/main.zip
+> ```
+>
+> The one-line installers already do this.
+
+### 2. Add your free keys (2–3 minutes)
 
 ```bash
 tempo-server setup
@@ -31,46 +89,44 @@ The wizard goes through each free provider: where to get the key, its free limit
 source), and its terms. Paste a key, or press Enter to skip. Each key is checked with the
 provider, stored encrypted, and never shown again. At the end you see how many free requests a
 day you now have. One key is enough to start (Groq or Google AI Studio take a minute to create).
-If [Ollama](https://ollama.com/download) is running, local models answer simple questions to
-save your free quota, and take over when every free quota is used up.
+If [Ollama](https://ollama.com/download) is running with a model, local models answer simple
+questions to save your free quota (the thinking window says so; `TEMPO_LOCAL_FIRST=off` turns it
+off), and take over when every free quota is used up.
 
-**3. Start the server**
+### 3. Start the server
 
 ```bash
 tempo-server serve            # web app on http://127.0.0.1:8000, API on http://127.0.0.1:8000/v1
 ```
 
-**4. Connect an app**: base URL `http://localhost:8000/v1`, model `tempo/auto`, any key (for
-example `local`) while it's just you. Step-by-step for Open WebUI, LibreChat, Continue, Aider,
-OpenCode, n8n and LangChain: [docs/CONNECT.md](docs/CONNECT.md).
+### 4. Connect an app
+
+Base URL `http://localhost:8000/v1`, model `tempo/auto`, any key (for example `local`) while
+it's just you. Step by step for Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n and
+LangChain: [docs/CONNECT.md](docs/CONNECT.md).
 
 ```bash
 tempo-server quota            # free requests left today, per provider
 tempo-server ask "Explain the difference between TCP and UDP"
+tempo-server doctor           # something wrong? checks everything and says how to fix it
 ```
 
 No keys yet? `TEMPO_ENABLE_MOCK=1 tempo-server serve` runs offline demo models (one always fails
 on purpose, so you can watch the fallback). Or see the [recorded demo](docs/demo/index.html).
 
-**Why `tempo-server` and not `tempo`?** Both commands work, but [Grafana
-Tempo](https://github.com/grafana/tempo) also installs a program called `tempo`, so the docs use
-`tempo-server` to avoid a clash. The examples below write `tempo` for short.
+**Where your data lives:** `%LOCALAPPDATA%\tempo-server` on Windows,
+`~/Library/Application Support/tempo-server` on macOS, `~/.local/share/tempo-server` on Linux
+(`TEMPO_DATA_DIR` changes it). An older `~/.tempo` folder is moved there once, automatically.
 
-**Docker** (the image isn't published yet; build it once):
+**Update or remove:** `pipx upgrade tempo-server` / `uv tool upgrade tempo-server`;
+`pipx uninstall tempo-server` / `uv tool uninstall tempo-server` (your data folder stays).
 
-```bash
-docker build -t tempo-server .
-docker run -it --rm -v tempo-data:/data tempo-server setup                   # your keys, in the volume
-docker run -d -p 127.0.0.1:8000:8000 -v tempo-data:/data tempo-server        # http://localhost:8000
-```
+**`tempo-server`, not `tempo`:** [Grafana Tempo](https://github.com/grafana/tempo) also installs a
+program called `tempo`. The short `tempo` alias still works in 0.x, with a notice, and goes away
+before 1.0.
 
-Set `-e TEMPO_API_KEY=...` before exposing the port beyond your own computer. Ollama on the host
-is `-e OLLAMA_API_BASE=http://host.docker.internal:11434` (Linux: add
-`--add-host=host.docker.internal:host-gateway`).
-
-**From a clone** (for development): `pip install -e ".[dev]"`; optional extras: `.[embeddings]`
-(embedding classifier and semantic cache, CPU) and `.[laya]` (Laya on CPU). Keys can also go in
-`.env` (copy `.env.example`) instead of the vault.
+Developing Tempo-server itself (a clone, a virtual environment, editable install, tests):
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Providers (all have free tiers)
 
@@ -81,21 +137,21 @@ is `-e OLLAMA_API_BASE=http://host.docker.internal:11434` (Linux: add
 | Google AI Studio | `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
 | OpenRouter (free models) | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | Cloudflare Workers AI (10,000 neurons/day) | `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | https://dash.cloudflare.com/profile/api-tokens |
-| Cohere (off by default: each user adds their own trial key; answers only, never judges, never eval or collect) | added per user with `tempo keys add cohere` | https://dashboard.cohere.com/api-keys |
+| Cohere (off by default: each user adds their own trial key; answers only, never judges, never eval or collect) | added per user with `tempo-server keys add cohere` | https://dashboard.cohere.com/api-keys |
 | Mistral (free plan; limits read from response headers) | `MISTRAL_API_KEY` | https://console.mistral.ai/api-keys |
 | NVIDIA API catalog (off by default; the owner's private testing only, never other users or demo mode; `TEMPO_ENABLE_PROVIDERS=nvidia`) | `NVIDIA_API_KEY` | https://build.nvidia.com |
-| OpenCode Zen (off by default, `TEMPO_ENABLE_PROVIDERS=opencode`; free models, each user's own key, answering only) | added per user with `tempo keys add opencode` | https://opencode.ai/auth |
+| OpenCode Zen (off by default, `TEMPO_ENABLE_PROVIDERS=opencode`; free models, each user's own key, answering only) | added per user with `tempo-server keys add opencode` | https://opencode.ai/auth |
 | Ollama (local) | `OLLAMA_API_BASE=http://localhost:11434` | https://ollama.com/download |
 
 GitHub Models is not offered: GitHub retired it on 30 July 2026 ([docs](https://docs.github.com/en/github-models), checked 2026-09-28).
 
-Model lists are read live from each provider (public lists without a key: OpenRouter, NVIDIA, OpenCode Zen). Every model gets a type (chat, code, vision, speech-to-text, text-to-speech, safety, embedding, reranker, decision); only chat-capable ones get chat requests. `tempo terms` shows each provider's training verdict and what its free tier may do with prompts; `tempo terms --check` re-reads the terms pages and reports quotes that changed (`pip install -e ".[terms]"` for NVIDIA's PDF).
+Model lists are read live from each provider (public lists without a key: OpenRouter, NVIDIA, OpenCode Zen). Every model gets a type (chat, code, vision, speech-to-text, text-to-speech, safety, embedding, reranker, decision); only chat-capable ones get chat requests. `tempo-server terms` shows each provider's training verdict and what its free tier may do with prompts; `tempo-server terms --check` re-reads the terms pages and reports quotes that changed (NVIDIA's terms are a PDF: install with the `terms` extra, `pipx install "tempo-server[terms]"`).
 
-Installed Ollama models are discovered automatically at startup. The seed model list, skill priors, free limits and each provider's training terms live in [`tempo/models.yaml`](tempo/models.yaml); set `TEMPO_MODELS_FILE` to use your own copy. The server refreshes each provider's model list every 6 hours, and `tempo sync` does it on demand.
+Installed Ollama models are discovered automatically at startup. The seed model list, skill priors, free limits and each provider's training terms live in [`tempo/models.yaml`](tempo/models.yaml); set `TEMPO_MODELS_FILE` to use your own copy. The server refreshes each provider's model list every 6 hours, and `tempo-server sync` does it on demand.
 
 ### Provider terms (may outputs be training data?)
 
-From `tempo terms` (quotes re-checked on the providers' pages with `tempo terms --check`, 2026-09-28). "Yes" sources are the only ones Tempo exports as training data.
+From `tempo-server terms` (quotes re-checked on the providers' pages with `tempo-server terms --check`, 2026-09-28). "Yes" sources are the only ones Tempo exports as training data.
 
 | Provider | Training on outputs | Free tier's use of prompts | Tempo's use |
 |---|---|---|---|
@@ -115,14 +171,14 @@ From `tempo terms` (quotes re-checked on the providers' pages with `tempo terms 
 ### Command line
 
 ```bash
-tempo ask "What is 17% of 2,340?"                 # thinking window on stderr, answer on stdout
-tempo ask --mode best "Prove that √2 is irrational"
-tempo ask --private "Summarize this" < notes.txt  # local models only
-tempo ask --no-logging "Summarize this" < notes.txt  # never a free tier that may log or train on prompts
-tempo ask -s 20 --time-budget 300 "Plan a 5-part course on SQL, with exercises"  # big job
-tempo ask --strategy mixture "Compare REST and GraphQL for a mobile app"
-tempo ask --json "hi"                              # one JSON object with answer + trace
-tempo chat                                         # interactive; /mode fast, /clear, /exit
+tempo-server ask "What is 17% of 2,340?"                 # thinking window on stderr, answer on stdout
+tempo-server ask --mode best "Prove that √2 is irrational"
+tempo-server ask --private "Summarize this" < notes.txt  # local models only
+tempo-server ask --no-logging "Summarize this" < notes.txt  # never a free tier that may log or train on prompts
+tempo-server ask -s 20 --time-budget 300 "Plan a 5-part course on SQL, with exercises"  # big job
+tempo-server ask --strategy mixture "Compare REST and GraphQL for a mobile app"
+tempo-server ask --json "hi"                              # one JSON object with answer + trace
+tempo-server chat                                         # interactive; /mode fast, /clear, /exit
 ```
 
 Modes: `auto` (balanced), `fast`, `best` (uses scarce strong models and a higher pass mark), `private` (local only).
@@ -131,26 +187,27 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `tempo setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
-| `tempo quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
-| `tempo record-demo [--out FILE] [-q QUESTION]` | Record questions for the static demo page ([docs/demo/](docs/demo/index.html)) |
-| `tempo models` | Which models are ready, and why the others aren't (no key, quota used up, no longer offered, …) |
-| `tempo sync` | Refresh provider model lists now and report each provider's health |
-| `tempo models --free [--json]` | Live free-model catalog: provider, model, type, context, max output, inputs, tools, limits, data policy, health, last check and status |
-| `tempo eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
-| `tempo users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
-| `tempo users consent NAME [--on\|--off]` / `forget NAME` | A user opts in to (or withdraws from) training use of their questions, off by default; `forget` deletes their logged questions. Also `PUT /api/consent` and `DELETE /api/data` |
-| `tempo keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
-| `tempo collect [--yes-only] [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable. `--yes-only` uses only models whose outputs may be training data (local Apache-2.0/MIT models) |
-| `tempo export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
-| `tempo export-sft --out DIR` | Question → checked final answer, for fine-tuning Tempo-Core (only "yes" rows, licence and source on each) |
-| `tempo export-pairs --out DIR` | Question, chosen (answer that passed) and rejected (draft that failed), for DPO (only "yes" rows) |
-| `tempo terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
-| `tempo laya status` / `tempo laya compare` | Laya's state per decision; Laya vs rules on held-out questions |
+| `tempo-server setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
+| `tempo-server doctor [--port N] [--offline]` | Checks Python, the data folder, keys, which providers are reachable, Ollama and the port, with a fix for each problem |
+| `tempo-server quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
+| `tempo-server record-demo [--out FILE] [-q QUESTION]` | Record questions for the static demo page ([docs/demo/](docs/demo/index.html)) |
+| `tempo-server models` | Which models are ready, and why the others aren't (no key, quota used up, no longer offered, …) |
+| `tempo-server sync` | Refresh provider model lists now and report each provider's health |
+| `tempo-server models --free [--json]` | Live free-model catalog: provider, model, type, context, max output, inputs, tools, limits, data policy, health, last check and status |
+| `tempo-server eval [--model ID] [--task code]` | Measure models on the probe set; the router then blends measured skills into its scores |
+| `tempo-server users add NAME` / `list` / `remove` | Create users; each gets a Tempo API key (shown once) |
+| `tempo-server users consent NAME [--on\|--off]` / `forget NAME` | A user opts in to (or withdraws from) training use of their questions, off by default; `forget` deletes their logged questions. Also `PUT /api/consent` and `DELETE /api/data` |
+| `tempo-server keys add groq [--user NAME]` / `list` / `remove` | Store a provider key, encrypted, after checking it with the provider |
+| `tempo-server collect [--yes-only] [--estimate \| --status \| --list]` | Make Laya training data from openly licensed public questions, slowly and within every free limit; resumable. `--yes-only` uses only models whose outputs may be training data (local Apache-2.0/MIT models) |
+| `tempo-server export-laya --out DIR [--include-unclear]` | Export logged decisions as a Laya fine-tuning dataset |
+| `tempo-server export-sft --out DIR` | Question → checked final answer, for fine-tuning Tempo-Core (only "yes" rows, licence and source on each) |
+| `tempo-server export-pairs --out DIR` | Question, chosen (answer that passed) and rejected (draft that failed), for DPO (only "yes" rows) |
+| `tempo-server terms` | Whether each provider's outputs may be used for training: verdict, link and exact sentences |
+| `tempo-server laya status` / `tempo-server laya compare` | Laya's state per decision; Laya vs rules on held-out questions |
 
 ### Web app
 
-`tempo serve`, then open http://127.0.0.1:8000.
+`tempo-server serve`, then open http://127.0.0.1:8000.
 
 - **Ask:** a prompt box with a mode switch and a ⚙ settings panel for the stage, time and free-quota budgets. Each answer gets a live thinking window (auto-scrolling, collapsible) with a stage progress bar. The first draft streams right away, later stages replace it live, and a 👍/👎 under each answer is saved for tuning. A strip shows the free requests left today per provider; when every free quota is used up it says so, and Tempo answers with local models and the cache (a note in the thinking window).
 - **Models:** providers and models, ready or not and why, with measured skill scores and health.
@@ -165,7 +222,7 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="unused")
 reply = client.chat.completions.create(
-    model="tempo/auto",  # or tempo/fast, tempo/best, tempo/private, or a model id from `tempo models`
+    model="tempo/auto",  # or tempo/fast, tempo/best, tempo/private, or a model id from `tempo-server models`
     messages=[{"role": "user", "content": "Explain recursion in one paragraph."}],
     extra_body={"tempo": {"allow_providers": ["groq", "cerebras"], "max_stages": 3, "trace": True}},
 )
@@ -198,7 +255,7 @@ question ─▶ understand ─▶ plan ─▶ draft ─▶ check ─┬─ passe
 2. **Plan and rank** ([`router.py`](tempo/router.py), [`quota.py`](tempo/quota.py), [`evals.py`](tempo/evals.py)): drop models that can't take the request (no key, not installed, cooling down, free quota used up, no longer offered, context too small, not local in private mode). Score the rest by predicted quality (priors blended with measured and live judge scores), quota scarcity and latency, weighted by mode. Pick a strategy: single, cascade, mixture or decompose.
 3. **Run stages** ([`pipeline.py`](tempo/pipeline.py)): draft, check ([`checks.py`](tempo/checks.py): heuristics, plus a judge from a different model family), then fix, merge or polish until the answer passes. Stop at the first pass, or when the stage, time or free-quota budget runs out. Calls go through [LiteLLM](https://github.com/BerriAI/litellm) with automatic fallback; a rate limit or error cools that model down and moves to the next one.
 4. **Decide fast with Laya** ([`laya_decider.py`](tempo/laya_decider.py)): before stage 1, Laya predicts the task type, difficulty, strategy and stage budget. After each check it scores the answer and says stop or continue, and before each stage it picks a model from a shortlist of at most 10. It starts in **shadow mode**: Laya predicts, the rules decide, and both are logged. If Laya is missing, errors, or takes longer than 200 ms, the rules decide.
-5. **Show and log everything** ([`events.py`](tempo/events.py), [`store.py`](tempo/store.py)): every step is an event with a one-line summary, rendered the same way by the web app, CLI and API. Every question is logged to SQLite (`~/.tempo/tempo.db`): decisions with Laya's predictions and probabilities, stages, calls, check results, times, quota used, the final answer and feedback.
+5. **Show and log everything** ([`events.py`](tempo/events.py), [`store.py`](tempo/store.py)): every step is an event with a one-line summary, rendered the same way by the web app, CLI and API. Every question is logged to SQLite (`tempo.db in the data folder`): decisions with Laya's predictions and probabilities, stages, calls, check results, times, quota used, the final answer and feedback.
 
 The full design, with the stage jobs, events and Laya details, is in [docs/ARCHITECTURE.md §4.11–4.12](docs/ARCHITECTURE.md#411-the-staged-engine-built-in-phase-2).
 
@@ -209,26 +266,26 @@ Laya runs on an ordinary CPU. In shadow mode (the default) Tempo asks it in the 
 The stock checkpoints are near chance on Tempo's decisions, so fine-tune one first. The full walk-through is in [docs/LAYA_TUNING.md](docs/LAYA_TUNING.md):
 
 ```bash
-tempo collect --estimate                      # how long, at your keys' free limits
-tempo collect                                 # public, openly licensed questions; stop and resume any time
-tempo export-laya --out laya-dataset          # train.jsonl + test.jsonl + README (licences listed)
+tempo-server collect --estimate                      # how long, at your keys' free limits
+tempo-server collect                                 # public, openly licensed questions; stop and resume any time
+tempo-server export-laya --out laya-dataset          # train.jsonl + test.jsonl + README (licences listed)
 # fine-tune with Laya's notebook on Kaggle's free GPUs (offline; the only GPU step)
 export TEMPO_LAYA_MODEL=/path/to/checkpoint   # the tuned checkpoint, on CPU, still in shadow mode
-tempo laya compare                            # after a few hundred more questions
+tempo-server laya compare                            # after a few hundred more questions
 export TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto"   # Laya takes over where it wins
 ```
 
-The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. A row is exported only if every model that answered or judged its question belongs to a provider marked `training_on_outputs: yes`; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo terms`), and `no` is never exported.
+The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. A row is exported only if every model that answered or judged its question belongs to a provider marked `training_on_outputs: yes`; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo-server terms`), and `no` is never exported.
 
 ## Settings
 
-All optional; put them in `.env` or the environment. `tempo setup` writes the non-secret ones it
+All optional; put them in `.env` or the environment. `tempo-server setup` writes the non-secret ones it
 needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PROVIDERS`) to
 `<data dir>/settings.env`; the environment and `.env` win over it. Keys never go there.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TEMPO_DATA_DIR` | `~/.tempo` | Where the SQLite log, quota counters, users and the key-vault secret live (`memory` keeps nothing) |
+| `TEMPO_DATA_DIR` | the system's app-data folder | Where the SQLite log, quota counters, users and the key-vault secret live: `%LOCALAPPDATA%\tempo-server`, `~/Library/Application Support/tempo-server` or `~/.local/share/tempo-server` (`memory` keeps nothing) |
 | `TEMPO_LOG` | `1` | Log every question for tuning |
 | `TEMPO_MAX_STAGES` | `5` | Most stages per question (up to 50) |
 | `TEMPO_TIME_BUDGET` | `60` | Seconds per question |
@@ -249,21 +306,28 @@ needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PRO
 | `TEMPO_SECRET_KEY` | generated | Key-vault secret (otherwise a 0600 `secret.key` file in the data dir) |
 | `TEMPO_SYNC_INTERVAL` | `21600` | Seconds between registry syncs (`0` = off) |
 | `TEMPO_API_KEY` | none | Admin key for the API and web app |
+| `TEMPO_SHARE_SERVER_KEYS` | `0` | Keys in `.env`/the environment are the owner's; `1` lets every user of this server use them too (keys from `tempo-server setup` are always the owner's only) |
 | `TEMPO_LOCAL_FIRST` / `TEMPO_LOCAL_FIRST_MAX_COMPLEXITY` | `auto` / `0.3` | Send simple questions (up to this complexity) to a running local Ollama model first, to save free quota; `off` to turn off. Never in `best` mode |
 | `TEMPO_TOOL_FOLLOWUP` | `quick` | Checks for text answers to tool-calling requests: `quick`, `full` (always judge) or `off` |
 | `TEMPO_MIN_PUBLIC_SHARE` / `TEMPO_MAX_SELF_SHARE` | `0.3` / `0.3` | Training data mix: at least this share from public or human data, at most this share written by an earlier Tempo-Core (exports warn) |
 | `TEMPO_ENABLE_PROVIDERS` / `TEMPO_OPTED_OUT` | none | Providers that are off by default to turn on (e.g. `nvidia`); providers whose "train on my data" setting you turned off (e.g. `mistral`) |
 | `TEMPO_REQUEST_TIMEOUT` / `TEMPO_MAX_ATTEMPTS` | `60` / `4` | Per-call timeout and fallback attempts |
 
+## Optional extras
+
+Install with an extra when you want it (`uv tool install "tempo-server[embeddings]"` works the
+same way):
+
+| Extra | What it adds |
+|---|---|
+| `pipx install "tempo-server[embeddings]"` | Embedding task classifier and semantic cache (fastembed, ~65 MB model, CPU) |
+| `pipx install "tempo-server[laya]"` | Laya decision-maker on CPU (PyTorch and ONNX Runtime) |
+| `pipx install "tempo-server[terms]"` | `tempo-server terms --check` for NVIDIA's PDF terms |
+
 ## Development
 
-```bash
-pip install -e ".[dev]"
-pytest          # 344 tests; the mock models cover early stop, parallel stages, Laya shadow mode,
-                # fallback and timeout, quota budgets and the event stream; some tests make real
-                # LiteLLM calls against a local fake provider server
-ruff check . && ruff format --check .
-```
+A clone, a virtual environment and an editable install are for working on Tempo-server itself:
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documents
 
@@ -274,7 +338,7 @@ ruff check . && ruff format --check .
 - [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.
 - [docs/USE_CASES.md](docs/USE_CASES.md): 20 scenarios Tempo is for, what each still needs, and its roadmap phase.
 - [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).
-- [docs/COLLECT_ANYWHERE.md](docs/COLLECT_ANYWHERE.md): step-by-step `tempo collect` on a Windows computer (local open-licence models), and as a scheduled GitHub Actions job that resumes across runs.
+- [docs/COLLECT_ANYWHERE.md](docs/COLLECT_ANYWHERE.md): step-by-step `tempo-server collect` on a Windows computer (local open-licence models), and as a scheduled GitHub Actions job that resumes across runs.
 - [docs/RESEARCH.md](docs/RESEARCH.md): existing GitHub projects (routers, gateways, model-mixing methods), the free LLM API providers and their limits, and what to avoid.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the full design: components, request lifecycle, the staged engine, Laya, thinking-window events, the neural router, using Tempo as a skill (API / MCP / CLI), security, tech stack, the roadmap and the planned **Tempo Tune** phase.
 

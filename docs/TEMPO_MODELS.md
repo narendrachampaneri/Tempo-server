@@ -11,9 +11,9 @@ openly. Tempo uses them first and calls free APIs only when they are not confide
 
 | Model | What it does | Base (licence) | Trained from | Ships as | Status |
 |---|---|---|---|---|---|
-| **Tempo-Router** | Picks the model for each stage, and decides stop or continue | Laya (`convaiinnovations/laya`, Apache-2.0, 421M parameters) | `tempo export-laya`: plan, pick and assess rows | Laya checkpoint, PyTorch fp32 on CPU (ONNX fp32 optional) | started: Laya runs in shadow mode, rows are logged and exported |
+| **Tempo-Router** | Picks the model for each stage, and decides stop or continue | Laya (`convaiinnovations/laya`, Apache-2.0, 421M parameters) | `tempo-server export-laya`: plan, pick and assess rows | Laya checkpoint, PyTorch fp32 on CPU (ONNX fp32 optional) | started: Laya runs in shadow mode, rows are logged and exported |
 | **Tempo-Judge** | Grades answers (Laya's `score` type), to save judge calls to big models | Laya (Apache-2.0) | graded answers: the judge's grade, heuristics, 👍/👎 | same | data logged (every check); export and training planned |
-| **Tempo-Core** | Writes answers itself, on CPU | a 1–4B Apache-2.0 or MIT model (below) | `tempo export-sft`, then `tempo export-pairs` | GGUF, 4-bit (Q4_K_M), for llama.cpp or Ollama | data export ready; training planned |
+| **Tempo-Core** | Writes answers itself, on CPU | a 1–4B Apache-2.0 or MIT model (below) | `tempo-server export-sft`, then `tempo-server export-pairs` | GGUF, 4-bit (Q4_K_M), for llama.cpp or Ollama | data export ready; training planned |
 | **Tempo Tune add-ons** | One small adapter per user scenario | Laya checkpoints (decisions) or LoRA on Tempo-Core (writing) | per scenario (ARCHITECTURE §13) | Laya checkpoint, or GGUF LoRA adapter | Phase 5 |
 
 Base-model licences, from each model's Hugging Face page (checked 2026-09-28):
@@ -36,15 +36,15 @@ licence and source on every row):
 
 | Export | Row | Used for |
 |---|---|---|
-| `tempo export-laya` | a typed decision with its outcome-based label | Tempo-Router, Tempo-Judge |
-| `tempo export-sft` | the conversation and the **final answer that passed its check** (heuristics plus a judge from another family), no 👎 | Tempo-Core SFT |
-| `tempo export-pairs` | the prompt, **chosen** = that answer, **rejected** = an earlier answer to the same question that failed its check (hard failures first) | Tempo-Core DPO |
+| `tempo-server export-laya` | a typed decision with its outcome-based label | Tempo-Router, Tempo-Judge |
+| `tempo-server export-sft` | the conversation and the **final answer that passed its check** (heuristics plus a judge from another family), no 👎 | Tempo-Core SFT |
+| `tempo-server export-pairs` | the prompt, **chosen** = that answer, **rejected** = an earlier answer to the same question that failed its check (hard failures first) | Tempo-Core DPO |
 
 - A row is exported only if **every** model that wrote or graded text for its question is
   "yes": local Apache-2.0/MIT models, Mistral text outputs, and Apache-2.0/MIT models on
   Cloudflare. Before every export, the terms of hosted "yes" providers that appear in the log
-  are re-read (`tempo terms --check`); if a quote has changed, that provider is left out.
-- Questions come from openly licensed public datasets (`tempo collect`; questions only) or from
+  are re-read (`tempo-server terms --check`); if a quote has changed, that provider is left out.
+- Questions come from openly licensed public datasets (`tempo-server collect`; questions only) or from
   the owner. Other users' questions need their consent first (Phase 3), so they are left out by
   default (`--user NAME` adds one).
 - **The same held-out split everywhere**: a question's split comes from a hash of its id, so it
@@ -59,7 +59,7 @@ notebook's settings panel). Nothing that serves a request depends on the noteboo
 
 ### Tempo-Router and Tempo-Judge (Laya)
 
-1. `tempo export-laya` (plan, pick and assess rows; the judge rows are the `quality` score
+1. `tempo-server export-laya` (plan, pick and assess rows; the judge rows are the `quality` score
    questions).
 2. Laya's own notebook (`notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`), as in
    [LAYA_TUNING.md](./LAYA_TUNING.md). Laya's own fine-tune on 6,000 decisions took about 10
@@ -118,7 +118,7 @@ both on CPU.
   logged: which tasks dropped or had too few questions, by how much, the win/loss counts and the
   repetition numbers. The log lives next to the model files
   (`PROMOTIONS.md` per model) and in the release notes, so a rejected version is never lost.
-- The same gate applies to Tempo-Router and Tempo-Judge, with `tempo laya compare`'s agreement
+- The same gate applies to Tempo-Router and Tempo-Judge, with `tempo-server laya compare`'s agreement
   with outcomes as the score (per decision, like per task).
 
 ## 4. Model-collapse protection
@@ -141,9 +141,9 @@ every run:
    writing model, so the share is counted, not guessed.
 
 Both numbers are settings, `TEMPO_MIN_PUBLIC_SHARE=0.3` and `TEMPO_MAX_SELF_SHARE=0.3`, as
-starting values; `tempo export-sft` reports the mix and warns when it is off. The collapse check
+starting values; `tempo-server export-sft` reports the mix and warns when it is off. The collapse check
 (below) and the promotion gate (§3) guide any change.
-4. **Repetition check between versions**: `tempo export-sft` already reports two measures of
+4. **Repetition check between versions**: `tempo-server export-sft` already reports two measures of
    the answers (the share of distinct word pairs, and the share of 4-word sequences repeated
    within an answer). On the held-out questions, a new version may not be more repetitive than
    the old one by more than 5% on either measure, or it is not promoted (§3).
@@ -176,7 +176,7 @@ starting values; `tempo export-sft` reports the mix and warns when it is off. Th
 
 | Step | Needs |
 |---|---|
-| Tempo-Router v1 | a few thousand "yes" decision rows: `tempo collect --yes-only` with Ollama on the owner's computer |
+| Tempo-Router v1 | a few thousand "yes" decision rows: `tempo-server collect --yes-only` with Ollama on the owner's computer |
 | Tempo-Judge v1 | the same run (every check is logged) |
 | Tempo-Core SFT | 2k+ checked "yes" answers, plus the public share |
 | Tempo-Core DPO | 1k+ pairs (questions whose draft failed and a later answer passed) |

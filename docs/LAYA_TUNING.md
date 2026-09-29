@@ -11,22 +11,22 @@ offline training job on Kaggle's free notebooks.
 ## 1. Collect decisions (days, on CPU)
 
 Tempo logs every question it answers. To get enough varied data without personal data, let
-`tempo collect` ask questions from openly licensed public datasets:
+`tempo-server collect` ask questions from openly licensed public datasets:
 
 ```bash
-tempo collect --list        # the datasets, their licences, and what their cards say about personal data
-tempo collect --estimate    # how many questions and days, from your keys' free limits
-tempo collect               # runs until done or stopped (Ctrl-C); run it again to resume
-tempo collect --status      # progress per dataset
+tempo-server collect --list        # the datasets, their licences, and what their cards say about personal data
+tempo-server collect --estimate    # how many questions and days, from your keys' free limits
+tempo-server collect               # runs until done or stopped (Ctrl-C); run it again to resume
+tempo-server collect --status      # progress per dataset
 ```
 
 - One question at a time, at most 2 a minute (`--per-minute`), and it keeps half of every
   model's daily free quota for real users (`--reserve 0.5`). It never works around a limit:
   when no model has free quota left it waits for the next quota window (`--no-wait` stops
   instead, and a later run resumes).
-- Providers whose terms say outputs may not be used for training (`tempo terms`: Google AI
+- Providers whose terms say outputs may not be used for training (`tempo-server terms`: Google AI
   Studio) are left out by default, since their answers could never be exported.
-- **Local only, all "yes":** `tempo collect --yes-only` uses only models whose outputs may be
+- **Local only, all "yes":** `tempo-server collect --yes-only` uses only models whose outputs may be
   training data, for every stage including the judge. Today that means local Ollama models
   under Apache-2.0 or MIT (for example Qwen or gpt-oss; Tempo reads each installed model's
   licence). With only Ollama running, nothing leaves your computer and no free quota is used;
@@ -38,7 +38,7 @@ tempo collect --status      # progress per dataset
 - Items that look like they contain an email, phone number, IP address or card number are
   skipped. Each question keeps its dataset's name, and every exported row says which licence
   its text came under.
-- Target: about 7,000 labelled decisions, roughly 800 questions. `tempo collect --estimate`
+- Target: about 7,000 labelled decisions, roughly 800 questions. `tempo-server collect --estimate`
   replaces the assumed numbers with measured ones after 20 questions.
 
 **Where to run it for free:** the simplest place is your own computer ([step-by-step for
@@ -51,9 +51,9 @@ outcomes, not from Laya's predictions.
 ## 2. Export the dataset
 
 ```bash
-tempo terms                                  # read each provider's verdict and quoted terms first
-tempo export-laya --out laya-dataset         # only providers whose terms say "yes"
-tempo export-laya --out laya-dataset --include-unclear   # after you have read the "unclear" ones
+tempo-server terms                                  # read each provider's verdict and quoted terms first
+tempo-server export-laya --out laya-dataset         # only providers whose terms say "yes"
+tempo-server export-laya --out laya-dataset --include-unclear   # after you have read the "unclear" ones
 ```
 
 This writes `train.jsonl`, `test.jsonl` (10% of questions, split by question) and a `README.md`
@@ -80,23 +80,23 @@ must be shared under the same licence if you publish the dataset or the model.
 
 ```bash
 export TEMPO_LAYA_MODEL=/path/to/laya_finetuned_typed_decisions   # or <you>/tempo-laya
-tempo serve
+tempo-server serve
 ```
 
 On first load Tempo exports the checkpoint to ONNX for the CPU runtime (a minute or two, cached
-in `~/.tempo/laya/`), measures how long each kind of call takes on this machine, and sets the
-time limit from that. `tempo laya status` shows the runtime, threads and limit. The new
+in `laya/` inside the data folder), measures how long each kind of call takes on this machine, and sets the
+time limit from that. `tempo-server laya status` shows the runtime, threads and limit. The new
 checkpoint starts in shadow mode like the stock one.
 
 ## 5. Let it take over where it wins
 
-After a few hundred more questions (real ones, or `tempo collect` again):
+After a few hundred more questions (real ones, or `tempo-server collect` again):
 
 ```bash
-tempo laya compare                                   # Laya vs the rules on held-out questions
+tempo-server laya compare                                   # Laya vs the rules on held-out questions
 export TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto, quality=auto"
 ```
 
-`auto` hands a decision to Laya only when `tempo laya compare` shows it beating the rules on at
+`auto` hands a decision to Laya only when `tempo-server laya compare` shows it beating the rules on at
 least 50 held-out rows, and only counts predictions made by exactly this checkpoint and runtime.
 Re-run the comparison after every new checkpoint.

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tempo-server</title>
+<meta name="description" content="Tempo-server: open models plus the system that runs and trains them. Routes each question to the best free or open model, checks the answer, and runs on an ordinary CPU.">
+<style>
+:root {
+  --bg: #f7f7f8; --surface: #ffffff; --surface-2: #f1f1f4; --border: #e3e3e8;
+  --text: #17171c; --muted: #62626f; --faint: #8b8b98;
+  --accent: #4f46e5; --accent-soft: #eef0ff; --accent-text: #ffffff;
+  --ok: #15803d; --code-bg: #0f1117; --code-text: #e6e6ef;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d0e12; --surface: #15161c; --surface-2: #1c1d25; --border: #2a2b36;
+    --text: #ececf1; --muted: #a2a2b0; --faint: #767684;
+    --accent: #8b87ff; --accent-soft: #23234a; --accent-text: #0d0e12; --ok: #4ade80; --code-bg: #0a0b0f;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0e12; --surface: #15161c; --surface-2: #1c1d25; --border: #2a2b36;
+  --text: #ececf1; --muted: #a2a2b0; --faint: #767684;
+  --accent: #8b87ff; --accent-soft: #23234a; --accent-text: #0d0e12; --ok: #4ade80; --code-bg: #0a0b0f;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); }
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+header.top { border-bottom: 1px solid var(--border); background: var(--surface); }
+header.top .wrap { display: flex; align-items: center; gap: 10px; height: 56px; }
+.mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; flex: none; }
+.brand { font-weight: 700; }
+nav { margin-left: auto; display: flex; gap: 14px; font-size: 14px; flex-wrap: wrap; }
+nav a { color: var(--muted); text-decoration: none; }
+nav a:hover { color: var(--text); }
+.icon-btn { background: none; border: 1px solid var(--border); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; color: var(--muted); flex: none; }
+.hero { padding: 56px 0 32px; }
+.hero h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.15; margin: 0 0 14px; letter-spacing: -0.02em; }
+.hero p { color: var(--muted); font-size: 18px; max-width: 680px; margin: 0; }
+.cta { display: flex; gap: 10px; margin-top: 24px; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 9px 16px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid var(--border); color: var(--text); background: var(--surface); }
+.btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+section { padding: 28px 0; }
+h2 { font-size: 22px; margin: 0 0 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.card b { display: block; margin-bottom: 4px; }
+.card span { color: var(--muted); font-size: 14.5px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.tabs button { font: inherit; font-size: 14px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 5px 14px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+pre { background: var(--code-bg); color: var(--code-text); padding: 14px 16px; border-radius: 12px; overflow-x: auto; font: 13.5px/1.55 var(--mono); margin: 0 0 10px; }
+.note { color: var(--muted); font-size: 14px; }
+code { font-family: var(--mono); font-size: .92em; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+pre code { background: none; padding: 0; font-size: inherit; }
+ol.steps { padding-left: 20px; margin: 0; }
+ol.steps li { margin-bottom: 8px; }
+.demo-frame { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+ul.links { columns: 2 260px; padding-left: 18px; margin: 0; }
+ul.links li { margin-bottom: 6px; }
+footer { border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; padding: 20px 0 40px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="mark" aria-hidden="true">T</div>
+    <span class="brand">Tempo-server</span>
+    <nav aria-label="Sections">
+      <a href="#install">Install</a>
+      <a href="#demo">Demo</a>
+      <a href="#connect">Connect</a>
+      <a href="#links">Docs</a>
+      <a href="https://github.com/narendrachampaneri/Tempo-server">GitHub</a>
+    </nav>
+    <button class="icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <h1>Ask once. Tempo picks the best free model, checks the answer, and fixes it.</h1>
+    <p>Tempo-server is open models plus the system that runs and trains them. It routes every question to the best free or open model you have, checks the answer with a second model, fixes it when it's weak, and shows every step. It runs on an ordinary computer, with your own free keys, and speaks the OpenAI API.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install</a>
+      <a class="btn" href="demo/index.html">Watch the demo</a>
+      <a class="btn" href="https://github.com/narendrachampaneri/Tempo-server">Source on GitHub</a>
+    </div>
+  </div>
+
+  <section aria-labelledby="what">
+    <h2 id="what">What it does</h2>
+    <div class="grid">
+      <div class="card"><b>Free models, your keys</b><span>Groq, Google AI Studio, OpenRouter, Cloudflare, Mistral and more, each with its own free tier, plus local models through Ollama. No paid API needed.</span></div>
+      <div class="card"><b>Checked answers</b><span>A judge from another model family checks each answer; weak ones are fixed, merged or split into parts.</span></div>
+      <div class="card"><b>Never stuck</b><span>Rate limit or error? It switches models. Free quota used up? Local models take over, and it tells you.</span></div>
+      <div class="card"><b>Nothing hidden</b><span>A thinking window shows every stage: the model, why it was picked, the time and the free quota left.</span></div>
+      <div class="card"><b>Drop-in for apps</b><span>OpenAI-compatible API with tools, strict JSON, images and streaming. Works with Open WebUI, Continue, Aider, LangChain and more.</span></div>
+      <div class="card"><b>CPU only, open source</b><span>Windows, macOS or Linux. No GPU. Apache-2.0.</span></div>
+    </div>
+  </section>
+
+  <section id="install" aria-labelledby="install-h">
+    <h2 id="install-h">Install</h2>
+    <div class="tabs" role="tablist" aria-label="Your system">
+      <button role="tab" id="tab-unix" aria-controls="pane-unix" aria-selected="true">macOS and Linux</button>
+      <button role="tab" id="tab-win" aria-controls="pane-win" aria-selected="false">Windows</button>
+      <button role="tab" id="tab-docker" aria-controls="pane-docker" aria-selected="false">Docker</button>
+    </div>
+    <div role="tabpanel" id="pane-unix" aria-labelledby="tab-unix">
+<pre><code># one line: installs uv if needed, then Tempo-server, then runs the setup
+curl -LsSf https://raw.githubusercontent.com/narendrachampaneri/Tempo-server/main/install.sh | sh
+
+# or with a tool you already have
+pipx install tempo-server        # or: uv tool install tempo-server</code></pre>
+    </div>
+    <div role="tabpanel" id="pane-win" aria-labelledby="tab-win" hidden>
+<pre><code># PowerShell, one line: installs uv if needed, then Tempo-server, then runs the setup
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/narendrachampaneri/Tempo-server/main/install.ps1 | iex"
+
+# or with a tool you already have
+pipx install tempo-server        # or: uv tool install tempo-server</code></pre>
+    </div>
+    <div role="tabpanel" id="pane-docker" aria-labelledby="tab-docker" hidden>
+<pre><code>docker run -it --rm -v tempo-data:/data ghcr.io/narendrachampaneri/tempo-server setup
+docker run -d -p 127.0.0.1:8000:8000 -v tempo-data:/data ghcr.io/narendrachampaneri/tempo-server</code></pre>
+    <p class="note">The image is published with the first release; until then, build it from the repository (see the README).</p>
+    </div>
+    <p class="note">Before the first PyPI release, install from GitHub with the same tools: <code>pipx install https://github.com/narendrachampaneri/Tempo-server/archive/refs/heads/main.zip</code> (the one-line installers already do). Your data stays on your computer, in the system's app-data folder.</p>
+    <h2 style="margin-top:22px">Then, in under five minutes</h2>
+    <ol class="steps">
+      <li><code>tempo-server setup</code>: for each free provider, where to get the key, its free limits and terms. Keys are checked, stored encrypted and never shown again.</li>
+      <li><code>tempo-server serve</code>: the web app on <a href="http://127.0.0.1:8000">http://127.0.0.1:8000</a> and the API on <code>/v1</code>.</li>
+      <li>Connect an app: base URL <code>http://localhost:8000/v1</code>, model <code>tempo/auto</code>.</li>
+      <li>Anything wrong? <code>tempo-server doctor</code> checks everything and says how to fix it.</li>
+    </ol>
+  </section>
+
+  <section id="demo" aria-labelledby="demo-h">
+    <h2 id="demo-h">Demo</h2>
+    <p class="note">A recorded session, replayed in your browser: the thinking window, every stage and the final answer. <a href="demo/index.html">Open it full size</a>.</p>
+    <iframe class="demo-frame" src="demo/index.html" title="Recorded Tempo-server session" loading="lazy"></iframe>
+  </section>
+
+  <section id="connect" aria-labelledby="connect-h">
+    <h2 id="connect-h">Use it from any OpenAI client</h2>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="local")
+reply = client.chat.completions.create(
+    model="tempo/auto", messages=[{"role": "user", "content": "Hello!"}]
+)
+print(reply.choices[0].message.content)</code></pre>
+    <p class="note">Step-by-step for Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n and LangChain: <a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/docs/CONNECT.md">CONNECT.md</a>.</p>
+  </section>
+
+  <section id="links" aria-labelledby="links-h">
+    <h2 id="links-h">Documentation</h2>
+    <ul class="links">
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server#readme">README</a>: install, commands, settings</li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/docs/CONNECT.md">Connect an app</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/docs/ARCHITECTURE.md">Architecture</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/docs/USE_CASES.md">20 use cases</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/docs/TEMPO_MODELS.md">Tempo's own models (plan)</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/SECURITY.md">Security</a></li>
+      <li><a href="https://github.com/narendrachampaneri/Tempo-server/blob/main/LICENSE">Licence: Apache-2.0</a></li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">Tempo-server · Apache-2.0 · Copyright 2026 The Tempo-server authors. Free tiers belong to their providers; each user brings their own keys.</div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const root = document.documentElement;
+  document.getElementById("theme").addEventListener("click", () => {
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+  });
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  const select = tab => tabs.forEach(t => {
+    const on = t === tab;
+    t.setAttribute("aria-selected", String(on));
+    t.tabIndex = on ? 0 : -1;
+    document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+  });
+  tabs.forEach((t, i) => {
+    t.addEventListener("click", () => select(t));
+    t.addEventListener("keydown", e => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (step) { const next = tabs[(i + step + tabs.length) % tabs.length]; select(next); next.focus(); }
+    });
+  });
+  // open the tab for the visitor's system
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  if (/win/i.test(platform)) select(tabs[1]); else select(tabs[0]);
+})();
+</script>
+</body>
+</html>

@@ -34,5 +34,5 @@ to see what is done, in progress, blocked and next.
 python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 pytest -q                                   # full suite, offline
 ruff check . && ruff format --check .       # lint
-TEMPO_ENABLE_MOCK=1 TEMPO_DATA_DIR=memory tempo ask "hi"   # offline demo models
+TEMPO_ENABLE_MOCK=1 TEMPO_DATA_DIR=memory tempo-server ask "hi"   # offline demo models
 ```

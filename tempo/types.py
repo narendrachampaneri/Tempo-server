@@ -121,7 +121,10 @@ class ProviderInfo(BaseModel):
         try:
             ZoneInfo(value)
         except (KeyError, ValueError) as exc:  # ZoneInfoNotFoundError is a KeyError
-            raise ValueError(f"unknown time zone {value!r}") from exc
+            raise ValueError(
+                f"unknown time zone {value!r} (on Windows the tzdata package provides them: "
+                "reinstall tempo-server)"
+            ) from exc
         return value
 
     @field_validator("training_on_outputs", mode="before")

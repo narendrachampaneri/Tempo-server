@@ -113,15 +113,15 @@ So on an ordinary 4-core CPU:
 - **taking over one decision costs about 0.4–0.8 s per stage**, well inside the measured limit;
 - **taking over whole groups** (plan: 4 questions) costs 1.5–2.3 s once per question.
 
-A faster CPU gets a lower limit automatically. `tempo laya status` shows the runtime and threads,
+A faster CPU gets a lower limit automatically. `tempo-server laya status` shows the runtime and threads,
 and the plan line in the thinking window shows the measured limit.
 
 ## Options not taken, and when to revisit
 
 - **Multilingual checkpoint** (`TEMPO_LAYA_CHECKPOINT=multilingual`): 2.6× faster and reads
   100+ languages, but it is a different model. Worth fine-tuning and comparing with
-  `tempo laya compare` once Tempo has its own data, especially for non-English users.
+  `tempo-server laya compare` once Tempo has its own data, especially for non-English users.
 - **INT8**: revisit if Laya ships quantization-aware training or a calibrated static INT8
-  recipe; check it with `tempo laya compare` on your own held-out decisions first.
+  recipe; check it with `tempo-server laya compare` on your own held-out decisions first.
 - **bf16 on CPU**: needs AVX-512 BF16 or AMX, which this CPU lacks; on CPUs that have them,
   PyTorch bf16 autocast may be worth measuring (`LAYA_CPU_AMP=bf16`).

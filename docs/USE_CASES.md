@@ -119,7 +119,7 @@ first. **Phase 3.**
 ### 10. Batch jobs
 
 **Example:** summarise 5,000 product reviews overnight within free limits.
-**Today:** `tempo collect` shows the pattern: paced, resumable, within every free limit, keeping
+**Today:** `tempo-server collect` shows the pattern: paced, resumable, within every free limit, keeping
 half of each daily quota for people.
 **Still needs:** a general `tempo batch` command and API (a JSONL file in, results out), with
 the same pacing, resume and quota reserve. **Phase 4.**
@@ -185,8 +185,8 @@ Tempo answers with models from other families than the agent's.
 ### 18. Benchmark lab
 
 **Example:** "Which free model is best at Gujarati maths this week?"
-**Today:** `tempo eval` measures models on a probe set (never with providers whose terms forbid
-benchmarking, such as Cohere); `tempo models --free` shows the live catalog and health.
+**Today:** `tempo-server eval` measures models on a probe set (never with providers whose terms forbid
+benchmarking, such as Cohere); `tempo-server models --free` shows the live catalog and health.
 **Still needs:** larger, versioned eval sets per task and language, results over time, and a
 page that shows them. **Phase 3.**
 
@@ -194,7 +194,7 @@ page that shows them. **Phase 3.**
 
 **Example:** a researcher compares rules, kNN and a two-tower router on Tempo's logged
 decisions.
-**Today:** every decision is logged with its outcome; `tempo export-laya` and `tempo laya
+**Today:** every decision is logged with its outcome; `tempo-server export-laya` and `tempo-server laya
 compare` exist.
 **Still needs:** exports in the formats router libraries use (LLMRouter, RouteLLM), exploration
 traffic (sometimes a second model answers too), and an A/B switch. **Phase 3.**

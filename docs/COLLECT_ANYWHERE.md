@@ -1,6 +1,6 @@
-# Running `tempo collect` on Windows, or as a scheduled GitHub Actions job
+# Running `tempo-server collect` on Windows, or as a scheduled GitHub Actions job
 
-`tempo collect` makes Laya training data slowly, within every free limit, and resumes where it
+`tempo-server collect` makes Laya training data slowly, within every free limit, and resumes where it
 stopped ([LAYA_TUNING.md](./LAYA_TUNING.md)). Two ways to run it for free:
 
 - **A. On a Windows computer**, with local models through Ollama: nothing leaves your computer,
@@ -19,18 +19,19 @@ nothing works around a rate limit, and rows are exported only from sources marke
 Tested steps for Windows 10 or 11 on an ordinary CPU (16 GB RAM for two 8B models; 8 GB for the
 smaller pair below).
 
-### 1. Install Python, Git and Ollama (once)
+### 1. Install Ollama and Tempo-server (once)
 
 Open **PowerShell** and run:
 
 ```powershell
-winget install -e --id Python.Python.3.12
-winget install -e --id Git.Git
 winget install -e --id Ollama.Ollama
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/narendrachampaneri/Tempo-server/main/install.ps1 | iex"
 ```
 
-Close and reopen PowerShell so the new commands are found. (Without `winget`, use the installers
-from python.org, git-scm.com and ollama.com, and tick "Add python.exe to PATH".)
+The second line installs Tempo-server as its own tool (no Python or virtual environment to
+manage) and starts `tempo-server setup`: press Enter at each key for a local-only run. Close and
+reopen PowerShell so the new commands are found. (Without `winget`, use the installer from
+ollama.com.)
 
 ### 2. Get two open-licence models (once)
 
@@ -50,55 +51,36 @@ ollama pull qwen3:4b
 ollama pull granite3.3:2b
 ```
 
-### 3. Install Tempo (once)
+### 3. Point Tempo-server at Ollama
 
 ```powershell
-cd $HOME
-git clone https://github.com/narendrachampaneri/tempo-server.git
-cd tempo-server
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .
+tempo-server setup --only ollama     # finds the running Ollama and remembers it
+tempo-server doctor                  # everything should say ✓ (keys are optional here)
 ```
 
-If PowerShell refuses to run `Activate.ps1`, allow local scripts for your user once:
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then run the activate line again.
-
-### 4. Point Tempo at Ollama
+### 4. Check, then collect
 
 ```powershell
-Copy-Item .env.example .env
-notepad .env
+tempo-server models                         # both local models should say "ready"
+tempo-server terms                          # read what "yes" means for each source
+tempo-server collect --estimate --yes-only  # how long, at your pace
+tempo-server collect --yes-only             # runs until done; Ctrl-C any time
 ```
 
-In `.env`, remove the `#` in front of `OLLAMA_API_BASE=http://localhost:11434` and save. Leave
-every key empty for a local-only run. (`.env` is ignored by git; never commit it.)
+Run `tempo-server collect --yes-only` again whenever you like: it resumes where it stopped. Progress,
+logs and quota counters live in `%LOCALAPPDATA%\tempo-server`. `tempo-server collect --status` shows progress.
 
-For Gujarati or Hindi text in the console, also run `$env:PYTHONUTF8 = "1"` (or add
-`PYTHONUTF8=1` to your user environment variables).
+### 5. Optional: run it every evening with Task Scheduler
 
-### 5. Check, then collect
-
-```powershell
-tempo models                         # both local models should say "ready"
-tempo terms                          # read what "yes" means for each source
-tempo collect --estimate --yes-only  # how long, at your pace
-tempo collect --yes-only             # runs until done; Ctrl-C any time
-```
-
-Run `tempo collect --yes-only` again whenever you like: it resumes where it stopped. Progress,
-logs and quota counters live in `%USERPROFILE%\.tempo`. `tempo collect --status` shows progress.
-
-### 6. Optional: run it every evening with Task Scheduler
-
-Create `collect.cmd` in the `tempo-server` folder:
+Create `%USERPROFILE%\tempo-server\collect.cmd`:
 
 ```bat
 @echo off
 cd /d %USERPROFILE%\tempo-server
-set PYTHONUTF8=1
-.venv\Scripts\tempo.exe collect --yes-only --no-wait --minutes 120 >> collect.log 2>&1
+"%USERPROFILE%\.local\bin\tempo-server.exe" collect --yes-only --no-wait --minutes 120 >> collect.log 2>&1
 ```
+
+(That is where the installer puts `tempo-server.exe`; `where.exe tempo-server` shows yours.)
 
 Then, in PowerShell:
 
@@ -110,10 +92,10 @@ Ollama must be running (it starts with Windows after installing). In Power setti
 computer from sleeping during the run. `--minutes 120` stops starting new questions after two
 hours; the next evening resumes.
 
-### 7. Export
+### 6. Export
 
 ```powershell
-tempo export-laya --out laya-dataset
+tempo-server export-laya --out laya-dataset
 ```
 
 ---
@@ -136,7 +118,7 @@ docs/STATUS.md).
   restored at the start of the next. Because the quota counters travel with it, each run knows
   how much of today's free allowance the earlier runs used. Rate-limit headers from providers
   correct the counts if the same key is also used elsewhere.
-- **Only "yes" data is kept by default**: the export step runs `tempo export-laya` without
+- **Only "yes" data is kept by default**: the export step runs `tempo-server export-laya` without
   `--include-unclear`.
 
 ### Setting it up
@@ -152,7 +134,7 @@ docs/STATUS.md).
 4. Run it once by hand: Actions → "Tempo collect" → Run workflow. Check the log, then let the
    schedule run.
 5. Download the dataset from the run's artifacts (`laya-dataset`) when enough has been
-   collected (`tempo collect --estimate` says how much is enough).
+   collected (`tempo-server collect --estimate` says how much is enough).
 
 ### Things to know
 

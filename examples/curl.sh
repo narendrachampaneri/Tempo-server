@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# The API with curl, against a local `tempo serve` (demo mode needs no keys).
+# The API with curl, against a local `tempo-server serve` (demo mode needs no keys).
 BASE=${TEMPO_URL:-http://127.0.0.1:8000}
 
 curl -s "$BASE/v1/chat/completions" \

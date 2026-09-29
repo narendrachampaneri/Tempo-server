@@ -4,7 +4,7 @@ Each example talks to a local Tempo server. With no provider keys, start it in d
 examples run with no account and no network:
 
 ```bash
-TEMPO_ENABLE_MOCK=1 tempo serve      # http://127.0.0.1:8000
+TEMPO_ENABLE_MOCK=1 tempo-server serve      # http://127.0.0.1:8000
 pip install openai                   # for the Python examples
 ```
 

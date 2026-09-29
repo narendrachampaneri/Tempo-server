@@ -2,7 +2,7 @@
 
 Works the same whichever free model answers: models without native tool support get the tools
 described in their prompt, and every reply is validated (and retried on another model if it
-doesn't fit). Run a server first: TEMPO_ENABLE_MOCK=1 tempo serve
+doesn't fit). Run a server first: TEMPO_ENABLE_MOCK=1 tempo-server serve
 """
 
 import json
