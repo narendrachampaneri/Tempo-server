@@ -384,6 +384,18 @@ tests and `install.ps1`'s setup step) on the missing time-zone database; `tzdata
   ARCHITECTURE §6.2 and USE_CASES #17 updated.
 - Tests: 376 pass locally (Linux, Python 3.11), JS 6 pass (Node 22), lint clean.
 
+**CI results, step 7** (manual run 21 on `main`, commit `fb3fea6`, 2026-09-29):
+
+| System | Server tests (incl. MCP and Python SDK) | SDK job (Python SDK + JS SDK, packages) | Install tests |
+|---|---|---|---|
+| Linux | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓, Node 20 ✓ | ✓ |
+| Windows | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓ | ✓ |
+| macOS | 3.13 ✓ | Node 22 ✓ | ✓ |
+
+The only failure in that run was lint: `ruff format --check` also formats Python code blocks in
+Markdown and docstrings (README, `examples/sdk_python.py`). Fixed in `0d58022`; its push run
+(lint and Linux) is green.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
