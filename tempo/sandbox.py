@@ -265,7 +265,14 @@ class Sandbox:
         import wasmtime
 
         engine = self._engine()  # one engine per run: interrupting it touches no other run
-        module = wasmtime.Module.deserialize_file(engine, str(compiled))
+        try:
+            module = wasmtime.Module.deserialize_file(engine, str(compiled))
+        except wasmtime.WasmtimeError:
+            # Compiled on another machine (a copied data folder, a CI cache): compile again.
+            log.info("recompiling the %s sandbox for this machine", language)
+            compiled.unlink(missing_ok=True)
+            compiled = self._compiled(language)
+            module = wasmtime.Module.deserialize_file(engine, str(compiled))
         work = Path(tempfile.mkdtemp(prefix="tempo-sandbox-"))
         io = Path(tempfile.mkdtemp(prefix="tempo-sandbox-io-"))  # not visible to the code
         stopped: list[str] = []

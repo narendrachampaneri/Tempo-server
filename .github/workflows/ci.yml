@@ -56,6 +56,17 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - run: pip install -e ".[dev]"
+      - name: Sandbox runtimes (cached between runs)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tempo-sandbox
+          key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
+      - name: Install the sandbox (downloads checked by SHA-256); its tests must run, not skip
+        shell: bash
+        run: |
+          echo "TEMPO_SANDBOX_HOME=$RUNNER_TEMP/tempo-sandbox" >> "$GITHUB_ENV"
+          echo "TEMPO_SANDBOX_REQUIRED=1" >> "$GITHUB_ENV"
+          TEMPO_SANDBOX_HOME="$RUNNER_TEMP/tempo-sandbox" tempo-server sandbox install
       - run: pytest -q
 
   test-windows:
@@ -73,6 +84,17 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - run: pip install -e ".[dev]"
+      - name: Sandbox runtimes (cached between runs)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tempo-sandbox
+          key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
+      - name: Install the sandbox (downloads checked by SHA-256); its tests must run, not skip
+        shell: bash
+        run: |
+          echo "TEMPO_SANDBOX_HOME=$RUNNER_TEMP/tempo-sandbox" >> "$GITHUB_ENV"
+          echo "TEMPO_SANDBOX_REQUIRED=1" >> "$GITHUB_ENV"
+          TEMPO_SANDBOX_HOME="$RUNNER_TEMP/tempo-sandbox" tempo-server sandbox install
       - run: pytest -q
 
   test-macos:
@@ -86,6 +108,17 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: pip install -e ".[dev]"
+      - name: Sandbox runtimes (cached between runs)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tempo-sandbox
+          key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
+      - name: Install the sandbox (downloads checked by SHA-256); its tests must run, not skip
+        shell: bash
+        run: |
+          echo "TEMPO_SANDBOX_HOME=$RUNNER_TEMP/tempo-sandbox" >> "$GITHUB_ENV"
+          echo "TEMPO_SANDBOX_REQUIRED=1" >> "$GITHUB_ENV"
+          TEMPO_SANDBOX_HOME="$RUNNER_TEMP/tempo-sandbox" tempo-server sandbox install
       - run: pytest -q
 
   package:

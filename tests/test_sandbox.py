@@ -232,3 +232,14 @@ def test_install_refuses_an_archive_that_writes_outside_its_folder(tmp_path, mon
 def test_not_installed_is_a_clear_error(tmp_path):
     with pytest.raises(SandboxUnavailable, match="tempo-server sandbox install"):
         Sandbox(tmp_path).run("python", "print(1)")
+
+
+def test_a_cache_compiled_elsewhere_is_rebuilt(sandbox, tmp_path):
+    import shutil
+
+    copy = Sandbox(tmp_path, LIMITS)
+    shutil.copytree(sandbox.folder("javascript"), copy.folder("javascript"))
+    for cached in copy.folder("javascript").glob("*.cwasm"):
+        cached.write_bytes(b"compiled for another machine")
+    r = copy.run("javascript", "console.log('rebuilt')")
+    assert r.ok and r.stdout.strip() == "rebuilt"
