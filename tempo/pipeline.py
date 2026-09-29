@@ -1412,7 +1412,7 @@ class Pipeline:
                 ms=round((now - started) * 1000),
                 ttft_ms=round((first - started) * 1000) if first is not None else None,
             )
-            return Answer(
+            answer = Answer(
                 text=text,
                 model=model.id,
                 stage=stage,
@@ -1422,6 +1422,15 @@ class Pipeline:
                 call_id=call_id,
                 tool_calls=outcome.tool_calls,
             )
+            if (
+                job in ANSWER_JOBS
+                and not answer.tool_calls
+                and self._live_owner == (stage, slot_id)
+            ):
+                # Ready the moment the streamed answer is complete, not when the slowest
+                # parallel draft of this stage finishes.
+                self._ready(answer)
+            return answer
         return None
 
     async def _continue(
@@ -1597,14 +1606,21 @@ class Pipeline:
     # --- finish ----------------------------------------------------------------------------
 
     def _maybe_ready(self, stage: int, results: Sequence[Answer | None]) -> None:
-        """The answer that streamed in this stage is shown as ready as soon as it passes the
-        quick checks; anything later happens in the background."""
-        if self._shown_answer is not None or not self.o.live or self._live_owner is None:
+        """After a stage: the answer that streamed in it, if _call didn't already show it as
+        ready (a partial answer kept when the time budget ran out)."""
+        if self._live_owner is None:
             return
         owner_stage, slot = self._live_owner
         if owner_stage != stage or slot >= len(results) or results[slot] is None:
             return
-        answer = results[slot]
+        self._ready(results[slot])
+
+    def _ready(self, answer: Answer) -> None:
+        """The streamed answer is shown as ready as soon as it passes the quick checks;
+        anything later happens in the background."""
+        if self._shown_answer is not None or not self.o.live:
+            return
+        stage = answer.stage
         heur = run_heuristics(
             self.profile,
             self.question,

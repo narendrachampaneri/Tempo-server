@@ -45,7 +45,8 @@ async def test_the_draft_is_shown_at_once_and_a_failed_check_revises_it_in_the_b
     assert result.text.startswith("Fix from")
     kinds = [e.type for e in result.events]
     ready = kinds.index("answer_ready")
-    assert kinds.index("stage_end") < ready < kinds.index("stage_start", ready)  # before checking
+    # as soon as the draft's call ends, before checking starts
+    assert kinds.index("call_end") < ready < kinds.index("stage_start", ready)
     assert events_of(result, "answer_ready")[0].data["checking"] is True
     # nothing streams over the shown answer after it is ready
     assert "answer_reset" not in kinds
@@ -96,6 +97,25 @@ async def test_mixture_drafts_in_parallel_and_streams_one_of_them():
     assert draft_end.data["ms"] < 400
     streamed_by = {e.data["model"] for e in events_of(result, "answer_delta")}
     assert len(streamed_by) == 1
+
+
+async def test_mixture_shows_the_fast_draft_as_ready_without_waiting_for_the_slow_one():
+    """Best mode drafts with several models at once; the streamed answer is ready the moment
+    its own call ends, not when the slowest draft finishes (43 s of 60 s on the laptop)."""
+    scripts = {
+        "beta/mid": [("answer", "Quick draft text.")],
+        "alpha/strong": [sleep(0.6), ("answer", "Slow draft text.")],
+        "local/tiny": [sleep(0.6), ("answer", "Slow local text.")],
+    }
+    engine, _ = make_engine(scripts, judge_score=9)
+    result = await engine.complete(user("hi"), engine.options(mode="best"))
+    kinds = [e.type for e in result.events]
+    ready = events_of(result, "answer_ready")
+    assert ready and ready[0].data["model"] == "beta/mid" and ready[0].data["checking"] is True
+    assert ready[0].t < 0.4  # seconds from the start; the slow drafts take 0.6 s
+    assert events_of(result, "stage_end")[0].t >= 0.6
+    assert kinds.index("answer_ready") < kinds.index("stage_end")  # the draft stage goes on
+    assert len(events_of(result, "call_end")) >= 3  # the slow drafts still finish
 
 
 async def test_mixture_that_fails_its_check_is_merged():
