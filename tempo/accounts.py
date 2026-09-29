@@ -61,7 +61,7 @@ def load_vault_key(secret: str | None, data_dir: Path | None) -> Fernet:
         return Fernet(Fernet.generate_key())
     path = data_dir / "secret.key"
     if not path.exists():
-        data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)  # POSIX: only this user
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(Fernet.generate_key())

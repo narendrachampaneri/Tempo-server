@@ -140,7 +140,8 @@ def onnx_file(model_dir: Path, cache_dir: Path, int8: bool) -> Path:
         partial.replace(target)
         fp32.unlink()  # 3x bigger and no faster than PyTorch on CPU; not kept
     (folder / "export.json").write_text(
-        json.dumps({"checkpoint": str(model_dir), "int8": int8, "format": FORMAT_VERSION})
+        json.dumps({"checkpoint": str(model_dir), "int8": int8, "format": FORMAT_VERSION}),
+        encoding="utf-8",
     )
     log.info("Laya ONNX export ready in %.0fs", time.perf_counter() - started)
     return target

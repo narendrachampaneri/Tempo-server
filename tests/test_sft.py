@@ -96,13 +96,15 @@ async def test_export_writes_train_test_and_readme(tmp_path):
     engine, _ = await logged()
     all_yes(engine)
     stats = sft.export(engine.store, engine.registry, tmp_path / "sft", "sft", test_percent=0)
-    lines = (tmp_path / "sft" / "train.jsonl").read_text().splitlines()
+    lines = (tmp_path / "sft" / "train.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == stats.rows > 0
     assert json.loads(lines[0])["messages"][-1]["role"] == "assistant"
-    readme = (tmp_path / "sft" / "README.md").read_text()
+    readme = (tmp_path / "sft" / "README.md").read_text(encoding="utf-8")
     assert "tempo-traffic" in readme and "distinct word pairs" in readme
     sft.export(engine.store, engine.registry, tmp_path / "pairs", "pairs", test_percent=0)
-    pair = json.loads((tmp_path / "pairs" / "train.jsonl").read_text().splitlines()[0])
+    pair = json.loads(
+        (tmp_path / "pairs" / "train.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
     assert set(pair) >= {"prompt", "chosen", "rejected", "source", "output_terms"}
 
 

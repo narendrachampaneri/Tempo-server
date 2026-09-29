@@ -176,7 +176,7 @@ async def test_export_records_each_rows_dataset_and_licence(tmp_path):
     assert strict == [] and strict_stats.skipped_terms > 0
 
     export(engine.store, engine.registry, tmp_path / "ds", include_unclear=True)
-    readme = (tmp_path / "ds" / "README.md").read_text()
+    readme = (tmp_path / "ds" / "README.md").read_text(encoding="utf-8")
     assert "MIT (https://github.com/openai/grade-school-math" in readme
     assert "CC-BY-4.0" in readme
 

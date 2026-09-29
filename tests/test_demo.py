@@ -15,7 +15,7 @@ def test_record_demo_writes_a_replayable_recording(tmp_path, monkeypatch):
     out = tmp_path / "recording.js"
     result = CliRunner().invoke(app, ["record-demo", "--out", str(out), "-q", "What is 2+2?"])
     assert result.exit_code == 0, result.output
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert text.startswith("window.TEMPO_RECORDING = ")
     recording = json.loads(text.removeprefix("window.TEMPO_RECORDING = ").rstrip(";\n"))
     assert recording["demo_mode"] is True and len(recording["sessions"]) == 1
@@ -28,5 +28,7 @@ def test_the_committed_demo_page_has_a_recording():
     from pathlib import Path
 
     docs = Path(__file__).parent.parent / "docs" / "demo"
-    assert 'src="recording.js"' in (docs / "index.html").read_text()
-    assert (docs / "recording.js").read_text().startswith("window.TEMPO_RECORDING = ")
+    assert 'src="recording.js"' in (docs / "index.html").read_text(encoding="utf-8")
+    assert (
+        (docs / "recording.js").read_text(encoding="utf-8").startswith("window.TEMPO_RECORDING = ")
+    )

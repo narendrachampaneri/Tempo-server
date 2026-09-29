@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from tempo.paths import resolve_data_dir
+
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
@@ -150,18 +152,12 @@ class Settings:
             load_dotenv(override=False)
             # Non-secret settings written by `tempo setup` (never keys: those are encrypted in
             # the vault). The environment and .env win over them.
-            chosen = os.environ.get("TEMPO_DATA_DIR", "").strip()
-            if chosen.lower() != "memory":
-                home = Path(chosen).expanduser() if chosen else Path.home() / ".tempo"
-                if (home / SETTINGS_FILE).exists():
-                    load_dotenv(home / SETTINGS_FILE, override=False)
+            home = resolve_data_dir(os.environ)
+            if home is not None and (home / SETTINGS_FILE).exists():
+                load_dotenv(home / SETTINGS_FILE, override=False)
             env = os.environ
         models_file = env.get("TEMPO_MODELS_FILE")
-        data_dir = env.get("TEMPO_DATA_DIR", "").strip()
-        if data_dir.lower() == "memory":
-            resolved_dir = None
-        else:
-            resolved_dir = Path(data_dir).expanduser() if data_dir else Path.home() / ".tempo"
+        resolved_dir = resolve_data_dir(env)
         return cls(
             api_key=env.get("TEMPO_API_KEY") or None,
             enable_mock=_flag(env, "TEMPO_ENABLE_MOCK", False),

@@ -81,7 +81,7 @@ def read_settings(path: Path | None) -> dict[str, str]:
     if path is None or not path.exists():
         return {}
     values: dict[str, str] = {}
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             name, _, value = line.partition("=")
@@ -110,7 +110,7 @@ def write_settings(path: Path | None, updates: dict[str, str | None]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# Written by `tempo setup`. Non-secret settings only: keys live in the vault."]
     lines += [f"{name}={value}" for name, value in sorted(values.items())]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def enable_list(current: str, provider: str) -> str:

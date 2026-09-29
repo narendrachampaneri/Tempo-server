@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 # Who counts as the owner: the implicit local user and the TEMPO_API_KEY admin.
 OWNER_IDS = frozenset({"local", "admin"})
+# The owner's own background jobs (tempo collect), which may use the owner's server keys.
+OWNER_JOBS = frozenset({"collect"})
 
 OLLAMA_DEFAULT_BASE = "http://localhost:11434"
 
@@ -106,12 +108,23 @@ class Registry:
                 return True
             if provider.byok_only:
                 return False  # a server-wide key is never used for this provider
+            if not self.server_keys_for(access):
+                return False  # the owner's keys are only for the owner
             if not self._env.get(provider.key_env, "").strip():
                 return False
             return self.openai_base(provider_id) is not None or not provider.openai_base
         if provider.base_env:
             return bool(self._env.get(provider.base_env, "").strip())
         return False
+
+    def server_keys_for(self, access: Access | None) -> bool:
+        """May this caller use the server's own keys (.env or the environment)? They belong to
+        the owner (the local user or the TEMPO_API_KEY admin; internal jobs pass no access).
+        Other users use only their own keys, unless TEMPO_SHARE_SERVER_KEYS=1."""
+        if access is None or access.user_id in OWNER_IDS | OWNER_JOBS:
+            return True
+        flag = self._env.get("TEMPO_SHARE_SERVER_KEYS", "").strip().lower()
+        return flag in ("1", "true", "yes", "on")
 
     def openai_base(self, provider_id: str) -> str | None:
         """The provider's OpenAI-compatible base URL, with {NAME} filled from the environment
@@ -129,7 +142,7 @@ class Registry:
         """Keyword arguments (api_key / api_base) for calling this provider."""
         provider = self.providers[provider_id]
         creds: dict[str, str] = {}
-        if provider.key_env and not provider.byok_only:
+        if provider.key_env and not provider.byok_only and self.server_keys_for(access):
             if self._env.get(provider.key_env, "").strip():
                 creds["api_key"] = self._env[provider.key_env].strip()
         if access is not None and access.user_keys.get(provider_id):

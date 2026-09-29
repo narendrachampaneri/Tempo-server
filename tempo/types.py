@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -224,5 +225,10 @@ class Access(BaseModel):
     user_keys: dict[str, str] = Field(default_factory=dict, repr=False)
 
     def key_id(self, provider: str) -> str:
-        """Identifies the quota bucket: each user key has its own free-tier limits."""
-        return f"user:{self.user_id}" if provider in self.user_keys else "server"
+        """Identifies the quota bucket: each key has its own free-tier limits. Named after a
+        one-way fingerprint of the key, so one key used by several callers (the owner, the
+        admin, collect) is counted once."""
+        key = self.user_keys.get(provider)
+        if not key:
+            return "server"
+        return "key:" + hashlib.sha256(key.encode()).hexdigest()[:16]

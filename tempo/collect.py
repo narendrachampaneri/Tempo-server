@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from tempo.accounts import LOCAL_USER
 from tempo.datasets import DATASETS, Item, interleave, usable
 from tempo.registry import Registry
 from tempo.store import Store
@@ -126,7 +127,8 @@ async def run(
         use_cache=False,
         live=False,
         quota_budget=min(engine.settings.quota_budget, 6),
-        access=Access(user_id=COLLECT_USER),
+        # the owner's job: the owner's keys (from `tempo setup`), counted in the same buckets
+        access=Access(user_id=COLLECT_USER, user_keys=engine.access_for(LOCAL_USER).user_keys),
         training_only=yes_only,
     )
     deadline = clock() + max_minutes * 60 if max_minutes else None

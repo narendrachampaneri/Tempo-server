@@ -75,7 +75,7 @@ def test_each_key_has_its_own_bucket():
     quota.record(a, "server")
     quota.record(a, "server")
     assert quota.left(a, "server").rpm == 0
-    assert quota.left(a, "user:alice").rpm == 2
+    assert quota.left(a, "key:alice").rpm == 2
 
 
 def test_day_counts_survive_restart_and_reset_next_day(tmp_path):

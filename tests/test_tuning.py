@@ -152,11 +152,11 @@ def test_registry_records_where_each_verdict_comes_from():
 async def test_export_writes_files_the_notebook_can_load(tmp_path):
     engine, _ = await logged_engine()
     stats = export(engine.store, engine.registry, tmp_path / "ds", test_percent=50)
-    train = (tmp_path / "ds" / "train.jsonl").read_text().splitlines()
-    test = (tmp_path / "ds" / "test.jsonl").read_text().splitlines()
+    train = (tmp_path / "ds" / "train.jsonl").read_text(encoding="utf-8").splitlines()
+    test = (tmp_path / "ds" / "test.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(train) + len(test) == stats.rows
     assert all(json.loads(line)["split"] == "test" for line in test)
-    readme = (tmp_path / "ds" / "README.md").read_text()
+    readme = (tmp_path / "ds" / "README.md").read_text(encoding="utf-8")
     assert 'load_dataset("json"' in readme and "laya_finetune_typed_decisions" in readme
 
 

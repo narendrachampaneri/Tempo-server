@@ -20,7 +20,8 @@ HELLO = [{"role": "user", "content": "hi"}]
 def test_vault_encrypts_and_file_key_is_private(tmp_path):
     vault = load_vault_key(None, tmp_path)
     key_file = tmp_path / "secret.key"
-    assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600
+    if os.name == "posix":  # Windows keeps it private through the profile folder's ACLs
+        assert stat.S_IMODE(os.stat(key_file).st_mode) == 0o600
     token = vault.encrypt(b"gsk_supersecret")
     assert b"supersecret" not in token and vault.decrypt(token) == b"gsk_supersecret"
     assert load_vault_key(None, tmp_path).decrypt(token) == b"gsk_supersecret"  # same file
@@ -126,7 +127,7 @@ def test_own_keys_unlock_providers_and_use_their_own_quota():
     access = backend.accesses[-1]
     assert access.user_id == user.id and access.user_keys == {"alpha": "mei-alpha-key-1"}
     small = engine.registry.get("alpha/small")
-    assert engine.quota.left(small, f"user:{user.id}").rpd == 14399
+    assert engine.quota.left(small, access.key_id("alpha")).rpd == 14399
     assert engine.quota.left(small, "server").rpd == 14400
 
     # Another user without the key cannot use it.

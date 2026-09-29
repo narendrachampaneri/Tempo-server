@@ -15,6 +15,20 @@ from tempo.providers import Delta
 from tempo.registry import Registry
 from tempo.types import TASKS, ModelInfo, ProviderInfo
 
+
+@pytest.fixture(autouse=True)
+def _private_home(tmp_path_factory, monkeypatch):
+    """Every test gets its own empty home and app-data folders, so nothing reads or moves the
+    real ~/.tempo or the user's data folder, on any system."""
+    home = tmp_path_factory.mktemp("home")
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(home))
+    monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
+    monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(home / ".local" / "share"))
+    return home
+
+
 ENV_ALL = {"ALPHA_KEY": "a", "BETA_KEY": "b", "LOCAL_BASE": "http://local"}
 
 

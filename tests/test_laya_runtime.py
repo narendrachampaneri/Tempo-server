@@ -10,7 +10,7 @@ def checkpoint(tmp_path, name="ckpt", weights=b"w" * 10):
     folder = tmp_path / name
     folder.mkdir()
     (folder / "model.safetensors").write_bytes(weights)
-    (folder / "rl_agent_config.json").write_text("{}")
+    (folder / "rl_agent_config.json").write_text("{}", encoding="utf-8")
     return folder
 
 

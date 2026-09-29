@@ -174,7 +174,7 @@ class Store:
         if path is None:
             target = ":memory:"
         else:
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             target = str(path)
         self._conn = sqlite3.connect(target, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row

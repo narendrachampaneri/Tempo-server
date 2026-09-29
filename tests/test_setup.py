@@ -56,7 +56,7 @@ def test_walks_through_providers_and_stores_keys_encrypted(home):
     assert "fp:" in out and "Your free requests a day" in out
     assert checked == ["groq", "cloudflare"]
     assert set(vault_keys()) == {"groq", "cloudflare"}
-    settings = (tmp_path / "settings.env").read_text()
+    settings = (tmp_path / "settings.env").read_text(encoding="utf-8")
     assert "CLOUDFLARE_ACCOUNT_ID=acc123" in settings
     assert "placeholder" not in settings and "nvidia" not in settings
     assert (tmp_path / "tempo.db").read_bytes().find(b"placeholder-groq-key") == -1
@@ -76,7 +76,9 @@ def test_opt_in_provider_is_turned_on_only_with_the_users_own_key(home):
     )
     assert result.exit_code == 0, result.output
     assert "only your own key" in result.output
-    assert "TEMPO_ENABLE_PROVIDERS=opencode" in (tmp_path / "settings.env").read_text()
+    assert "TEMPO_ENABLE_PROVIDERS=opencode" in (tmp_path / "settings.env").read_text(
+        encoding="utf-8"
+    )
     assert set(vault_keys()) == {"opencode"}
 
 
