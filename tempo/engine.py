@@ -146,6 +146,10 @@ class Engine:
     ) -> None:
         self.settings = settings or Settings()
         self.registry = registry
+        if self.settings.data_dir is not None:  # promoted Tempo-Core versions per task type
+            from tempo.model_loop import load_routes
+
+            registry.core_routes = load_routes(self.settings.data_dir)
         self.backend_for = backend_for
         self.health = health or HealthTracker()
         self.store = store or Store(self.settings.db_path)

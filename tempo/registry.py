@@ -37,9 +37,29 @@ class Registry:
         self.providers = providers
         self._models: dict[str, ModelInfo] = {m.id: m for m in models}
         self._env = os.environ if env is None else env
+        # task type -> "tempo-core:<version>" (tempo-server models promote)
+        self._core_routes: dict[str, str] = {}
         for model in models:
             if model.provider not in providers:
                 raise ValueError(f"Model {model.id} uses unknown provider {model.provider!r}")
+
+    @property
+    def core_routes(self) -> dict[str, str]:
+        return self._core_routes
+
+    @core_routes.setter
+    def core_routes(self, routes: Mapping[str, str]) -> None:
+        self._core_routes = dict(routes)
+        self.apply_core_routes()
+
+    def apply_core_routes(self) -> None:
+        """Each local Tempo-Core version answers only the task types it was promoted for."""
+        for model in self._models.values():
+            name = model.id.split("/", 1)[-1]
+            if model.provider == "ollama" and name.startswith("tempo-core"):
+                if ":" not in name:
+                    name += ":latest"
+                model.tasks = sorted(t for t, v in self._core_routes.items() if v == name)
 
     @classmethod
     def load(
@@ -237,6 +257,7 @@ class Registry:
         for model in self._models.values():
             if model.provider == "ollama":
                 model.installed = model.id in installed
+        self.apply_core_routes()
         return len(installed)
 
 

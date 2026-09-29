@@ -361,8 +361,16 @@ def _free_catalog(engine: Engine, as_json: bool, everything: bool) -> None:
     out.print(f"Chat-capable free models: {sum(counts.values())} ({summary})", markup=False)
 
 
-@app.command()
+models_app = typer.Typer(
+    help="List models (--free: the live free catalog); import, compare and promote Tempo's own "
+    "trained models.",
+)
+app.add_typer(models_app, name="models")
+
+
+@models_app.callback(invoke_without_command=True)
 def models(
+    ctx: typer.Context,
     free: Annotated[
         bool,
         typer.Option("--free", help="Live free-model catalog: read every provider's list now."),
@@ -373,6 +381,8 @@ def models(
     ] = False,
 ) -> None:
     """List models and whether each one is ready to use."""
+    if ctx.invoked_subcommand:
+        return
     engine = _engine()
     asyncio.run(engine.startup(oneshot=True))
     if free:
@@ -427,6 +437,204 @@ def models(
     for p in registry.providers.values():
         if not p.enabled and p.disabled_note:
             out.print(f"{p.label}: {p.disabled_note}", style="dim", markup=False)
+
+
+def _loop_error(exc: Exception) -> typer.Exit:
+    err.print(str(exc), style="red", markup=False, soft_wrap=True)
+    return typer.Exit(1)
+
+
+@models_app.command("import")
+def models_import(
+    path: Annotated[
+        Path,
+        typer.Argument(help="A notebook's output: the downloaded zip, its folder, or a .gguf."),
+    ],
+    ollama: Annotated[
+        bool, typer.Option("--ollama/--no-ollama", help="Register Tempo-Core with Ollama.")
+    ] = True,
+) -> None:
+    """Load a trained Laya checkpoint, or register a Tempo-Core GGUF with Ollama."""
+    from tempo import model_loop
+
+    engine = _engine()
+    try:
+        results = model_loop.import_model(engine, path, ollama=ollama)
+    except model_loop.LoopError as exc:
+        raise _loop_error(exc) from exc
+    for item in results:
+        what = "Tempo-Core" if item.kind == model_loop.CORE else "Laya (Tempo-Router/Judge)"
+        extra = " (dry run)" if item.report.get("dry_run") else ""
+        err.print(
+            f"Imported {what} {item.version}{extra} to {item.path}", markup=False, soft_wrap=True
+        )
+        for note in item.notes:
+            err.print(f"  {note}", markup=False, soft_wrap=True)
+        heldout = item.report.get("heldout") or {}
+        shown = {k: v for k, v in heldout.items() if not isinstance(v, dict) and v is not None}
+        if shown:
+            err.print(f"  notebook's held-out scores: {shown}", markup=False, soft_wrap=True)
+    err.print("Next: tempo-server models compare", markup=False)
+
+
+@models_app.command("compare")
+def models_compare(
+    kind: Annotated[
+        str, typer.Option("--kind", "-k", help="tempo-core or laya (default: the last imported).")
+    ] = "",
+    old: Annotated[
+        str,
+        typer.Option(
+            "--old",
+            help="tempo-core: the promoted version, 'base', a version, ollama:NAME or "
+            "gguf:PATH. laya: 'current' (TEMPO_LAYA_MODEL or stock), 'stock', a version or a "
+            "folder.",
+        ),
+    ] = "",
+    new: Annotated[str, typer.Option("--new", help="Default: the last imported version.")] = (
+        "latest"
+    ),
+    data: Annotated[
+        Path | None,
+        typer.Option("--data", help="Pack folder with the held-out set (default: the latest)."),
+    ] = None,
+    min_questions: Annotated[
+        int | None,
+        typer.Option(
+            "--min-questions",
+            help="Held-out questions needed per task type (30) or rows per Laya decision (50).",
+        ),
+    ] = None,
+    max_tokens: Annotated[int, typer.Option("--max-tokens", help="Per answer.")] = 512,
+    limit: Annotated[int | None, typer.Option("--limit", help="Only this many questions.")] = None,
+    min_speed: Annotated[
+        float, typer.Option("--min-speed", help="Tokens a second the new version must reach.")
+    ] = 8.0,
+    llama_server: Annotated[
+        Path | None, typer.Option("--llama-server", help="llama.cpp's server, for gguf:PATH.")
+    ] = None,
+) -> None:
+    """Run the held-out set on old and new, and apply the promotion gate per task type."""
+    from tempo import model_loop, training
+
+    engine = _engine()
+    asyncio.run(engine.startup(oneshot=True))
+    pack = data or training.latest_pack(engine)
+    try:
+        if not kind:
+            items = model_loop.book(engine)["imports"]
+            if not items:
+                raise model_loop.LoopError("Nothing imported yet (tempo-server models import).")
+            kind = items[-1]["kind"]
+        if kind == model_loop.CORE:
+            result = model_loop.compare_core(
+                engine,
+                pack,
+                old=old,
+                new=new,
+                min_questions=min_questions or model_loop.MIN_CORE_QUESTIONS,
+                min_speed=min_speed,
+                max_tokens=max_tokens,
+                limit=limit,
+                llama_server=llama_server,
+                say=lambda text: err.print(text, markup=False, soft_wrap=True),
+            )
+        elif kind == model_loop.LAYA:
+            result = model_loop.compare_laya(
+                engine,
+                pack,
+                old=old or "current",
+                new=new,
+                min_rows=min_questions or model_loop.MIN_LAYA_ROWS,
+                say=lambda text: err.print(text, markup=False, soft_wrap=True),
+            )
+        else:
+            raise model_loop.LoopError("--kind is tempo-core or laya")
+    except model_loop.LoopError as exc:
+        raise _loop_error(exc) from exc
+    if kind == model_loop.CORE:
+        table = Table(
+            title=f"{result['labels']['old']} vs {result['labels']['new']}", header_style="bold"
+        )
+        for column in ("task type", "questions", "old", "new", "wins", "losses", "verdict"):
+            table.add_column(column)
+        for t in result["types"]:
+            verdict = (
+                f"[green]new[/green]: {t['reason']}" if t["takes_over"] else (f"old: {t['reason']}")
+            )
+            table.add_row(
+                t["task"],
+                str(t["n"]),
+                f"{t['old']:.3f}",
+                f"{t['new']:.3f}",
+                str(t["wins"]),
+                str(t["losses"]),
+                verdict,
+            )
+    else:
+        table = Table(title="Laya: old vs new checkpoint", header_style="bold")
+        for column in ("decision", "rows", "old", "new", "verdict"):
+            table.add_column(column)
+        for d in result["decisions"]:
+            table.add_row(
+                d["decision"], str(d["n"]), f"{d['old']:.3f}", f"{d['new']:.3f}", d["reason"]
+            )
+    out.print(table)
+    for reason in result["reasons"]:
+        err.print(f"  {reason}", markup=False, soft_wrap=True)
+    if result["release"]:
+        which = ", ".join(result.get("promote") or []) or "all decisions"
+        err.print(
+            f"Gate passed ({which}). Next: tempo-server models promote --kind {kind}",
+            style="green",
+            markup=False,
+            soft_wrap=True,
+        )
+    else:
+        err.print("Gate not passed: the old version stays.", style="yellow", markup=False)
+
+
+@models_app.command("promote")
+def models_promote(
+    kind: Annotated[
+        str, typer.Option("--kind", "-k", help="tempo-core or laya (default: the last compared).")
+    ] = "",
+) -> None:
+    """Apply the last comparison: the new version takes the task types it won."""
+    from tempo import model_loop
+
+    engine = _engine()
+    try:
+        if not kind:
+            compared = model_loop.book(engine)["compare"]
+            if not compared:
+                raise model_loop.LoopError("Run `tempo-server models compare` first.")
+            kind = max(compared.values(), key=lambda r: r["at"])["kind"]
+        change = model_loop.promote(engine, kind)
+    except model_loop.LoopError as exc:
+        raise _loop_error(exc) from exc
+    if not change["changed"]:
+        err.print(
+            "Not promoted: the last comparison did not pass the gate.", style="yellow", markup=False
+        )
+        for reason in change["reasons"]:
+            err.print(f"  {reason}", markup=False, soft_wrap=True)
+        raise typer.Exit(1)
+    if kind == model_loop.CORE:
+        err.print(
+            f"Tempo-Core now answers: {', '.join(change['tasks'])}", style="green", markup=False
+        )
+        for task, name in sorted(change["routes"].items()):
+            err.print(f"  {task}: {name}", markup=False)
+    else:
+        err.print(
+            f"TEMPO_LAYA_MODEL={change['laya_model']} (in settings.env). It starts in "
+            "shadow mode; TEMPO_LAYA_TAKEOVER hands it decisions it wins "
+            "(docs/LAYA_TUNING.md).",
+            style="green",
+            markup=False,
+            soft_wrap=True,
+        )
 
 
 @app.command(name="eval")
@@ -1323,8 +1531,7 @@ def train_prepare(
         ),
     ] = False,
 ) -> None:
-    """Run the exports, check the data mix and licences, pack one zip for Kaggle, and print
-    the exact upload steps."""
+    """Export, check data mix and licences, pack one zip for Kaggle, print the upload steps."""
     from tempo import training
 
     engine = _engine()

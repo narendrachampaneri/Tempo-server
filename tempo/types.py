@@ -175,6 +175,9 @@ class ModelInfo(BaseModel):
     expires: str | None = None  # YYYY-MM-DD; dropped from that day on
     # A specialist (e.g. "finance", "health") answers only questions in its field.
     domain: str | None = None
+    # Only these task types (None: all). Tempo-Core versions answer only the task types they
+    # were promoted for (tempo-server models promote); an unpromoted version answers none.
+    tasks: list[str] | None = None
     # Only used as the very last fallback (e.g. OpenRouter's own openrouter/free router).
     fallback_only: bool = False
     maker_disclosed: bool = True  # False for stealth models whose maker is not named
