@@ -207,6 +207,8 @@ def build(
         common = {
             "question_id": qid,
             "split": split,
+            # the promotion gate compares versions per task type (docs/TEMPO_MODELS.md §3)
+            "task_type": (_loads(q["profile"], {}) or {}).get("task"),
             "source": source,
             "output_terms": terms,
             "judge_model": chosen.check.get("judge_model"),

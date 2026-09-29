@@ -244,7 +244,47 @@ DATASETS: dict[str, Dataset] = {
 }
 
 
+# Built-in questions for dry runs of the training loop (`tempo-server train dry-run`), answered
+# by the offline demo models. Written for Tempo-server, so under its own licence. Never
+# downloaded and not offered by `tempo-server collect`.
+DEMO_DATASET = Dataset(
+    name="tempo-demo",
+    title="Tempo-server's built-in demo questions (dry runs only)",
+    url="",
+    filename="",
+    license="Apache-2.0",
+    license_url="https://github.com/narendrachampaneri/Tempo-server/blob/main/LICENSE",
+    personal_data="Questions written from templates; no personal data.",
+    parse=lambda raw: iter(()),
+)
+
+_DEMO_TEMPLATES = (
+    "What is {a}% of {b}?",
+    "A shop sells {a} pens a day for {b} days. How many pens is that?",
+    "Write a Python function that returns the sum of the first {a} square numbers.",
+    "Write a Python function that checks whether {b} is a prime number.",
+    "Say hello to a new colleague called Demo{a} in one friendly sentence.",
+    "Write a two-line poem about the number {a}.",
+    "Summarise in one sentence: Tempo-server routed {a} questions to {b} free models today.",
+    "Translate into Hindi: I have {a} books.",
+    "Explain step by step why {a} + {b} equals {c}.",
+    "Extract the numbers from this sentence as a list: the order had {a} apples and {b} pears.",
+)
+
+
+def demo_items(count: int) -> list[Item]:
+    """``count`` distinct questions of every task type, the same for every run."""
+    items = []
+    for i in range(count):
+        template = _DEMO_TEMPLATES[i % len(_DEMO_TEMPLATES)]
+        a, b = 3 + i, 17 + 7 * i
+        items.append(Item(f"demo-{i}", template.format(a=a, b=b, c=a + b)))
+    return items
+
+
 def dataset_info(name: str | None) -> dict[str, Any] | None:
+    if name == DEMO_DATASET.name:
+        return DEMO_DATASET.info()
     dataset = DATASETS.get(name or "")
     return dataset.info() if dataset else None
 

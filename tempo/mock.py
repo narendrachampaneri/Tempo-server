@@ -34,6 +34,8 @@ def _mock(model_id: str, name: str, strength: float, tps: float, ttft: int) -> M
         ttft_ms=ttft,
         tokens_per_sec=tps,
         skills={task: strength for task in TASKS},
+        # The demo text is written by Tempo-server's own code, so it is under its licence.
+        licence="Apache-2.0",
     )
 
 

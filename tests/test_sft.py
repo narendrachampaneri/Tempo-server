@@ -57,6 +57,7 @@ async def test_sft_rows_are_checked_final_answers_with_source_and_licences():
     assert row["messages"][-1]["role"] == "assistant"
     assert row["messages"][-1]["content"].startswith("Fix from")  # the answer that passed
     assert row["source"]["dataset"] == "tempo-traffic" and row["source"]["license"]
+    assert row["task_type"] == "code"  # the promotion gate compares per task type
     assert row["output_terms"] and all(t["verdict"] == "yes" for t in row["output_terms"].values())
     assert ids["disliked"] not in by_q  # 👎
     assert ids["other_user"] not in by_q and stats.skipped_user == 1  # needs consent
@@ -74,6 +75,7 @@ async def test_pairs_prefer_the_draft_that_failed():
     assert pair["chosen_score"] > pair["rejected_score"]
     assert pair["rejected_issues"]
     assert pair["source"]["license"] and pair["output_terms"]
+    assert pair["task_type"] == "code"
 
 
 async def test_a_provider_whose_terms_check_failed_is_left_out():
@@ -124,3 +126,12 @@ def test_cli_exports(tmp_path, monkeypatch):
         assert (tmp_path / folder / "README.md").exists()
         # Test providers are not in the real registry, so their rows are left out.
         assert "Wrote 0" in result.output
+
+
+def test_demo_questions_cover_every_kind_and_have_a_licence():
+    from tempo.datasets import DATASETS, dataset_info, demo_items
+
+    items = demo_items(30)
+    assert len({i.text for i in items}) == 30 and items == demo_items(30)  # stable
+    assert dataset_info("tempo-demo")["license"] == "Apache-2.0"
+    assert "tempo-demo" not in DATASETS  # never offered by `tempo-server collect`
