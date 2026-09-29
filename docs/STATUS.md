@@ -1,7 +1,7 @@
 # Status
 
-_Last updated 2026-09-29, at the end of step 8 (checking code and maths answers by running them
-in a WebAssembly sandbox). Branch: `main` (work goes straight to `main` in small commits)._
+_Last updated 2026-09-29, at the end of step 9 (the training kit and a first end-to-end tuning
+test). Branch: `main` (work goes straight to `main` in small commits)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -468,6 +468,60 @@ behind, because Wasmtime still held the folder and output files open when they w
 Fixed in `c91615d` (close Wasmtime's objects first, then delete with short retries), found by
 `test_each_run_is_fresh_and_leaves_nothing`.
 
+### Step 9: training kit, and a first end-to-end tuning test
+
+The whole path is in **[TRAINING.md](./TRAINING.md)**: collect, prepare, upload to Kaggle, run,
+download, import, compare, promote.
+
+- **Two Kaggle notebooks** in `training/` (generated from `tempo/notebooks.py` by
+  `tempo-server train notebooks`; a test keeps the committed files in sync):
+  - `tempo_core.ipynb`: Qwen3-1.7B (Apache-2.0), LoRA SFT on `export-sft` (loss on the answer
+    only), DPO on `export-pairs` (same LoRA), merge, GGUF with llama.cpp (pinned: release b11249,
+    binaries by SHA-256, converter by commit), Q4_K_M, Modelfile.
+  - `tempo_router_judge.ipynb`: Laya (Apache-2.0) on `export-laya`, following Laya's official
+    notebook (same preprocessing, loss, `torchrun` on both T4s, temperature calibration), with
+    held-out accuracy per decision before and after.
+  - Both: GPU check, progress line every minute (step, share, elapsed, time left, loss, session
+    time left), checkpoints, a clean stop 20 minutes before the time budget (11 of Kaggle's 12
+    hours), resume from an earlier version's output added as input, and `report.json` +
+    `REPORT.md` (status, losses, held-out scores, data mix, licences of base, sources and answer
+    models, files with SHA-256, times).
+  - The code is the training kit `tempo/trainkit.py`, standalone; it travels in the pack as
+    `tempo_trainkit.py`, so a notebook always runs the kit that matches its data.
+- **`tempo-server train prepare`**: the three exports with one held-out split, licence checks
+  on every training row (a source licence, no share-alike or non-commercial source, every
+  writing or grading model "yes"; any problem stops it), the data mix (stops unless `--force`,
+  which the pack records), size notes, `tempo-pack.json`, one zip, the notebooks next to it, and
+  the exact upload steps. Export rows now carry `task_type`.
+- **`tempo-server models import PATH`** (the downloaded zip, its folder or a `.gguf`): checksums
+  from the report; Tempo-Core registered with Ollama over its HTTP API as `tempo-core:<version>`
+  (chat template, stop word, Apache-2.0 licence so its outputs count as "yes"); Laya copied and
+  test-loaded. **`tempo-server models compare`**: held-out questions on old and new (Ollama, or a
+  GGUF on llama.cpp's server), graded by quick checks, a judge from another family and the
+  sandbox; the gate per task type (30+ questions, no drop), then more wins than losses, a 95%
+  bootstrap interval above zero, repetition within 5% and 8+ tokens/s on this CPU. Laya: per
+  decision (50+ rows, no drop, one improves). **`tempo-server models promote`**: Tempo-Core
+  versions answer only the task types they won (routes file read by the registry; the router
+  skips them elsewhere, so versions serve side by side); Laya becomes `TEMPO_LAYA_MODEL`.
+  `tempo-server models --free` still works (models is now a command group).
+- **`tempo-server train dry-run`**: no keys, no GPU: 40 built-in demo questions (a new
+  `tempo-demo` dataset, Apache-2.0, never offered by `collect`) answered by the demo models
+  (now marked Apache-2.0: Tempo's own text), prepare, both notebooks executed cell by cell on
+  the CPU (100 LoRA SFT steps and 20 DPO steps on a 40M-parameter random copy of Qwen3's
+  architecture with Qwen3's tokenizer; a small random Laya), GGUF conversion, import, compare
+  against the untuned tiny base, promote. About 4.5 minutes here. As expected, the tiny
+  Tempo-Core writes nonsense and its gate keeps the old version; the tiny Laya improves and is
+  promoted. Tested locally: the time-budget stop and resume (SFT stopped at step 14, the next
+  run resumed from checkpoint-14 and finished).
+- **Training libraries** only in the optional `tempo-server[train]` extra.
+- **CI**: new Linux job `train-dry-run` on every push (CPU PyTorch, then `.[train]`; downloads
+  cached), under 10 minutes.
+- Not tested here: the notebooks on a real Kaggle GPU (the `torchrun` two-GPU path for Laya, fp16
+  on a T4, real run times). The first real run measures them.
+- Tests: 408 pass locally (Linux, Python 3.11; the 50 sandbox tests skip here because its runtimes are not installed in this session, CI requires them), lint clean.
+
+**CI results, step 9**: manual run 43 on `main` (commit `a61ff5c`) is running; results follow in the next commit.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -498,7 +552,7 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 8 is finished.
+Nothing. Step 9 is finished.
 
 ## Blocked: needs the owner
 
@@ -506,6 +560,10 @@ Nothing. Step 8 is finished.
   release), GitHub Pages (Settings → Pages) and the two SDK packages (PyPI and npm) wait for the
   owner. The one-line installers and
   the GitHub-archive install need the repository to be public.
+
+- **The first real training run** needs the owner: real "yes" data (collect with Ollama on
+  their computer) and a free, phone-verified Kaggle account. Steps: "Your first real training
+  run" below.
 
 ## Blocked: needs key
 
@@ -533,6 +591,7 @@ server:
 | `tempo-server quota` with real limits (headers, OpenRouter `/key`) | keys | seed limits and recorded calls |
 | Local first and the used-up fallback with a real Ollama | Ollama running | scripted local model |
 | Demo re-recorded with real models | keys | recorded in demo mode |
+| `models compare` judged by real models | any key, or a local judge model | the demo judge (dry run) |
 
 Also blocked, on the owner rather than keys: publishing the Docker image, the PyPI package and
 the GitHub Pages demo (the owner said not to publish yet).
@@ -569,10 +628,27 @@ Check that a real 429 cools the model down and falls back, that `x-ratelimit-lim
 update the limits (`tempo-server models --free` shows them), and that Mistral's headers are parsed
 (their exact names were not documented on a reachable page).
 
+## Your first real training run (owner)
+
+1. Collect on your computer with a local Apache-2.0 model until `tempo-server train prepare`
+   shows about 2,000 SFT rows, 1,000 pairs and 3,000 Laya decisions with no errors (days, in the
+   background): `ollama pull qwen3:8b`, then `tempo-server collect --yes-only`.
+2. `tempo-server train prepare` → upload the zip as a private Kaggle dataset.
+3. Import `training/tempo_core.ipynb` and `training/tempo_router_judge.ipynb` into Kaggle; GPU
+   T4 x2, Internet on, add the dataset; Save & Run All.
+4. Download each output, then `tempo-server models import <zip>` (Ollama running),
+   `ollama pull qwen3:1.7b` (the first comparison's "old"), `tempo-server models compare`,
+   `tempo-server models promote`.
+5. Send back both `REPORT.md` files and the compare output: they replace the time estimates.
+
 ## Next
 
 - The owner's plan: `tempo-server collect --yes-only` on their computer with a local Apache-2.0
   model, then the first exports.
+- Step 9 follow-ups (noted, not started): GRPO with sandbox rewards (TEMPO_MODELS.md §2 stage
+  3); the probe set (`evalset.yaml`) in `models compare`; a judge that sees both answers in
+  random order; Tempo-Core on both T4s; `models promote --rollback`; Granite 3.3 2B as the second
+  family.
 - Later tasks (noted, not started):
   - A slimmer Docker image (owner's decision: 627 MB is fine for 0.1).
   - Drop the `tempo` alias before 1.0.
@@ -593,6 +669,22 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
     the runtimes pre-installed.
 
 ## Decisions for the owner
+
+Step 9:
+
+1. **Laya is promoted all or nothing** (one checkpoint serves every decision): only if no
+   decision with 50+ held-out rows drops and one improves. Keep that, or load two checkpoints
+   side by side (about 0.8 GB more memory each)?
+2. **First comparison's "old" Tempo-Core** is the untuned base (`qwen3:1.7b` from Ollama). Also
+   compare against the free APIs it would replace (costs judge and answer requests)?
+3. **Speed gate** 8 tokens/s on the computer that runs `compare` (TEMPO_MODELS.md said about 10
+   for 1.7B). Which number, and should it be measured on 4 threads exactly?
+4. **Tempo-Core on one T4** in full precision with LoRA (not QLoRA as planned): simpler, no
+   bitsandbytes. Keep, or add QLoRA and both GPUs for the 4B option later?
+5. **The dry run in CI on every push** (about 6–8 minutes of Linux minutes each). Keep, or only
+   on pull requests and manual runs?
+
+Step 8 (still open):
 
 1. **How the runtimes are installed.** `pip install tempo-server` brings Wasmtime; the Python and
    JavaScript interpreters (about 16 MB) are downloaded once by `tempo-server sandbox install` (or
