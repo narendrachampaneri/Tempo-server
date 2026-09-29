@@ -276,11 +276,38 @@ def check_port(port: int, host: str = "127.0.0.1") -> Check:
     return Check("Port", "ok", f"Port {port} is free for `tempo-server serve`.")
 
 
+def check_sandbox(engine: Engine) -> Check:
+    from tempo.sandbox import LANGUAGES, wasmtime_version
+
+    box = engine.sandbox
+    if box is None:
+        return Check(
+            "Sandbox", "info", "Off (TEMPO_SANDBOX=off): code and maths answers aren't run."
+        )
+    if wasmtime_version() is None:
+        return Check(
+            "Sandbox",
+            "warn",
+            "The wasmtime package is missing, so code and maths answers aren't run.",
+            "Reinstall tempo-server (pipx install --force tempo-server).",
+        )
+    missing = [lang for lang in LANGUAGES if not box.installed(lang)]
+    if missing:
+        return Check(
+            "Sandbox",
+            "info",
+            f"Not installed: {', '.join(missing)} (code and maths answers aren't run yet).",
+            "tempo-server sandbox install  (about 16 MB, once)",
+        )
+    return Check("Sandbox", "ok", f"Python and JavaScript ready in {box.home}.")
+
+
 async def run_checks(engine: Engine, port: int = 8000, offline: bool = False) -> list[Check]:
     checks = [check_python(), check_command(), *check_data_dir(engine), *check_keys(engine)]
     if not offline:
         checks += await check_reachable(engine)
     checks.append(await check_ollama(engine))
+    checks.append(check_sandbox(engine))
     checks.append(check_port(port))
     return checks
 

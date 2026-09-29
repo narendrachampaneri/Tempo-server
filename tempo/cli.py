@@ -947,6 +947,90 @@ def export_laya(
     err.print(f"See {out_dir}/README.md for how to load it in the notebook.", markup=False)
 
 
+sandbox_app = typer.Typer(
+    help="The WebAssembly sandbox that runs code and maths answers (docs/SANDBOX.md)."
+)
+app.add_typer(sandbox_app, name="sandbox")
+LanguageOption = Annotated[
+    str | None,
+    typer.Option("--language", "-l", help="python or javascript (default: both)."),
+]
+
+
+def _sandbox() -> Any:
+    from tempo.sandbox import Sandbox, sandbox_home
+
+    settings = Settings.from_env()
+    return Sandbox(sandbox_home(settings.data_dir)), settings
+
+
+@sandbox_app.command("install")
+def sandbox_install(language: LanguageOption = None) -> None:
+    """Download (checked by SHA-256), unpack and compile the Python and JavaScript runtimes."""
+    from tempo.sandbox import LANGUAGES, RUNTIMES, SandboxUnavailable
+
+    box, _ = _sandbox()
+    chosen = [language] if language else list(LANGUAGES)
+    for lang in chosen:
+        if lang not in RUNTIMES:
+            raise typer.BadParameter("language must be python or javascript")
+        try:
+            box.install(lang, say=lambda text: err.print(text, markup=False))
+        except (SandboxUnavailable, OSError) as exc:
+            err.print(f"Could not install the {lang} sandbox: {exc}", style="red", markup=False)
+            raise typer.Exit(1) from exc
+    err.print(f"Sandbox ready in {box.home}", markup=False)
+
+
+@sandbox_app.command("status")
+def sandbox_status() -> None:
+    """Whether the sandbox is on, which runtimes are installed, and the limits."""
+    from tempo.sandbox import RUNTIMES, wasmtime_version
+
+    box, settings = _sandbox()
+    state = "off (TEMPO_SANDBOX=off)" if settings.sandbox == "off" else "on when installed"
+    out.print(f"Sandbox: {state}; maths: {settings.sandbox_math}", markup=False)
+    out.print(
+        f"Wasmtime: {wasmtime_version() or 'not installed'}; folder: {box.home}", markup=False
+    )
+    for lang, rt in RUNTIMES.items():
+        mark = "installed" if box.installed(lang) else "not installed"
+        out.print(f"  {lang}: {rt.version} ({rt.licence}) - {mark}", markup=False)
+    out.print(
+        f"Limits: {settings.sandbox_timeout_s:g}s, {settings.sandbox_memory_mb} MB memory, "
+        f"{settings.sandbox_output_kb} KB output",
+        markup=False,
+    )
+
+
+@sandbox_app.command("run")
+def sandbox_run(
+    file: Annotated[Path, typer.Argument(help="A .py or .js file to run.", exists=True)],
+    timeout: Annotated[float, typer.Option(help="Seconds.")] = 10.0,
+) -> None:
+    """Run a file in the sandbox and show what happened (for trying it out)."""
+    from tempo.sandbox import Limits, SandboxUnavailable
+
+    box, settings = _sandbox()
+    lang = "javascript" if file.suffix in (".js", ".mjs") else "python"
+    limits = Limits(
+        timeout_s=timeout,
+        memory_mb=settings.sandbox_memory_mb,
+        output_kb=settings.sandbox_output_kb,
+    )
+    try:
+        result = box.run(lang, file.read_text(encoding="utf-8"), limits=limits)
+    except SandboxUnavailable as exc:
+        err.print(str(exc), style="red", markup=False)
+        raise typer.Exit(1) from exc
+    if result.stdout:
+        out.print(result.stdout, end="", markup=False, highlight=False)
+    if result.stderr:
+        err.print(result.stderr, end="", markup=False, highlight=False)
+    err.print(f"[{lang}: {result.summary}, {result.duration_ms} ms]", style="dim", markup=False)
+    raise typer.Exit(0 if result.ok else 1)
+
+
 laya_app = typer.Typer(help="Laya, the fast decision-maker: status and comparison with rules.")
 app.add_typer(laya_app, name="laya")
 

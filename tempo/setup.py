@@ -227,6 +227,8 @@ class Wizard:
                 )
             else:
                 self.keyed(provider)
+        if not only or "sandbox" in only:
+            self.sandbox()
         self.finish()
 
     def ollama(self, provider: ProviderInfo) -> None:
@@ -308,6 +310,33 @@ class Wizard:
             self.say(f"Key from {provider.key_env} ({fingerprint(env_key)}).", style="green")
         else:
             self.say("No key yet.")
+
+    def sandbox(self) -> None:
+        """Offer the sandbox that runs code and maths answers (docs/SANDBOX.md)."""
+        from tempo.sandbox import LANGUAGES, SandboxUnavailable
+
+        box = self.engine.sandbox
+        self.say()
+        self.say("── Code and maths sandbox ──", style="bold")
+        if box is None:
+            self.say("Off (TEMPO_SANDBOX=off).")
+            return
+        missing = [lang for lang in LANGUAGES if not box.installed(lang)]
+        if not missing:
+            self.say("Installed: code answers and maths results are checked by running them.")
+            return
+        self.say(
+            "Runs code answers (and their tests) and computes maths answers in WebAssembly, "
+            "with no network and no access to your files. About 16 MB, downloaded once."
+        )
+        if not self.interactive or not typer.confirm("Install it now?", default=True):
+            self.say("Not installed; later: tempo-server sandbox install")
+            return
+        for lang in missing:
+            try:
+                box.install(lang, say=self.say)
+            except (SandboxUnavailable, OSError) as exc:
+                self.say(f"Could not install the {lang} sandbox: {exc}", style="red")
 
     def enable(self, provider: ProviderInfo) -> None:
         if provider.enabled:
