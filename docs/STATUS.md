@@ -309,6 +309,17 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   project URLs, `twine check --strict` in CI.
 - Tests: 361 pass locally (Linux, Python 3.11 and 3.13), lint clean.
 
+**CI results** (manual run 11, commit `8efeee1`, 2026-09-29; all green):
+
+| System | Tests | Install test |
+|---|---|---|
+| Linux (ubuntu-latest) | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | install.sh (uv) ✓, install.sh (pipx) ✓, pipx ✓, uv ✓ |
+| Windows (windows-latest) | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | install.ps1 (installs uv) ✓, install.ps1 (pipx) ✓, pipx ✓, uv ✓ |
+| macOS (macos-latest) | 3.13 ✓ | install.sh (uv) ✓, install.sh (pipx) ✓, pipx ✓, uv ✓ |
+
+Lint and the package build (`twine check --strict`) pass. The first Windows run failed (56
+tests and `install.ps1`'s setup step) on the missing time-zone database; `tzdata` fixed it.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
