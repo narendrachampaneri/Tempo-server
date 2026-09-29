@@ -333,6 +333,14 @@ class Pipeline:
                 self._log(error="requested model unavailable")
                 return
 
+        for provider, gone in (await e.check_lists(o.access)).items():
+            label = e.registry.providers[provider].label
+            self.emit(
+                "note",
+                message=f"{label}'s model list no longer has {', '.join(gone[:3])}"
+                + (f" and {len(gone) - 3} more" if len(gone) > 3 else "")
+                + ": skipped.",
+            )
         route = self._rank("draft", fit=False)
         self._note_quota_fallback(route)
         if not route.candidates:
@@ -1362,6 +1370,13 @@ class Pipeline:
                     model.structured_outputs = False
                     log.info("%s rejected response_format; not sending it again", model.id)
                 e.health.record_failure(model, err.kind, err.retry_after)
+                if err.kind == "not_found":
+                    e.mark_not_offered(model)
+                    self.emit(
+                        "note",
+                        message=f"{model.id} is not offered by its provider (model not found): "
+                        "skipped from now on, until its model list shows it again.",
+                    )
                 self._usage(model, key_id, messages, "", meta)
                 self._log_call(stage, job, model, "error", err.kind, started, first, messages, "")
                 self.emit(

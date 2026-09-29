@@ -29,6 +29,37 @@ def _private_home(tmp_path_factory, monkeypatch):
     return home
 
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+
+
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """The suite runs offline: an HTTP request to any host but this computer fails at once, so
+    a test that would quietly reach a real provider (with a placeholder key) shows up instead.
+    Fake providers use httpx.MockTransport, which this doesn't touch."""
+    import httpx
+
+    def guard(original):
+        def check(self, request):
+            if request.url.host not in LOCAL_HOSTS:
+                raise httpx.ConnectError(f"tests run offline: {request.url.host}", request=request)
+            return original(self, request)
+
+        return check
+
+    async_original = httpx.AsyncHTTPTransport.handle_async_request
+
+    async def async_check(self, request):
+        if request.url.host not in LOCAL_HOSTS:
+            raise httpx.ConnectError(f"tests run offline: {request.url.host}", request=request)
+        return await async_original(self, request)
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", async_check)
+    monkeypatch.setattr(
+        httpx.HTTPTransport, "handle_request", guard(httpx.HTTPTransport.handle_request)
+    )
+
+
 ENV_ALL = {"ALPHA_KEY": "a", "BETA_KEY": "b", "LOCAL_BASE": "http://local"}
 
 

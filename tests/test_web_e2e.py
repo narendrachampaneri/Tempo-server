@@ -189,11 +189,15 @@ def voice_site():
 
     def provider(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
+        if request.url.path.endswith("/models"):  # Groq's model list, read before routing
+            ids = ["whisper-large-v3", "orpheus"]
+            return httpx.Response(200, json={"data": [{"id": i} for i in ids]})
         if request.url.path.endswith("transcriptions"):
             return httpx.Response(200, json={"text": "what is a table"})
         return httpx.Response(200, content=WAV)
 
     app.state.speech_transport = httpx.MockTransport(provider)
+    engine._http_transport = httpx.MockTransport(provider)
     with running(app) as url:
         site = Site(url, engine, backend)
         site.calls = calls

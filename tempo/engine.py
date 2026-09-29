@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from tempo.pipeline import Pipeline
 
 DEFAULT_SYSTEM_PROMPT = TEMPO_SYSTEM
+LIST_MAX_AGE_S = 24 * 3600  # a provider's model list is re-read before routing after this long
+LIST_CHECK_TIMEOUT_S = 6.0  # at most this long before the first question waits for lists
 # One clear line when no model can be used at all (instead of counting every model skipped).
 NO_MODEL_LINE = "No model yet: run `tempo-server setup` to add a free key, or start Ollama."
 log = logging.getLogger(__name__)
@@ -188,7 +190,10 @@ class Engine:
         self._classifier_loading: Any = None
         self._warm_up = warm_up
         self._clock = clock
-        self._http_transport: Any = None  # tests replace it with a fake Ollama
+        self._http_transport: Any = None  # tests replace it with a fake Ollama or provider
+        # When each provider's model list was last read (this run, or the saved catalog).
+        self._lists_read: dict[str, float] = {}
+        self._lists_tried: set[str] = set()
         self.warming: asyncio.Task[str | None] | None = None  # the local model warm-up
 
     @classmethod
@@ -222,7 +227,10 @@ class Engine:
         does not sync.
         """
         if self.settings.data_dir is not None:
-            load_catalog(self.registry, self.settings.data_dir / CATALOG_FILE)
+            saved = load_catalog(self.registry, self.settings.data_dir / CATALOG_FILE)
+            for provider, status in ((saved or {}).get("status") or {}).items():
+                if isinstance(status, dict) and status.get("ok"):
+                    self._lists_read[provider] = float(status.get("checked_at") or 0)
         await self.registry.discover_ollama()
         self.speed.load(self.store)
         loop = asyncio.get_running_loop()
@@ -342,6 +350,65 @@ class Engine:
             self.save_catalog(status)
         except Exception:  # a list that can't be read must never fail adding a key
             log.exception("model list refresh for %s failed", provider)
+
+    async def check_lists(self, access: Access) -> dict[str, list[str]]:
+        """Before routing: read the model list of each provider this caller can use whose list
+        hasn't been read in the last LIST_MAX_AGE_S (once per run at most, a few seconds at
+        most), so models.yaml entries the provider no longer offers are skipped without a
+        wasted attempt (laptop test: a Gemini 2.5 model gave "model not found"). Returns the
+        models found missing, per provider."""
+        from tempo.sync import MODEL_LISTS
+
+        now = time.time()
+        due = {
+            p.id
+            for p in self.registry.providers.values()
+            if p.id != "mock"
+            and not p.local
+            and (p.id in MODEL_LISTS or p.openai_base)
+            and p.id not in self._lists_tried
+            and now - self._lists_read.get(p.id, 0.0) > LIST_MAX_AGE_S
+            and self.registry.is_configured(p.id, access)
+        }
+        if not due:
+            return {}
+        self._lists_tried |= due
+        if self.sync is None:
+            self.sync = RegistrySync(self.registry, self.health)
+        if self._http_transport is not None:
+            self.sync.transport = self._http_transport
+        keys = {}
+        for provider in due:
+            key = access.user_keys.get(provider) or self.registry.credentials(provider, access).get(
+                "api_key"
+            )
+            if key:
+                keys[provider] = key
+        try:
+            status = await asyncio.wait_for(self.sync.run(keys, only=due), LIST_CHECK_TIMEOUT_S)
+        except TimeoutError:
+            log.info(
+                "Model lists not read within %ss; routing with what is known", LIST_CHECK_TIMEOUT_S
+            )
+            return {}
+        except Exception:
+            log.exception("reading model lists failed")
+            return {}
+        missing = {}
+        for provider in due:
+            result = status.get(provider)
+            if result is not None and result.ok:
+                self._lists_read[provider] = result.checked_at
+                if result.removed:
+                    missing[provider] = list(result.removed)
+        self.save_catalog(status)
+        return missing
+
+    def mark_not_offered(self, model: ModelInfo) -> None:
+        """The provider said "model not found": skip this model from now on (saved with the
+        catalog) until its model list shows it again."""
+        model.listed = False
+        self.save_catalog(self.sync.status if self.sync else {})
 
     def save_catalog(self, status: dict[str, Any]) -> None:
         if self.settings.data_dir is not None:
