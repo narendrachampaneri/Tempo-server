@@ -157,3 +157,18 @@ async def test_stdio_command(tmp_path):
         assert {t.name for t in (await c.list_tools()).tools} == TOOLS
         out = data(await c.call_tool("ask", {"question": "What is 2+2?"}))
         assert out["answer"] and out["model"].startswith("mock/")
+
+
+def test_every_config_snippet_in_the_docs_is_valid_json():
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).parent.parent / "docs" / "MCP.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)```", text, re.S)
+    assert len(blocks) >= 8
+    for block in blocks:
+        config = json.loads(block)
+        servers = config.get("mcpServers") or config.get("servers")
+        entry = servers["tempo-server"]
+        assert entry.get("args") == ["mcp"] or entry.get("url", "").endswith("/mcp")
+        assert "Bearer placeholder" not in block and "gsk_" not in block
