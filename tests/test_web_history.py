@@ -148,6 +148,17 @@ def test_web_files_are_served_with_cache_rules():
     assert client.get("/static/../pipeline.py").status_code in (404, 400)
 
 
+def test_cache_rule_works_with_windows_paths():
+    """Starlette passes paths with the system's separators; on Windows fonts and libraries
+    were served with no-cache (found by the Windows CI run of step 11)."""
+    from tempo.api import web_cache_control
+
+    for path in ("fonts/inter.woff2", "fonts\\inter.woff2", "vendor\\katex\\katex.min.js"):
+        assert "max-age" in web_cache_control(path), path
+    for path in ("js/app.js", "js\\app.js", "css\\app.css", "index.html", "fontsx/a.css"):
+        assert web_cache_control(path) == "no-cache", path
+
+
 def test_no_external_urls_in_the_web_app():
     """Everything is bundled: no CDN, no trackers (checked over the app's own code)."""
     import re

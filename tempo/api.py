@@ -179,14 +179,20 @@ def _pieces(text: str, size: int = 120) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)] or [""]
 
 
+def web_cache_control(path: str) -> str:
+    """Code and styles are re-checked on every load (cheap: ETag); fonts and bundled libraries
+    never change under a URL within a version, so they are cached. ``path`` uses the system's
+    separators (Starlette gives ``fonts\\x.woff2`` on Windows)."""
+    top = path.replace("\\", "/").split("/", 1)[0]
+    return "public, max-age=604800" if top in ("fonts", "vendor") else "no-cache"
+
+
 class _WebFiles(StaticFiles):
-    """The web app's own files. Code and styles are re-checked on every load (cheap: ETag);
-    fonts and bundled libraries never change under a URL within a version, so they are cached."""
+    """The web app's own files, with the cache rule above."""
 
     async def get_response(self, path: str, scope: Any) -> Response:
         response = await super().get_response(path, scope)
-        heavy = path.startswith(("fonts/", "vendor/"))
-        response.headers["Cache-Control"] = "public, max-age=604800" if heavy else "no-cache"
+        response.headers["Cache-Control"] = web_cache_control(path)
         return response
 
 
