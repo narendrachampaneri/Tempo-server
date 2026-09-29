@@ -20,6 +20,7 @@ reason; nothing it did survives the run.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -265,6 +266,7 @@ class Sandbox:
         import wasmtime
 
         engine = self._engine()  # one engine per run: interrupting it touches no other run
+        closing: list[Any] = [engine]  # closed before the folders are deleted (Windows)
         try:
             module = wasmtime.Module.deserialize_file(engine, str(compiled))
         except wasmtime.WasmtimeError:
@@ -273,6 +275,7 @@ class Sandbox:
             compiled.unlink(missing_ok=True)
             compiled = self._compiled(language)
             module = wasmtime.Module.deserialize_file(engine, str(compiled))
+        closing.append(module)
         work = Path(tempfile.mkdtemp(prefix="tempo-sandbox-"))
         io = Path(tempfile.mkdtemp(prefix="tempo-sandbox-io-"))  # not visible to the code
         stopped: list[str] = []
@@ -297,6 +300,7 @@ class Sandbox:
             wasi.stderr_file = str(err_path)
 
             store = wasmtime.Store(engine)
+            closing.append(store)
             store.set_limits(memory_size=limits.memory_mb * 1024 * 1024)
             store.set_wasi(wasi)
             store.set_epoch_deadline(1)
@@ -322,6 +326,7 @@ class Sandbox:
             guard = threading.Thread(target=watchdog, name="tempo-sandbox-watchdog", daemon=True)
             guard.start()
             linker = wasmtime.Linker(engine)
+            closing.append(linker)
             linker.define_wasi()
             exit_code: int | None = None
             try:
@@ -354,8 +359,23 @@ class Sandbox:
                 truncated=t1 or t2,
             )
         finally:
-            shutil.rmtree(work, ignore_errors=True)
-            shutil.rmtree(io, ignore_errors=True)
+            # Wasmtime holds the folder and output files open until its objects are closed, and
+            # Windows can't delete open files.
+            for obj in reversed(closing):
+                with contextlib.suppress(Exception):
+                    obj.close()
+            _remove(work)
+            _remove(io)
+
+
+def _remove(folder: Path) -> None:
+    """Delete a run's folder; on Windows a handle may take a moment to be released."""
+    for attempt in range(20):
+        shutil.rmtree(folder, ignore_errors=True)
+        if not folder.exists():
+            return
+        time.sleep(0.05 * (attempt + 1))
+    log.warning("could not delete the sandbox folder %s", folder)
 
 
 def _size(path: Path) -> int:
