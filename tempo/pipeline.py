@@ -1240,6 +1240,15 @@ class Pipeline:
                         streamed = True
                         self._shown = True
                         self.emit("answer_delta", stage=stage, model=model.id, delta=chunk)
+                if (
+                    meta.get("finish_reason") == "length"
+                    and text.strip()
+                    and job in ANSWER_JOBS | {"parts"}
+                    and not native_calls
+                ):
+                    text, meta["finish_reason"] = await self._continue(
+                        stage, job, slot, model, call_messages, text, live, slot_id
+                    )
                 if not text.strip() and not native_calls:
                     raise ProviderError("empty", "The model returned no answer text.")
                 outcome = self._validate(job, text, native_calls)
@@ -1301,6 +1310,107 @@ class Pipeline:
                 tool_calls=outcome.tool_calls,
             )
         return None
+
+    async def _continue(
+        self,
+        stage: int,
+        job: str,
+        slot: list[Candidate],
+        model: ModelInfo,
+        messages: list[dict[str, Any]],
+        text: str,
+        live: bool,
+        slot_id: int,
+    ) -> tuple[str, str | None]:
+        """The model stopped at its output limit (finish_reason "length"): ask it, or the next
+        model in the slot, for the rest, and join the pieces. Up to MAX_CONTINUATIONS rounds;
+        the answer is arriving, so the time budget doesn't stop it (the grace period does)."""
+        e, o = self.e, self.o
+        finish: str | None = "length"
+        order = [model] + [c.model for c in slot if c.model.id != model.id]
+        rounds = 0
+        while finish == "length" and rounds < MAX_CONTINUATIONS:
+            rounds += 1
+            previous = model.id
+            for candidate in order:
+                is_local = e.registry.providers[candidate.provider].local
+                key_id = o.access.key_id(candidate.provider)
+                if not is_local and self.requests_left() <= 0:
+                    continue
+                if e.health.unavailable_reason(candidate) or (
+                    e.quota and e.quota.blocked_reason(candidate, key_id)
+                ):
+                    continue
+                self.emit("continue", stage=stage, model=previous, to=candidate.id, round=rounds)
+                self.calls += 1
+                if not is_local:
+                    self.requests += 1
+                meta: dict[str, Any] = {}
+                started = self.clock()
+                first: float | None = None
+                more = ""
+                pending = ""  # the start of the new piece, until any repeated text is removed
+                cont = prompts.continue_messages(messages, text)
+                try:
+                    stream = e.backend_for(candidate).stream(
+                        candidate,
+                        cont,
+                        temperature=o.temperature,
+                        max_tokens=o.max_tokens,
+                        access=o.access,
+                        meta=meta,
+                        purpose="continue",
+                    )
+                    async for kind, chunk in stream:
+                        if kind != "answer":
+                            continue
+                        if first is None:
+                            first = self.clock()
+                        if pending is not None:
+                            pending += chunk
+                            if len(pending) < OVERLAP_WINDOW:
+                                continue
+                            chunk, pending = _strip_overlap(text + more, pending), None
+                        more += chunk
+                        self._partial[(stage, slot_id)] = (model.id, text + more)
+                        if chunk and live and self._claim_live(stage, slot_id):
+                            self.emit("answer_delta", stage=stage, model=candidate.id, delta=chunk)
+                    if pending:
+                        chunk = _strip_overlap(text + more, pending)
+                        more += chunk
+                        if chunk and live and self._claim_live(stage, slot_id):
+                            self.emit("answer_delta", stage=stage, model=candidate.id, delta=chunk)
+                    if not more.strip():
+                        raise ProviderError("empty", "The model returned nothing to add.")
+                except ProviderError as err:
+                    e.health.record_failure(candidate, err.kind, err.retry_after)
+                    self._usage(candidate, key_id, cont, "", meta)
+                    self._log_call(
+                        stage, "continue", candidate, "error", err.kind, started, first, cont, ""
+                    )
+                    self.emit(
+                        "call_error",
+                        stage=stage,
+                        model=candidate.id,
+                        kind=err.kind,
+                        message=err.message,
+                    )
+                    continue
+                e.health.record_success(candidate)
+                self._usage(candidate, key_id, cont, more, meta)
+                self._log_call(stage, "continue", candidate, "ok", None, started, first, cont, more)
+                text += more
+                finish = meta.get("finish_reason")
+                model = candidate
+                break
+            else:
+                self.emit(
+                    "note",
+                    message="The answer stopped at the model's output limit and no model could "
+                    "continue it: it is shown as it is.",
+                )
+                break
+        return text, finish
 
     def _usage(
         self,
@@ -1509,6 +1619,18 @@ class _NoAnswer(Exception):
 
 
 ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
+MAX_CONTINUATIONS = 3  # rounds of "continue where you stopped" after an output-limit stop
+OVERLAP_WINDOW = 200  # characters of a continuation checked for text it repeated
+
+
+def _strip_overlap(before: str, piece: str) -> str:
+    """A continuation often starts by repeating the last words it saw: drop that part."""
+    for size in range(min(len(before), len(piece), OVERLAP_WINDOW), 7, -1):
+        if before.endswith(piece[:size]):
+            return piece[size:]
+    return piece
+
+
 _REJECTED_FORMAT = re.compile(
     r"response_format|json_schema|structured output|schema", re.IGNORECASE
 )

@@ -134,6 +134,10 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         if str(d.get("reason", "")).startswith("replaced"):
             return f"Replacing the shown answer with stage {d['stage']}"
         return "Discarding the partial answer"
+    if kind == "continue":
+        same = d.get("to") == d.get("model")
+        who = "continuing" if same else f"continuing with {d.get('to')}"
+        return f"✂ {d.get('model')} stopped at its output limit · {who}"
     if kind == "fallback":
         return f"Falling back → {d['to']}"
     if kind == "call_end":

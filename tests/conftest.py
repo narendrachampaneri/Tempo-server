@@ -109,6 +109,11 @@ def sleep(seconds: float) -> tuple[str, float]:
     return ("sleep", seconds)
 
 
+def finish(reason: str) -> tuple[str, str]:
+    """Script item: the provider's finish_reason for this reply (e.g. "length")."""
+    return ("finish", reason)
+
+
 def judge_reply(scores: Sequence[float] | Callable[[list[str]], list[float]]):
     """Script for a judge: grades every candidate in the prompt."""
 
@@ -192,6 +197,10 @@ class ScriptedBackend:
                     raise item
                 if item[0] == "sleep":
                     await asyncio.sleep(item[1])
+                    continue
+                if item[0] == "finish":
+                    if kwargs.get("meta") is not None:
+                        kwargs["meta"]["finish_reason"] = item[1]
                     continue
                 yield item
         finally:

@@ -3,7 +3,7 @@ multi-part jobs, and the stage / time / free-quota budgets."""
 
 import json
 
-from conftest import ENV_ALL, judge_reply, make_engine, sleep, user
+from conftest import ENV_ALL, finish, judge_reply, make_engine, sleep, user
 
 from tempo.providers import ProviderError
 
@@ -177,6 +177,66 @@ async def test_an_answer_past_the_grace_period_keeps_what_arrived():
     assert result.error is None and result.text.startswith("Kept text")
     notes = [e.data["message"] for e in events_of(result, "note")]
     assert any("grace period" in n for n in notes)
+
+
+LONG = "Here is the full page you asked for, section by section: " + "header, " * 5
+
+
+async def test_an_answer_cut_at_the_output_limit_is_continued():
+    scripts = {
+        "*:draft": [("answer", LONG), finish("length")],
+        "*:continue": [("answer", "body and footer. Done."), finish("stop")],
+    }
+    engine, backend = make_engine(scripts, judge_score=9)
+    result = await engine.complete(user("hi"))
+    assert result.text == LONG + "body and footer. Done."
+    cont = events_of(result, "continue")
+    assert len(cont) == 1 and "stopped at its output limit" in cont[0].text
+    # the continuation streamed into the same answer
+    streamed = "".join(e.data["delta"] for e in events_of(result, "answer_delta"))
+    assert streamed == result.text
+    ask = backend.calls[[p for _, _, p in backend.calls].index("continue")][1]
+    assert ask[-2] == {"role": "assistant", "content": LONG}
+    assert "Continue exactly where it stopped" in ask[-1]["content"]
+    check = events_of(result, "check")[0]
+    assert "cut off at the length limit" not in str(check.data["results"])
+
+
+async def test_repeated_text_at_the_start_of_a_continuation_is_dropped():
+    scripts = {
+        "*:draft": [("answer", LONG), finish("length")],
+        "*:continue": [("answer", "header, header, body."), finish("stop")],
+    }
+    engine, _ = make_engine(scripts, judge_score=9)
+    result = await engine.complete(user("hi"))
+    assert result.text == LONG + "body."
+
+
+async def test_another_model_continues_when_the_first_cannot():
+    scripts = {
+        "beta/mid": [("answer", LONG), finish("length")],
+        "beta/mid:continue": [ProviderError("rate_limit", "slow down")],
+        "*:continue": [("answer", "the rest."), finish("stop")],
+    }
+    engine, _ = make_engine(scripts, judge_score=9)
+    result = await engine.complete(user("hi"))
+    assert result.text == LONG + "the rest."
+    targets = [e.data["to"] for e in events_of(result, "continue")]
+    assert targets[0] == "beta/mid" and targets[1] != "beta/mid"
+    assert "continuing with" in events_of(result, "continue")[1].text
+
+
+async def test_continuation_rounds_are_limited_and_counted_as_requests():
+    rounds = iter(range(1, 10))
+
+    def more(_messages):
+        return [("answer", f"piece number {next(rounds)} keeps going. "), finish("length")]
+
+    scripts = {"*:draft": [("answer", LONG), finish("length")], "*:continue": more}
+    engine, backend = make_engine(scripts, env={"ALPHA_KEY": "a", "BETA_KEY": "b"})
+    result = await engine.complete(user("hi"), engine.options(max_stages=1))
+    assert len(backend.called_for("continue")) == 3  # MAX_CONTINUATIONS
+    assert result.requests == 4  # the draft and three continuations
 
 
 async def test_quota_budget_limits_parallel_drafts_and_skips_the_judge():

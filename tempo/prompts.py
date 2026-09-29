@@ -61,6 +61,22 @@ COMBINE_PARTS_SYSTEM = (
 )
 
 
+CONTINUE_PROMPT = (
+    "Your reply above was cut off by the output limit. Continue exactly where it stopped: no "
+    "repetition, no preamble, no summary of what came before. If it stopped inside a code block "
+    "or a sentence, carry on inside it."
+)
+
+
+def continue_messages(messages: Sequence[Message], so_far: str) -> list[Message]:
+    """Ask for the rest of an answer that stopped at the model's output limit."""
+    return [
+        *messages,
+        {"role": "assistant", "content": so_far},
+        {"role": "user", "content": CONTINUE_PROMPT},
+    ]
+
+
 def last_user_text(messages: Sequence[Message]) -> str:
     for message in reversed(messages):
         if message.get("role") == "user":

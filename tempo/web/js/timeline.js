@@ -142,6 +142,7 @@ export class Timeline {
       }
       case "call_end": this.setChip(stageKey(), ev.model, "ok", ev.ms); break;
       case "call_error": { const n = stageKey(); this.setChip(n, ev.model, "err"); this.note(n, ev.text, "bad"); break; }
+      case "continue": { const n = stageKey(); this.note(n, ev.text, "warn"); this.setChip(n, ev.to, ""); break; }
       case "fallback": { const n = stageKey(); this.note(n, ev.text, "warn"); if (ev.to) this.setChip(n, ev.to, "pending"); break; }
       case "check": this.note(stageKey(), ev.text, ev.passed ? "good" : "warn"); break;
       case "sandbox": this.note(stageKey(), ev.text, ev.status === "passed" ? "good" : ev.status === "failed" ? "bad" : ""); break;
@@ -150,7 +151,10 @@ export class Timeline {
       case "stage_end": {
         const n = this.nodes.get("stage-" + ev.stage);
         if (n) {
-          for (const [m, c] of n.chips) if (c.classList.contains("pending")) { c.remove(); n.chips.delete(m); }
+          for (const [m, c] of n.chips) {
+            if (c.classList.contains("pending")) { c.remove(); n.chips.delete(m); }
+            else if (c.className.trim() === "mchip") c.className = "mchip ok";  // a continuation that finished
+          }
           this.settle(n);
         }
         if (this.current === n) this.current = null;
