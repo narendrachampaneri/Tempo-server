@@ -255,3 +255,45 @@ async def test_the_local_model_is_warmed_up_at_server_start():
 async def test_no_local_model_means_no_warm_up():
     engine, _ = make_engine()
     assert await engine.warm_local_model() is None  # no Ollama provider configured
+
+
+# Laya's own message (laya/agent.py) for the stock English checkpoint, as seen on the laptop.
+STOCK_WARNING = (
+    "laya: this checkpoint ships invalid temperatures or values outside [0.5, 5]; using "
+    "choice:11+=0.10058280825614929 -> 0.5. Treat confidence from the affected entries as "
+    "uncalibrated."
+)
+
+
+def test_the_stock_checkpoints_temperature_warning_is_explained_not_shouted():
+    note = laya_runtime.explain_temperature_warning(STOCK_WARNING)
+    assert note.startswith("Laya's checkpoint ships a temperature below Laya's own minimum")
+    assert "choice:11+=0.10" in note and "never asks a choice with 11 or more options" in note
+    # an entry Tempo does use stays a real warning
+    used = STOCK_WARNING.replace("choice:11+=0.10058280825614929", "choice:6-10=0.2")
+    assert laya_runtime.explain_temperature_warning(used) is None
+    assert laya_runtime.explain_temperature_warning("something else") is None
+
+
+def test_agent_warnings_other_than_the_known_one_still_reach_the_user(caplog):
+    import logging
+    import warnings
+
+    def make():
+        warnings.warn(STOCK_WARNING, RuntimeWarning, stacklevel=1)
+        warnings.warn("laya: something new", RuntimeWarning, stacklevel=1)
+        return "agent"
+
+    with caplog.at_level(logging.INFO, logger="tempo.laya_runtime"):
+        with pytest.warns(RuntimeWarning, match="something new") as seen:
+            assert laya_runtime._agent(make) == "agent"
+    assert all("invalid temperatures" not in str(w.message) for w in seen)
+    assert "never asks a choice with 11 or more options" in caplog.text
+
+
+def test_tempos_own_fine_tunes_stay_within_layas_temperature_range():
+    from tempo.trainkit import LAYA_TEMP_MAX, LAYA_TEMP_MIN, laya_temperature
+
+    assert (LAYA_TEMP_MIN, LAYA_TEMP_MAX) == (0.5, 5.0)
+    assert laya_temperature(0.1006) == 0.5  # what our fit could write before (0.1 to 10)
+    assert laya_temperature(9.0) == 5.0 and laya_temperature(1.3) == 1.3

@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import platform
+import re
 import sys
 import time
 from collections.abc import Callable
@@ -146,6 +147,47 @@ def checkpoint_dir(
         announce(message)
     root = Path(snapshot_download(repo, allow_patterns=patterns))
     return root / sub if sub else root
+
+
+# Temperature buckets (question type : option count) Tempo asks. Choices have at most 10
+# options (laya_decider.MAX_SHORTLIST; task type has 8), so the "11+" buckets are never used.
+UNUSED_BUCKET_SIZES = ("11+",)
+_REJECTED = re.compile(r"([a-z]+:[0-9+\-]+)=([^\s,]+) -> ([0-9.eE+-]+)")
+
+
+def explain_temperature_warning(message: str) -> str | None:
+    """Laya warns when a checkpoint ships temperatures outside its own range. The stock
+    English checkpoint ships choice:11+=0.10 (Laya's issue, not Tempo's): Tempo never asks a
+    choice with 11 or more options, so it changes nothing here. Returns a plain note for that
+    case, None when an entry Tempo does use is affected."""
+    if "invalid temperatures" not in message:
+        return None
+    rejected = _REJECTED.findall(message)
+    if not rejected or not all(b.split(":")[1] in UNUSED_BUCKET_SIZES for b, _, _ in rejected):
+        return None
+    shown = ", ".join(f"{b}={float(raw):.2f}" for b, raw, _ in rejected)
+    return (
+        f"Laya's checkpoint ships a temperature below Laya's own minimum ({shown}; Laya uses "
+        "0.5). Tempo never asks a choice with 11 or more options, so this doesn't affect it."
+    )
+
+
+def _agent(make: Callable[[], Any]) -> Any:
+    """Build a Laya agent, turning its known-harmless temperature warning into a log line."""
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        agent = make()
+    for item in caught:
+        note = explain_temperature_warning(str(item.message))
+        if note:
+            log.info(note)
+        else:
+            warnings.warn_explicit(
+                item.message, item.category, item.filename, item.lineno, source=item.source
+            )
+    return agent
 
 
 def machine_id() -> str:
@@ -347,12 +389,12 @@ def load(
         from laya.agent import Agent
 
         torch.set_num_threads(threads)
-        return TorchRunner(Agent(str(model_dir), device=device or "cpu"))
+        return TorchRunner(_agent(lambda: Agent(str(model_dir), device=device or "cpu")))
     import onnxruntime as ort
     from laya.onnx_agent import ONNXAgent
 
     path = onnx_file(model_dir, cache_dir, int8=backend == "onnx-int8")
-    agent = ONNXAgent(str(model_dir), onnx_path=str(path))
+    agent = _agent(lambda: ONNXAgent(str(model_dir), onnx_path=str(path)))
     options = ort.SessionOptions()
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     options.intra_op_num_threads = threads

@@ -883,6 +883,18 @@ def _collate(items: list[dict[str, Any]], pad_id: int) -> dict[str, Any]:
     }
 
 
+# Laya refuses temperatures outside this range and warns ("this checkpoint ships invalid
+# temperatures or values outside [0.5, 5]"): below 1 a temperature sharpens the logits, and
+# far below it misstates confidence. laya/common.py TEMP_MIN / TEMP_MAX (checked 2026-09-29:
+# https://github.com/NandhaKishorM/laya/blob/main/laya/common.py).
+LAYA_TEMP_MIN, LAYA_TEMP_MAX = 0.5, 5.0
+
+
+def laya_temperature(value: float) -> float:
+    """A fitted temperature Laya will accept as it is."""
+    return min(LAYA_TEMP_MAX, max(LAYA_TEMP_MIN, float(value)))
+
+
 def _fit_temperature(selected: list[tuple[Any, list[float]]]) -> float:
     import torch
 
@@ -904,7 +916,8 @@ def _fit_temperature(selected: list[tuple[Any, list[float]]]) -> float:
         return loss
 
     opt.step(closure)
-    return float(torch.clamp(log_t.exp(), 0.1, 10.0).item())
+    # Within Laya's own range, so the checkpoint loads without "invalid temperatures".
+    return laya_temperature(log_t.exp().item())
 
 
 def laya_train(model_dir: Path, out: Path, items_path: Path, cfg: LayaConfig) -> dict[str, Any]:
