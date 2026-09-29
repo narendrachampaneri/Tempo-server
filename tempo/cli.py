@@ -1289,6 +1289,98 @@ def keys_remove(
     err.print(f"Removed the {provider} key.", markup=False)
 
 
+train_app = typer.Typer(
+    help="Train Tempo's own models on Kaggle's free GPUs: prepare the upload, dry-run the loop "
+    "(docs/TRAINING.md)."
+)
+app.add_typer(train_app, name="train")
+
+
+def _print_findings(findings: list[Any]) -> None:
+    styles = {"error": "red", "mix": "yellow", "warning": "yellow"}
+    for finding in findings:
+        label = {"error": "error", "mix": "data mix", "warning": "note"}[finding.level]
+        err.print(
+            f"  {label}: {finding.text}", style=styles[finding.level], markup=False, soft_wrap=True
+        )
+
+
+@train_app.command("prepare")
+def train_prepare(
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out", "-o", help="Pack folder (default: <data dir>/training/<date>)."),
+    ] = None,
+    test_percent: Annotated[
+        int, typer.Option("--test-percent", help="Held-out share, the same for every export.")
+    ] = 10,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Pack even when the data mix is off (recorded in the pack). Licence problems "
+            "always stop it.",
+        ),
+    ] = False,
+) -> None:
+    """Run the exports, check the data mix and licences, pack one zip for Kaggle, and print
+    the exact upload steps."""
+    from tempo import training
+
+    engine = _engine()
+    out_dir = out_dir or training.default_out(engine)
+    report = training.prepare(
+        engine,
+        out_dir,
+        test_percent=test_percent,
+        users=_training_users(engine),
+        unverified=_terms_gate(engine),
+        force=force,
+        include_mcp=engine.settings.train_on_mcp,
+    )
+    counts = report.manifest["counts"]
+    err.print(f"Exported to {report.folder}/", markup=False, soft_wrap=True)
+    for kind, split in counts.items():
+        err.print(
+            f"  {kind}: {split['train']} train, {split['test']} held out",
+            markup=False,
+            soft_wrap=True,
+        )
+    mix = report.manifest["mix"]
+    err.print(
+        f"  data mix: {mix['public_share']:.0%} public or human (min "
+        f"{mix['min_public_share']:.0%}), {mix['self_share']:.0%} from an earlier Tempo-Core "
+        f"(max {mix['max_self_share']:.0%})",
+        markup=False,
+        soft_wrap=True,
+    )
+    for kind, info in report.manifest["licences"].items():
+        sources = ", ".join(f"{n} {s['license']}" for n, s in info["sources"].items())
+        if sources:
+            err.print(f"  {kind} licences: {sources}", markup=False, soft_wrap=True)
+    _print_findings(report.findings)
+    if report.zip_path is None:
+        why = "licence or data problems" if report.errors else "the data mix (--force to pack)"
+        err.print(f"Not packed because of {why}.", style="red", markup=False, soft_wrap=True)
+        raise typer.Exit(1)
+    size = report.zip_path.stat().st_size / 1e6
+    err.print(f"Packed {report.zip_path} ({size:.1f} MB)\n", markup=False, soft_wrap=True)
+    print(training.upload_steps(report))
+
+
+@train_app.command("notebooks")
+def train_notebooks(
+    out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")] = Path(
+        "training"
+    ),
+) -> None:
+    """Write the two Kaggle notebooks (tempo_core.ipynb, tempo_router_judge.ipynb)."""
+    from tempo.notebooks import write_all
+
+    for path in write_all(out_dir):
+        err.print(f"Wrote {path}", markup=False, soft_wrap=True)
+
+
 @app.command(name="mcp")
 def mcp_command(
     http: Annotated[
