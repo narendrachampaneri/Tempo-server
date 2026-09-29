@@ -214,6 +214,7 @@ def make_engine(
 ) -> tuple[Engine, ScriptedBackend]:
     backend = ScriptedBackend(scripts, judge_score=judge_score)
     settings.setdefault("local_first", "off")  # tests of local first turn it on themselves
+    settings.setdefault("sandbox", "off")  # sandbox tests turn it on (tests/test_sandbox*.py)
     engine = Engine(
         make_registry(env),
         lambda model: backend,

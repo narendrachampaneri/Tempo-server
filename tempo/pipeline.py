@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from tempo import compat, prompts
+from tempo import compat, execute, prompts
 from tempo.analyzer import analyze, message_text
 from tempo.checks import (
     PASS_THRESHOLD,
@@ -131,6 +131,7 @@ class Pipeline:
         )
         self.json_fmt = compat.JsonFormat.from_request(options.response_format)
         self._last_invalid: str | None = None
+        self._math_code: tuple[str | None, str] | None = None  # sandbox maths, once per question
         if self.tool_req or self.json_fmt:
             options.live = False  # validated before anything is shown
 
@@ -729,6 +730,7 @@ class Pipeline:
             for a in pending
         }
         gradable = [a for a in pending if not heur[id(a)].hard_fail]
+        will_run = self._runnable(pending)
         judge_slot: list[Candidate] = []
         if gradable and self._want_judge():
             families = {self._family(a.model) for a in gradable}
@@ -749,10 +751,15 @@ class Pipeline:
             slots = await self._pick("check", judge_ranked)
             judge_slot = slots[0] if slots else []
         reason = f"heuristics + judge {judge_slot[0].model.id}" if judge_slot else "heuristics only"
+        if will_run:
+            reason = f"{reason} + sandbox"
         stage = self._begin("check", [judge_slot[0].model.id] if judge_slot else [], reason)
+        if will_run:
+            await self._execute(stage, will_run, heur)
+            gradable = [a for a in gradable if not heur[id(a)].hard_fail]
         grades = None
         judge_model = None
-        if judge_slot:
+        if judge_slot and gradable:
             messages = prompts.judge_messages(self.messages, [a.text for a in gradable])
             reply = await self._timed(self._call(stage, "check", judge_slot, messages, live=False))
             if reply is not None:
@@ -785,6 +792,87 @@ class Pipeline:
             passed=bool(best and best.check and best.check.passed),
         )
         self._end(stage, "check", [], check=results)
+
+    # --- running code and maths in the sandbox (tempo/execute.py) ----------------------------
+
+    def _runnable(self, pending: list[Answer]) -> list[tuple[Answer, str, Any]]:
+        """Answers the sandbox can check: (answer, "code" | "math", the program or None)."""
+        sandbox, p = self.e.sandbox, self.profile
+        if sandbox is None or p is None or self.tool_req or self.json_fmt:
+            return []
+        out: list[tuple[Answer, str, Any]] = []
+        for answer in pending:
+            program = execute.build_program(self.question, answer.text)
+            if program is not None and (p.task == "code" or program.has_tests):
+                out.append((answer, "code", program))
+            elif p.task == "math" and self.e.settings.sandbox_math != "off":
+                out.append((answer, "math", None))
+        return out
+
+    async def _execute(
+        self, stage: int, runnable: list[tuple[Answer, str, Any]], heur: dict[int, Any]
+    ) -> None:
+        """Run each answer's code (with its tests), or compute the maths result, and turn a
+        failure into a failed check whose error goes to the fix stage."""
+        sandbox = self.e.sandbox
+        assert sandbox is not None
+        missing: set[str] = set()
+        for answer, kind, program in runnable:
+            if kind == "code":
+                if not sandbox.available(program.language):
+                    missing.add(program.language)
+                    continue
+                result = await asyncio.to_thread(execute.run_code, sandbox, program)
+            else:
+                if not sandbox.available("python"):
+                    missing.add("python")
+                    continue
+                code, method = await self._math_program(stage)
+                if code is None:
+                    continue
+                result = await asyncio.to_thread(
+                    execute.check_math, sandbox, answer.text, code, method
+                )
+            self.emit("sandbox", stage=stage, model=answer.model, **result.as_dict())
+            if self.e.store and self.e.settings.log_questions:
+                self.e.store.record_execution(self.qid, answer.stage, answer.model, result)
+            if result.status == "failed" and result.error:
+                if kind == "code" or result.method == "rules":
+                    heur[id(answer)].fail(result.error)
+                else:  # a model wrote the program: strong evidence, not proof
+                    heur[id(answer)].warn(result.error, weight=4.0)
+        for language in sorted(missing):
+            self.emit(
+                "note",
+                message=f"Not run: the {language} sandbox is not installed "
+                "(tempo-server sandbox install).",
+            )
+
+    async def _math_program(self, stage: int) -> tuple[str | None, str]:
+        """A program that prints the answer: from rules for simple arithmetic, else written
+        by a model (once per question, TEMPO_SANDBOX_MATH=auto)."""
+        if self._math_code is not None:
+            return self._math_code
+        expression = execute.math_expression(self.question)
+        if expression is not None:
+            self._math_code = (execute.math_program(expression), "rules")
+            return self._math_code
+        self._math_code = (None, "program")
+        if self.e.settings.sandbox_math != "auto" or self.requests_left() < 2:
+            return self._math_code
+        ranked = self._rank("check").candidates
+        slots = await self._pick("check", ranked)
+        if not slots:
+            return self._math_code
+        prompt = execute.PROGRAM_PROMPT.format(question=self.question)
+        reply = await self._timed(
+            self._call(
+                stage, "compute", slots[0], [{"role": "user", "content": prompt}], live=False
+            )
+        )
+        code = execute.program_from_reply(reply.text) if reply is not None else None
+        self._math_code = (code, "program")
+        return self._math_code
 
     def best(self) -> Answer | None:
         checked = [a for a in self.answers if a.check is not None]

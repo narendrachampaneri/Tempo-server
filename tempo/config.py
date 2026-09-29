@@ -166,6 +166,15 @@ class Settings:
     # Questions from AI assistants over MCP are logged apart ("mcp") and kept out of every
     # training export unless this is on (owner's decision, step 7).
     train_on_mcp: bool = False
+    # Sandbox (docs/SANDBOX.md): run code answers and their tests, and compute maths answers,
+    # in WebAssembly. "auto": when installed (`tempo-server sandbox install`); "off": never.
+    sandbox: str = "auto"
+    # Maths: "auto" (rules, else a model writes a short program), "rules" (no extra model
+    # call), "off".
+    sandbox_math: str = "auto"
+    sandbox_timeout_s: float = 10.0
+    sandbox_memory_mb: int = 256
+    sandbox_output_kb: int = 64
 
     @property
     def db_path(self) -> Path | None:
@@ -221,4 +230,9 @@ class Settings:
             local_first_max_complexity=float(env.get("TEMPO_LOCAL_FIRST_MAX_COMPLEXITY") or 0.3),
             cors_origins=parse_origins(env.get("TEMPO_CORS_ORIGINS")),
             train_on_mcp=_flag(env, "TEMPO_TRAIN_ON_MCP", False),
+            sandbox=_choice(env, "TEMPO_SANDBOX", ("auto", "off"), "auto"),
+            sandbox_math=_choice(env, "TEMPO_SANDBOX_MATH", ("auto", "rules", "off"), "auto"),
+            sandbox_timeout_s=float(env.get("TEMPO_SANDBOX_TIMEOUT") or 10),
+            sandbox_memory_mb=int(env.get("TEMPO_SANDBOX_MEMORY_MB") or 256),
+            sandbox_output_kb=int(env.get("TEMPO_SANDBOX_OUTPUT_KB") or 64),
         )

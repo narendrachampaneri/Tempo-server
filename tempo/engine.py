@@ -30,6 +30,7 @@ from tempo.providers import ChatBackend, LiteLLMBackend
 from tempo.quota import QuotaManager
 from tempo.registry import Registry
 from tempo.router import Router, RouteResult
+from tempo.sandbox import Limits, Sandbox, sandbox_home
 from tempo.store import Store
 from tempo.sync import CATALOG_FILE, RegistrySync, load_catalog, save_catalog
 from tempo.types import MODES, Access, ModelInfo, QueryProfile
@@ -154,6 +155,18 @@ class Engine:
         )
         self.skills = SkillBook(registry, self.store)
         self.router = Router(registry, self.health, self.quota, skill_of=self.skills.skill)
+        # Runs code and maths answers in WebAssembly (tempo/sandbox.py); None when turned off.
+        self.sandbox: Sandbox | None = None
+        if self.settings.sandbox != "off":
+            s = self.settings
+            self.sandbox = Sandbox(
+                sandbox_home(s.data_dir),
+                Limits(
+                    timeout_s=s.sandbox_timeout_s,
+                    memory_mb=s.sandbox_memory_mb,
+                    output_kb=s.sandbox_output_kb,
+                ),
+            )
         self.sync: RegistrySync | None = None  # periodic model-list sync (from_settings)
         self._maintenance: asyncio.Task[None] | None = None
         self.cache: SemanticCache | None = None  # attached in Engine.from_settings

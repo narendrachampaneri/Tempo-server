@@ -37,6 +37,26 @@ CREATE TABLE IF NOT EXISTS questions (
     feedback_comment TEXT,
     feedback_at REAL
 );
+CREATE TABLE IF NOT EXISTS executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id TEXT NOT NULL,
+    stage INTEGER,
+    model TEXT,
+    kind TEXT,
+    language TEXT,
+    status TEXT,
+    method TEXT,
+    tests_total INTEGER,
+    tests_passed INTEGER,
+    reward REAL,
+    error TEXT,
+    stopped TEXT,
+    computed TEXT,
+    claimed TEXT,
+    duration_ms INTEGER,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS executions_question ON executions (question_id);
 CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     question_id TEXT NOT NULL,
@@ -228,6 +248,40 @@ class Store:
             "INSERT INTO questions (id, created_at, user_id, mode, messages, source) "
             "VALUES (?,?,?,?,?,?)",
             (question_id, time.time(), user_id, mode, _json(messages), source),
+        )
+
+    def record_execution(
+        self, question_id: str, stage: int, model: str | None, execution: Any
+    ) -> None:
+        """A sandbox run for one answer (tempo/execute.py), kept as a training reward."""
+        e = execution
+        self.execute(
+            "INSERT INTO executions (question_id, stage, model, kind, language, status, method, "
+            "tests_total, tests_passed, reward, error, stopped, computed, claimed, duration_ms, "
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                question_id,
+                stage,
+                model,
+                e.kind,
+                e.language,
+                e.status,
+                e.method,
+                e.tests_total,
+                e.tests_passed,
+                e.reward,
+                e.error,
+                e.stopped,
+                e.computed,
+                e.claimed,
+                e.duration_ms,
+                time.time(),
+            ),
+        )
+
+    def executions(self, question_id: str) -> list[dict[str, Any]]:
+        return self.query(
+            "SELECT * FROM executions WHERE question_id = ? ORDER BY id", (question_id,)
         )
 
     def update_question(self, question_id: str, **fields: Any) -> None:
