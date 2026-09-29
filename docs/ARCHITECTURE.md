@@ -309,7 +309,11 @@ This is how Tempo decides "the model is not capable". Combine cheap signals firs
 
 Output: `confidence ∈ [0,1]` plus short notes. The threshold depends on mode (`fast` accepts 0.6, `best` wants 0.85).
 
-**As built (Phase 2):** `tempo/checks.py` runs free heuristics first: empty answer, cut off at the length limit, unclosed code fence, refusal, invalid JSON when JSON was asked for, Python that does not parse, no code block when the user clearly asked for code (write, fix, implement, convert; also in Hindi and Gujarati; a question *about* code is left to the judge), very short answer, an answer mostly in another language (`tempo/language.py`: code, names, numbers, links and capitalised technical terms don't count; mixed-language answers pass; a language the user asks for ("answer in Hindi") is expected instead; non-Latin scripts are told apart by script and Latin-script languages by common function words, only when the guess is clear), and repetition. A missing requested code block and a wrong-language answer are hard failures. Then a **judge** model from a different family than the writer scores the answer 1–10 and lists issues, and the two are combined into one score. The pass marks are fast 0.6, auto and private 0.7, best 0.85. Without a judge, the score is capped at 0.8 of the heuristic score. Hard failures (empty, cut off, refusal, broken code) can never pass. Code is only **parsed, not run**: sandboxed execution is still to do.
+**As built (Phase 2):** `tempo/checks.py` runs free heuristics first: empty answer, cut off at the length limit, unclosed code fence, refusal, invalid JSON when JSON was asked for, Python that does not parse, no code block when the user clearly asked for code (write, fix, implement, convert; also in Hindi and Gujarati; a question *about* code is left to the judge), very short answer, an answer mostly in another language (`tempo/language.py`: code, names, numbers, links and capitalised technical terms don't count; mixed-language answers pass; a language the user asks for ("answer in Hindi") is expected instead; non-Latin scripts are told apart by script and Latin-script languages by common function words, only when the guess is clear), and repetition. A missing requested code block and a wrong-language answer are hard failures. Then a **judge** model from a different family than the writer scores the answer 1–10 and lists issues, and the two are combined into one score. The pass marks are fast 0.6, auto and private 0.7, best 0.85. Without a judge, the score is capped at 0.8 of the heuristic score. Hard failures (empty, cut off, refusal, broken code) can never pass. **Since step 8, code and maths are also run**: code answers with their tests, and maths
+results, in a WebAssembly sandbox (Wasmtime + CPython 3.14 for WASI + QuickJS-ng; no network, no
+processes, only its own temporary folder, limits on time, memory, output and disk). A failure
+fails the check and its error goes to the fix stage; each run is recorded as a training reward.
+See [SANDBOX.md](./SANDBOX.md).
 
 ### 4.7 Synthesizer / Tempo core ("goes back to my main model")
 
@@ -575,7 +579,7 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 - **Prompt-injection hygiene**: sub-model outputs are data. The aggregator prompt fences them and tells Tempo core to ignore instructions inside them.
 - **Safety filter**: a moderation model (e.g. Llama Guard, available free on some providers) on input and output.
 - **Fair use of free tiers**: respect each provider's limits and terms; no key pooling or rotation to evade limits; prefer BYOK for public deployments. Never use reverse-engineered "free GPT" endpoints.
-- **Sandbox** for code-execution verification (Phase 3): a WebAssembly sandbox (wasmtime running a WASI build of CPython) with no network, a scratch folder only, and memory, time and output limits. It is a normal Python package, so it needs no Docker, gVisor or special machine (§1.1).
+- **Sandbox** for code-execution verification (built in step 8, [SANDBOX.md](./SANDBOX.md)): Wasmtime (a pip package) running CPython 3.14 for WASI and QuickJS-ng, with no network, no processes, a scratch folder only, and time, memory, output and disk limits. It needs no Docker, gVisor or special machine (§1.1).
 
 ---
 

@@ -91,7 +91,9 @@ provider, stored encrypted, and never shown again. At the end you see how many f
 day you now have. One key is enough to start (Groq or Google AI Studio take a minute to create).
 If [Ollama](https://ollama.com/download) is running with a model, local models answer simple
 questions to save your free quota (the thinking window says so; `TEMPO_LOCAL_FIRST=off` turns it
-off), and take over when every free quota is used up.
+off), and take over when every free quota is used up. It also offers the code and maths
+sandbox (about 16 MB, once), which checks code answers by running their tests and maths answers
+by computing the result.
 
 ### 3. Start the server
 
@@ -234,6 +236,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `tempo-server setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
+| `tempo-server sandbox install` / `status` / `run FILE` | The WebAssembly sandbox that runs code answers with their tests and computes maths answers (about 16 MB, once; [docs/SANDBOX.md](docs/SANDBOX.md)) |
 | `tempo-server mcp [--http --port 8001]` | Run as an MCP server for AI assistants: stdio for desktop apps, or HTTP with a Tempo key ([docs/MCP.md](docs/MCP.md)) |
 | `tempo-server doctor [--port N] [--offline]` | Checks Python, the data folder, keys, which providers are reachable, Ollama and the port, with a fix for each problem |
 | `tempo-server quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
@@ -354,6 +357,8 @@ needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PRO
 | `TEMPO_SYNC_INTERVAL` | `21600` | Seconds between registry syncs (`0` = off) |
 | `TEMPO_API_KEY` | none | Admin key for the API and web app |
 | `TEMPO_CORS_ORIGINS` | none | Websites whose pages may call the API from a browser, each written exactly (`https://app.example.com,http://localhost:5173`); no wildcard, no path |
+| `TEMPO_SANDBOX` / `TEMPO_SANDBOX_MATH` | `auto` / `auto` | Run code answers with their tests, and compute maths answers, in a WebAssembly sandbox when installed (`off` to stop); maths: `rules` never asks a model for a program ([docs/SANDBOX.md](docs/SANDBOX.md)) |
+| `TEMPO_SANDBOX_TIMEOUT` / `TEMPO_SANDBOX_MEMORY_MB` / `TEMPO_SANDBOX_OUTPUT_KB` | `10` / `256` / `64` | Limits per sandbox run |
 | `TEMPO_TRAIN_ON_MCP` | `0` | Questions from AI assistants over MCP are logged apart (tagged `mcp`) and kept out of every training export; `1` includes them (assistants often send private code or documents) |
 | `TEMPO_SHARE_SERVER_KEYS` | `0` | Keys in `.env`/the environment are the owner's; `1` lets every user of this server use them too (keys from `tempo-server setup` are always the owner's only) |
 | `TEMPO_LOCAL_FIRST` / `TEMPO_LOCAL_FIRST_MAX_COMPLEXITY` | `auto` / `0.3` | Send simple questions (up to this complexity) to a running local Ollama model first, to save free quota; `off` to turn off. Never in `best` mode |
@@ -382,6 +387,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/SANDBOX.md](docs/SANDBOX.md): how code and maths answers are checked by running them in WebAssembly, and the sandbox's limits.
 - [docs/MCP.md](docs/MCP.md): Tempo-server as an MCP server for Claude Desktop, Claude Code, Cursor and VS Code; the tools.
 - [sdk/python](sdk/python/README.md) and [sdk/js](sdk/js/README.md): the Python and JavaScript/TypeScript SDKs.
 - [docs/CONNECT.md](docs/CONNECT.md): connect Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n or LangChain.

@@ -42,9 +42,10 @@ every stage, and exposes it all as an OpenAI-compatible API (`tempo/auto`), a CL
 function that parses ISO-8601 durations, with tests."
 **Today:** routed as a code task; a reply without a code block fails when code was clearly asked
 for; Python that doesn't parse fails; a cascade fixes it.
-**Still needs:** running the code and its tests in the WebAssembly sandbox (so "passed" means
-the tests pass) and conversation memory. Tool calls through the API work (step 4). **Phase 3** (sandbox),
-Phase 4 (tools).
+**Today (step 8):** Python and JavaScript answers run with their tests in the WebAssembly sandbox,
+so "passed" means the tests pass; a failure goes to the fix stage with the error.
+**Still needs:** conversation memory, and tests Tempo writes itself when the question has none.
+**Phase 4.**
 
 ### 2. Pull-request reviewer
 
@@ -59,8 +60,10 @@ example, chunking for large diffs (decompose by file). **Phase 4.**
 
 **Example:** "Write pytest tests for this function" with the function pasted in.
 **Today:** code-task routing and checks; the judge grades coverage in words.
-**Still needs:** running the generated tests against the given code in the sandbox, and a
-reward from that for Tempo-Core's GRPO stage (TEMPO_MODELS.md §2). **Phase 3.**
+**Today (step 8):** the generated tests run against the given code in the sandbox, and the result
+is recorded as a reward in `export-sft` / `export-pairs`.
+**Still needs:** checking that the tests fail on a broken version of the function (mutation
+testing), and Tempo-Core's GRPO stage using the reward (TEMPO_MODELS.md §2). **Phase 3.**
 
 ### 4. Log explainer
 
@@ -138,7 +141,10 @@ option in the engine. **Phase 4.**
 **Example:** a student asks a maths word problem in Hindi and gets a worked answer in Hindi.
 **Today:** word problems route as maths; answers mostly in the wrong language fail and are
 rewritten; a judge checks the working.
-**Still needs:** numeric verification of maths answers (compute the result, not just judge it),
+**Today (step 8):** the result is computed in the sandbox (rules for arithmetic, else a short
+program a model writes) and compared with the answer's final number; a mismatch goes to the fix
+stage.
+**Still needs:** answers with units, fractions written as words, and several results; a
 step-by-step hints mode. **Phase 3.**
 
 ### 13. Indian-language translation
