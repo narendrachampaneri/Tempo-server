@@ -199,7 +199,8 @@ class Accounts:
 
     def delete_data(self, user_id: str) -> int:
         """Delete everything logged for a user's questions (answers, decisions, stages, calls,
-        feedback). Returns how many questions were deleted. Keys and the account stay."""
+        feedback) and their saved chats. Returns how many questions were deleted. Keys and the
+        account stay."""
         ids = [
             row["id"]
             for row in self.store.query("SELECT id FROM questions WHERE user_id = ?", (user_id,))
@@ -210,6 +211,7 @@ class Accounts:
             for table in ("decisions", "stages", "calls"):
                 self.store.execute(f"DELETE FROM {table} WHERE question_id IN ({marks})", chunk)
             self.store.execute(f"DELETE FROM questions WHERE id IN ({marks})", chunk)
+        self.store.execute("DELETE FROM chats WHERE user_id = ?", (user_id,))
         return len(ids)
 
     def key_info(self, user_id: str) -> list[dict[str, Any]]:

@@ -167,6 +167,19 @@ CREATE TABLE IF NOT EXISTS collect_items (
     updated_at REAL,
     PRIMARY KEY (dataset, item_id)
 );
+CREATE TABLE IF NOT EXISTS chats (
+    id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    title_edited INTEGER NOT NULL DEFAULT 0,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    body TEXT NOT NULL,
+    search_text TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_chats_user ON chats (user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_question ON decisions (question_id);
 CREATE INDEX IF NOT EXISTS idx_stages_question ON stages (question_id);
 CREATE INDEX IF NOT EXISTS idx_calls_question ON calls (question_id);

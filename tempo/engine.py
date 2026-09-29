@@ -81,6 +81,8 @@ class RunOptions:
     # Where the question came from, recorded with it: "mcp" for AI assistants over MCP (kept out
     # of training exports unless TEMPO_TRAIN_ON_MCP=1: they often carry private code or files).
     source: str | None = None
+    # False: log nothing about this question (web Private chats). Also skips the answer cache.
+    log: bool = True
 
 
 @dataclass
