@@ -189,12 +189,12 @@ key): [docs/MCP.md](docs/MCP.md).
 **SDKs** (thin clients over the HTTP API; not published yet, install from `sdk/`):
 
 ```python
-from tempo_server_client import TempoClient          # pip install ./sdk/python
+from tempo_server_client import TempoClient  # pip install ./sdk/python
 
-tempo = TempoClient()                                # $TEMPO_URL, $TEMPO_API_KEY
+tempo = TempoClient()  # $TEMPO_URL, $TEMPO_API_KEY
 for event in tempo.stream("Explain TCP vs UDP"):
     if event.text:
-        print("▸", event.text)                       # the thinking window, live
+        print("▸", event.text)  # the thinking window, live
 print(tempo.ask("What is 17% of 2,340?").text)
 ```
 

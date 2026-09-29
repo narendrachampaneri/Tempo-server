@@ -1,8 +1,8 @@
 """The Python SDK: stream the thinking window, then use the answer.
 
-    pip install ./sdk/python            # `pip install tempo-server-client` once published
-    TEMPO_ENABLE_MOCK=1 tempo-server serve &
-    python examples/sdk_python.py
+pip install ./sdk/python            # `pip install tempo-server-client` once published
+TEMPO_ENABLE_MOCK=1 tempo-server serve &
+python examples/sdk_python.py
 """
 
 from tempo_server_client import TempoClient
