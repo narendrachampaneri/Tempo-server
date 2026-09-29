@@ -121,6 +121,45 @@ jobs:
           TEMPO_SANDBOX_HOME="$RUNNER_TEMP/tempo-sandbox" tempo-server sandbox install
       - run: pytest -q
 
+  train-dry-run:
+    # The whole training loop on a CPU with tiny models and no keys (docs/TRAINING.md): demo
+    # data, train prepare, both Kaggle notebooks executed cell by cell, models import, compare
+    # and promote. About 5 minutes of it is training; Linux only.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (PyTorch's CPU build first, then the [train] extra)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[train]"
+      - name: Downloads (tokenizers, Laya's configs, llama.cpp) cached between runs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface/hub
+            ${{ runner.temp }}/llama.cpp
+          key: train-dry-run-${{ hashFiles('tempo/trainkit.py') }}
+      - name: tempo-server train dry-run
+        run: |
+          TEMPO_LLAMA_CPP="$RUNNER_TEMP/llama.cpp" \
+            tempo-server train dry-run --work "$RUNNER_TEMP/dry-run"
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: train-dry-run-reports
+          path: |
+            ${{ runner.temp }}/dry-run/kaggle/*/tempo-*/REPORT.md
+            ${{ runner.temp }}/dry-run/kaggle/*/tempo-*/report.json
+            ${{ runner.temp }}/dry-run/data/models/models.json
+          if-no-files-found: ignore
+
   package:
     runs-on: ubuntu-latest
     steps:

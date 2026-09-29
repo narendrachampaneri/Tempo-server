@@ -168,3 +168,13 @@ def test_score_laya_counts_per_decision():
     assert scores["decisions"]["strategy"] == {"n": 1, "accuracy": 1.0}
     assert scores["decisions"]["difficulty"] == {"n": 1, "accuracy": 0.0}
     assert scores["accuracy"] == 0.5
+
+
+def test_dry_run_says_what_to_install(tmp_path, monkeypatch):
+    import pytest
+
+    from tempo import dry_run
+
+    monkeypatch.setattr(dry_run, "missing_packages", lambda: ["torch", "trl"])
+    with pytest.raises(dry_run.DryRunError, match=r"tempo-server\[train\]"):
+        dry_run.run(tmp_path)

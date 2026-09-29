@@ -1575,6 +1575,35 @@ def train_prepare(
     print(training.upload_steps(report))
 
 
+@train_app.command("dry-run")
+def train_dry_run(
+    work: Annotated[
+        Path | None,
+        typer.Option("--work", help="Folder for everything it makes (default: a temporary one)."),
+    ] = None,
+    questions: Annotated[int, typer.Option("--questions", help="Demo questions.")] = 40,
+) -> None:
+    """Every step of the loop on this CPU with tiny models, no keys: demo data, prepare, both
+    notebooks, import, compare, promote."""
+    import tempfile
+
+    from tempo import dry_run
+
+    def say(text: str) -> None:
+        err.print(text, markup=False, highlight=False, soft_wrap=True)
+
+    try:
+        if work is not None:
+            outcome = dry_run.run(work, questions, say)
+        else:
+            with tempfile.TemporaryDirectory(prefix="tempo-dry-run-") as folder:
+                outcome = dry_run.run(Path(folder), questions, say)
+    except dry_run.DryRunError as exc:
+        err.print(str(exc), style="red", markup=False, soft_wrap=True)
+        raise typer.Exit(1) from exc
+    out.print_json(data=outcome)
+
+
 @train_app.command("notebooks")
 def train_notebooks(
     out_dir: Annotated[Path, typer.Option("--out", "-o", help="Folder to write.")] = Path(

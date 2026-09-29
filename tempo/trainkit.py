@@ -397,6 +397,21 @@ def _precision() -> dict[str, Any]:
     return {"dtype": torch.float32, "bf16": False, "fp16": False, "use_cpu": True}
 
 
+def _quiet_datasets() -> None:
+    from datasets.utils.logging import disable_progress_bar
+
+    disable_progress_bar()
+
+
+def _quiet(trainer: Any) -> Any:
+    """Our progress lines replace the Trainer's raw log dictionaries and progress bars."""
+    from transformers.trainer_callback import PrinterCallback, ProgressCallback
+
+    trainer.remove_callback(PrinterCallback)
+    trainer.remove_callback(ProgressCallback)
+    return trainer
+
+
 def _conversations(rows: list[dict[str, Any]]) -> Any:
     """SFT rows as prompt/completion conversations, so the loss is on the answer only."""
     from datasets import Dataset
@@ -480,6 +495,7 @@ def sft(pack: Path, work: Path, cfg: CoreConfig, clock: Clock, state: State) -> 
         task_type="CAUSAL_LM",
     )
     progress = progress_callback("SFT", clock)
+    _quiet_datasets()
     trainer = SFTTrainer(
         model=model,
         args=args,
@@ -489,6 +505,7 @@ def sft(pack: Path, work: Path, cfg: CoreConfig, clock: Clock, state: State) -> 
         peft_config=lora,
         callbacks=[progress],
     )
+    _quiet(trainer)
     before = trainer.evaluate()["eval_loss"] if test else None
     if before is not None:
         say(f"SFT: held-out loss before training {before:.4f}")
@@ -556,6 +573,7 @@ def dpo(pack: Path, work: Path, cfg: CoreConfig, clock: Clock, state: State) -> 
         )
     )
     progress = progress_callback("DPO", clock)
+    _quiet_datasets()
     trainer = DPOTrainer(
         model=model,
         args=args,
@@ -564,6 +582,7 @@ def dpo(pack: Path, work: Path, cfg: CoreConfig, clock: Clock, state: State) -> 
         processing_class=tok,
         callbacks=[progress],
     )
+    _quiet(trainer)
     resume = latest_checkpoint(out)
     if resume:
         say(f"DPO: resuming from {resume.name}")
@@ -1261,7 +1280,8 @@ def write_report(out: Path, report: dict[str, Any]) -> Path:
     lines.append(f"- Run: {report['run_id']} · {report.get('hardware', '')}")
     lines.append(f"- Base: {report['base']} ({report['base_licence']}, {report['base_source']})")
     for name, info in report.get("stages", {}).items():
-        lines.append(f"- {name}: " + ", ".join(f"{k} {v}" for k, v in info.items()))
+        shown = {k: v for k, v in info.items() if k != "files"}
+        lines.append(f"- {name}: " + ", ".join(f"{k} {v}" for k, v in shown.items()))
     heldout = report.get("heldout")
     if heldout:
         lines += ["", "## Held-out scores", ""]
