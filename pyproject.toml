@@ -112,3 +112,5 @@ explicit-preview-rules = true
 [tool.ruff.lint.per-file-ignores]
 # Programs that run inside the sandbox are embedded as strings (no # noqa possible there).
 "tempo/execute.py" = ["E501"]
+# Browser tests carry long selectors and embedded page scripts.
+"tests/test_web_e2e.py" = ["E501"]

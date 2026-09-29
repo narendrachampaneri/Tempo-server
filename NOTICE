@@ -6,3 +6,7 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Tempo-server uses Laya (convaiinnovations/laya), licensed under the Apache License,
 Version 2.0. Datasets used by `tempo collect` keep their own licences; each exported row
 names its dataset and licence, and model cards carry the dataset credits.
+
+The web app bundles fonts (Inter, JetBrains Mono, Noto Sans Gujarati and Devanagari; SIL Open
+Font License 1.1), KaTeX (MIT) and Mermaid (MIT, with bundled dependencies; see
+tempo/web/LICENSES.md for every licence).
