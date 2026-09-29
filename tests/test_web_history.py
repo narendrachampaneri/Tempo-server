@@ -290,3 +290,50 @@ def test_docs_site_uses_the_apps_own_theme_and_fonts():
             copy = root / "docs" / "assets" / folder / source.name
             assert copy.exists(), f"{copy} is missing (see this test's docstring)"
             assert copy.read_bytes() == source.read_bytes(), f"{copy} is out of date"
+
+
+def test_status_counts_the_keys_setup_stored():
+    """Step 10 laptop test: the header said "No providers configured" while Groq, NVIDIA and
+    Google were answering. The keys were in the vault (tempo-server setup), which /health
+    didn't look at."""
+    from tempo.accounts import LOCAL_USER
+
+    engine, _ = make_engine(env={})  # nothing in the environment
+    engine.accounts.set_key(LOCAL_USER, "beta", "b-key-from-setup", True)
+    client = TestClient(create_app(engine=engine, settings=Settings()))
+    assert client.get("/health").json()["models_ready"] == 1
+    status = client.get("/api/status").json()
+    assert status == {
+        "models_ready": 1,
+        "providers": ["Beta"],
+        "local": False,
+        "message": "1 model ready: Beta",
+    }
+    done = [e for e in sse(client.post("/api/ask", json={"prompt": "hi"})) if e["type"] == "done"]
+    assert done[0]["model"] == "beta/mid"  # and it does answer
+
+
+def test_status_with_no_model_is_one_clear_line():
+    engine, _ = make_engine(env={})
+    client = TestClient(create_app(engine=engine, settings=Settings()))
+    assert client.get("/api/status").json()["message"] == (
+        "No model yet: run `tempo-server setup` to add a free key, or start Ollama."
+    )
+    errors = [
+        e for e in sse(client.post("/api/ask", json={"prompt": "hi"})) if e["type"] == "error"
+    ]
+    assert errors[0]["message"].startswith("No model yet:")
+    assert "provider not configured" not in errors[0]["message"]  # no count of skipped models
+
+
+def test_the_no_model_message_leaves_out_models_that_could_never_answer():
+    """With keys set up, a request no model can take lists only what stopped the usable ones
+    (not every model of every provider without a key, nor speech models)."""
+    engine, _ = make_engine(env={"BETA_KEY": "b"})
+    for model in engine.registry.all():
+        model.context_window = 10  # too small for anything
+    from tempo.analyzer import analyze
+
+    route = engine.router.rank(analyze([{"role": "user", "content": "hi"}]))
+    message = engine.no_model_message(route)
+    assert message == "No available model can handle this request (1 context window too small)."

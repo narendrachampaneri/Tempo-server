@@ -67,7 +67,7 @@ export function friendly(error) {
   if (error.status === 401)
     return { title: "This server needs an API key", detail: "The key was missing or not accepted.",
       next: "Enter the key you set as TEMPO_API_KEY, or one made with `tempo-server users add`.", actions: [{ label: "Enter key", go: "apikey" }] };
-  if (low.includes("no model providers are configured") || low.includes("providers are configured"))
+  if (low.includes("no model yet") || low.includes("providers are configured"))
     return { title: "No models are set up yet", detail: "Tempo has nothing to send your question to.",
       next: "Add a free provider key (Groq, Google, OpenRouter and others are free), or start Ollama for local models.", actions: [KEYS, MODELS] };
   if (low.includes("free quota is used up") || low.includes("quota") && (error.status === 503 || error.kind === "unavailable"))
@@ -90,14 +90,20 @@ export function friendly(error) {
   return { title: "Something went wrong", detail: msg, next: "Try again. If it keeps happening, run `tempo-server doctor` and check the server log.", actions: [RETRY] };
 }
 
+// The header's status: what *this* caller can use now (their own keys, the owner's keys, local
+// models). /health is only the fallback for a page that isn't signed in yet.
 export async function refreshStatus() {
   const pill = $("#status-pill"), text = $("#status-text");
   try {
-    const data = await (await fetch("/health")).json();
+    // No key prompt from here (it refreshes every minute): without a key, the public count.
+    const res = await api("/api/status", {}, true);
+    const data = res.ok ? await res.json() : await (await fetch("/health")).json();
     const n = data.models_ready;
     pill.className = "pill " + (n ? "ok" : "warn");
-    text.textContent = n ? `${n} model${n === 1 ? "" : "s"} ready` : "No models ready";
-    pill.title = n ? "Models that can answer right now. Click for details." : "No provider is set up yet. Click to see what to add.";
+    text.textContent = n ? `${n} model${n === 1 ? "" : "s"} ready` : "No model yet";
+    pill.title = data.message || (n ? "Models that can answer right now." : "No model yet: run tempo-server setup or start Ollama.");
+    const note = $("#setup-note");
+    if (note) note.hidden = !!n;
     return data;
   } catch {
     pill.className = "pill bad"; text.textContent = "Server unreachable"; pill.title = "The page cannot reach the server.";

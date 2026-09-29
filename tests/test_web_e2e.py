@@ -654,6 +654,18 @@ def test_history_says_when_it_is_only_kept_in_memory(browser, voice_site):
     page.context.close()
 
 
+def test_with_no_model_the_header_and_home_say_so_in_one_line(browser):
+    engine, _ = make_engine(env={}, sync_interval_s=0)
+    with running(create_app(engine=engine, settings=Settings())) as url:
+        context = browser.new_context(viewport={"width": 1280, "height": 800})
+        page = context.new_page()
+        page.goto(url + "/")
+        expect(page.locator("#status-text")).to_have_text("No model yet")
+        expect(page.locator("#setup-note")).to_contain_text("run tempo-server setup")
+        assert "99" not in page.locator("#status-pill").get_attribute("title")
+        context.close()
+
+
 def test_voice_is_hidden_without_a_key(page):
     expect(page.locator("#mic")).to_be_hidden()
     ask(page, "hello")

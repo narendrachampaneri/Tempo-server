@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from tempo import __version__, history, speech
 from tempo.accounts import ADMIN_USER, LOCAL_USER
 from tempo.config import MAX_STAGES_LIMIT, Settings
-from tempo.engine import DEFAULT_SYSTEM_PROMPT, Engine, RunOptions
+from tempo.engine import DEFAULT_SYSTEM_PROMPT, NO_MODEL_LINE, Engine, RunOptions
 from tempo.events import STREAM_EVENTS
 from tempo.sync import verify_key
 from tempo.types import MODES, Access, ModelInfo
@@ -258,7 +258,18 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         return engine.health.unavailable_reason(model) or "ready"
 
     def ready_models(access: Access | None = None) -> list[ModelInfo]:
-        return [m for m in engine.registry.all() if model_status(m, access) == "ready"]
+        """Models that can answer a question right now (chat, code and vision models)."""
+        return [
+            m
+            for m in engine.registry.all()
+            if m.chat_capable and model_status(m, access) == "ready"
+        ]
+
+    def owner_access() -> Access:
+        """The server owner's credentials: the keys `tempo-server setup` stored in the vault,
+        then the environment. Before this, /health counted environment keys only and said
+        "no providers configured" while vault keys were answering (step 10 laptop test)."""
+        return engine.access_for(LOCAL_USER)
 
     def resolve_model(name: str) -> tuple[str, str | None]:
         """Map an OpenAI ``model`` field to (mode, explicit model id)."""
@@ -280,7 +291,13 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "version": __version__, "models_ready": len(ready_models())}
+        """Public: is the server up, and how many models can the owner's keys use now. Signed-in
+        callers see their own count at /api/status."""
+        return {
+            "status": "ok",
+            "version": __version__,
+            "models_ready": len(ready_models(owner_access())),
+        }
 
     # --- OpenAI-compatible ---------------------------------------------------
 
@@ -484,6 +501,25 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         user_id = request.state.user_id
         mode = "local" if user_id == LOCAL_USER else "admin" if user_id == ADMIN_USER else "user"
         return {"user": request.state.user_name, "mode": mode}
+
+    @api.get("/status")
+    async def status(access: AccessDep) -> dict[str, Any]:
+        """What the caller can use right now: ready models, by provider, and one plain line."""
+        ready = ready_models(access)
+        providers = sorted({engine.registry.providers[m.provider].label for m in ready})
+        local = any(engine.registry.providers[m.provider].local for m in ready)
+        if not ready:
+            message = NO_MODEL_LINE
+        else:
+            message = f"{len(ready)} model{'' if len(ready) == 1 else 's'} ready: " + ", ".join(
+                providers
+            )
+        return {
+            "models_ready": len(ready),
+            "providers": providers,
+            "local": local,
+            "message": message,
+        }
 
     @api.get("/capabilities")
     async def capabilities(access: AccessDep) -> dict[str, Any]:

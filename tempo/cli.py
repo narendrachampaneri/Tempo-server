@@ -18,7 +18,14 @@ from rich.table import Table
 
 from tempo import paths
 from tempo.config import Settings
-from tempo.engine import DEFAULT_SYSTEM_PROMPT, Engine, RunOptions, RunResult, collect
+from tempo.engine import (
+    DEFAULT_SYSTEM_PROMPT,
+    NO_MODEL_LINE,
+    Engine,
+    RunOptions,
+    RunResult,
+    collect,
+)
 from tempo.types import MODES
 
 app = typer.Typer(
@@ -714,7 +721,7 @@ def sync() -> None:
         table.add_row(s.provider, state, str(s.listed), str(len(s.added)), str(len(s.removed)))
     out.print(table)
     if not status:
-        err.print("No providers configured.", style="dim")
+        err.print(NO_MODEL_LINE, style="dim", markup=False)
 
 
 @app.command()
@@ -814,7 +821,7 @@ def quota(
         )
     out.print(table)
     if not view:
-        err.print("No providers configured. Run: tempo-server setup", style="dim")
+        err.print(NO_MODEL_LINE, style="dim", markup=False)
     elif budget.all_used_up(view):
         err.print(
             "Every free quota is used up: Tempo answers with local models (Ollama) and the cache"

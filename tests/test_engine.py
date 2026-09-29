@@ -110,7 +110,9 @@ async def test_reports_error_when_every_attempt_fails():
 async def test_no_configured_provider_gives_setup_hint():
     engine, backend = make_engine(env={})
     result = await engine.complete(user("hi"))
-    assert "No model providers are configured" in result.error
+    assert result.error == (
+        "No model yet: run `tempo-server setup` to add a free key, or start Ollama."
+    )
     assert backend.called == []
 
 

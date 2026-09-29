@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from tempo.pipeline import Pipeline
 
 DEFAULT_SYSTEM_PROMPT = TEMPO_SYSTEM
+# One clear line when no model can be used at all (instead of counting every model skipped).
+NO_MODEL_LINE = "No model yet: run `tempo-server setup` to add a free key, or start Ollama."
 log = logging.getLogger(__name__)
 
 
@@ -392,19 +394,27 @@ class Engine:
             return await self.laya.decide(pipeline, name, stage, rules_value, **context)
         return rules_value
 
-    def no_model_message(self, route: RouteResult) -> str:
+    def no_model_message(self, route: RouteResult, access: Access | None = None) -> str:
         reasons = route.skipped_summary()
-        if set(reasons) <= {"provider not configured"}:
-            return (
-                "No model providers are configured. Run `tempo-server setup` to add your free keys "
-                "(or set them in .env), or start Ollama for local models."
-            )
+        usable = any(
+            m.chat_capable and self.registry.is_configured(m.provider, access)
+            for m in self.registry.all()
+        )
+        if not usable:
+            return NO_MODEL_LINE
         if any("used up" in reason for reason in reasons):
             return (
                 "Free quota is used up on every provider for now, and no local model is "
                 "running. Start Ollama for local answers (tempo-server setup), or try again later "
                 "(see Retry-After and `tempo-server quota`)."
             )
+        # Only what stopped the models that could have answered: not the models of providers
+        # without a key, and not speech or embedding models.
+        reasons = {
+            reason: n
+            for reason, n in reasons.items()
+            if reason != "provider not configured" and not reason.startswith("not a chat model")
+        }
         detail = ", ".join(f"{n} {reason}" for reason, n in reasons.items())
         return f"No available model can handle this request ({detail})."
 

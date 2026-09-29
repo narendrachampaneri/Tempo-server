@@ -338,7 +338,7 @@ class Pipeline:
         if not route.candidates:
             self.emit(
                 "error",
-                message=e.no_model_message(route),
+                message=e.no_model_message(route, o.access),
                 kind="unavailable",
                 skipped=route.skipped_summary(),
             )
