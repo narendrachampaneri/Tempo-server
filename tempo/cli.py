@@ -823,6 +823,76 @@ def quota(
         )
 
 
+@app.command()
+def bench(
+    modes: Annotated[
+        str, typer.Option("--modes", help="Comma-separated modes to time.")
+    ] = "auto,fast,best",
+    questions: Annotated[
+        int, typer.Option("--questions", "-n", min=1, max=3, help="Standard questions per mode.")
+    ] = 3,
+    repeat: Annotated[int, typer.Option("--repeat", min=1, max=10, help="Rounds.")] = 1,
+    time_budget: TimeOption = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print JSON instead of a table.")] = False,
+) -> None:
+    """Time answers per mode with your keys: first token, answer ready, and all stages done.
+
+    Uses your free quota (about 2-6 requests per question). Not logged as questions and no
+    answer cache; the timings do update the speed record that routing uses."""
+    from tempo import bench as bench_mod
+
+    chosen = [m.strip() for m in modes.split(",") if m.strip()]
+    for mode in chosen:
+        _check_mode(mode)
+    engine = _engine()
+    asked = bench_mod.QUESTIONS[:questions]
+    err.print(
+        f"Timing {len(asked)} question(s) × {repeat} in {', '.join(chosen)} mode "
+        f"(about {len(asked) * repeat * len(chosen) * 3} free requests)…",
+        style="dim",
+    )
+
+    def show(run: Any) -> None:
+        if as_json:
+            return
+        if run.error:
+            err.print(f"  {run.mode}: ✗ {run.error}", style="red", markup=False)
+        else:
+            err.print(
+                f"  {run.mode}: first token {run.first_token_s}s · ready {run.ready_s}s · "
+                f"done {run.total_s}s · {run.model}",
+                style="dim",
+                markup=False,
+            )
+
+    extra = {"time_budget_s": time_budget} if time_budget else {}
+    results = asyncio.run(bench_mod.run_bench(engine, chosen, asked, repeat, on_run=show, **extra))
+    summaries = [r.summary() for r in results]
+    if as_json:
+        out.print_json(json.dumps({"modes": summaries, "speed": engine.speed.table()}))
+        return
+    table = Table(title="Answer speed (median seconds)", header_style="bold")
+    for column in ("mode", "first token", "ready", "done", "slowest", "errors", "models"):
+        table.add_column(column)
+    for row in summaries:
+        cell = lambda v: "-" if v is None else f"{v:.1f}"  # noqa: E731
+        table.add_row(
+            row["mode"],
+            cell(row["first_token_s"]),
+            cell(row["ready_s"]),
+            cell(row["total_s"]),
+            cell(row["slowest_total_s"]),
+            str(row["errors"]),
+            ", ".join(row["models"]),
+        )
+    out.print(table)
+    err.print(
+        "first token: the answer starts · ready: it can be read and copied (checks may go on) "
+        "· done: every stage finished",
+        style="dim",
+    )
+
+
 @app.command(name="collect")
 def collect_data(
     dataset: Annotated[
