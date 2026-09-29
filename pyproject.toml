@@ -89,7 +89,7 @@ tempo = "tempo.cli:main_alias"
 include = ["tempo*"]
 
 [tool.setuptools.package-data]
-tempo = ["models.yaml", "web/*", "data/*.yaml"]
+tempo = ["models.yaml", "web/*", "web/**/*", "data/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

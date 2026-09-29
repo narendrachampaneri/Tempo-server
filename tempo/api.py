@@ -8,14 +8,16 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from importlib import resources
+from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from tempo import __version__
+from tempo import __version__, history, speech
 from tempo.accounts import ADMIN_USER, LOCAL_USER
 from tempo.config import MAX_STAGES_LIMIT, Settings
 from tempo.engine import DEFAULT_SYSTEM_PROMPT, Engine, RunOptions
@@ -132,6 +134,18 @@ class AskRequest(StageOptions):
     model: str | None = None
     privacy: Literal["default", "local_only", "no_logging"] = "default"
     allow_providers: list[str] | None = None
+    # False (web Private chats): nothing about this question is logged, cached or saved.
+    save: bool = True
+
+
+class ChatPatch(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    pinned: bool | None = None
+
+
+class SayRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=400)
+    voice: str | None = Field(default=None, max_length=40)
 
 
 class ConsentRequest(BaseModel):
@@ -165,10 +179,22 @@ def _pieces(text: str, size: int = 120) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)] or [""]
 
 
+class _WebFiles(StaticFiles):
+    """The web app's own files. Code and styles are re-checked on every load (cheap: ETag);
+    fonts and bundled libraries never change under a URL within a version, so they are cached."""
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        heavy = path.startswith(("fonts/", "vendor/"))
+        response.headers["Cache-Control"] = "public, max-age=604800" if heavy else "no-cache"
+        return response
+
+
 def create_app(engine: Engine | None = None, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     engine = engine or Engine.from_settings(settings)
-    web_page = resources.files("tempo").joinpath("web/index.html").read_text(encoding="utf-8")
+    web_dir = Path(__file__).parent / "web"
+    web_page = (web_dir / "index.html").read_text(encoding="utf-8")
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -177,6 +203,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
 
     app = FastAPI(title="Tempo", version=__version__, lifespan=lifespan)
     app.state.engine = engine
+    app.state.speech_transport = None  # tests replace it with a fake provider
     if settings.cors_origins:  # only the websites the owner listed (TEMPO_CORS_ORIGINS)
         from fastapi.middleware.cors import CORSMiddleware
 
@@ -427,6 +454,8 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             access=access,
             **req.stage_overrides(),
         )
+        options.log = req.save
+        options.use_cache = options.use_cache and req.save
 
         async def stream() -> AsyncIterator[str]:
             async for event in engine.run(messages, options):
@@ -448,6 +477,113 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
         user_id = request.state.user_id
         mode = "local" if user_id == LOCAL_USER else "admin" if user_id == ADMIN_USER else "user"
         return {"user": request.state.user_name, "mode": mode}
+
+    @api.get("/capabilities")
+    async def capabilities(access: AccessDep) -> dict[str, Any]:
+        """What this server can do for the caller, so the web app can hide what is missing."""
+        return {
+            "version": __version__,
+            "history": {"saved": settings.data_dir is not None},
+            "vision": any(
+                m.vision and model_status(m, access) == "ready" for m in engine.registry.all()
+            ),
+            "speech": speech.capabilities(engine, access),
+        }
+
+    # --- saved chats (the user's own history; never used for training) --------------
+
+    def chat_or_404(request: Request, chat_id: str) -> dict[str, Any]:
+        chat = history.get(engine.store, request.state.user_id, chat_id)
+        if chat is None:
+            raise APIError(404, "That chat no longer exists.", code="chat_not_found")
+        return chat
+
+    @api.get("/chats")
+    async def list_chats(request: Request, q: str = "", limit: int = 500) -> dict[str, Any]:
+        return {"chats": history.listing(engine.store, request.state.user_id, q[:200], limit)}
+
+    @api.put("/chats/{chat_id}")
+    async def save_chat(chat_id: str, request: Request) -> dict[str, Any]:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError
+        except ValueError:
+            raise APIError(400, "Send the chat as a JSON object.", code="bad_chat") from None
+        try:
+            return history.save(engine.store, request.state.user_id, chat_id, payload)
+        except history.ChatError as exc:
+            raise APIError(400, str(exc), code="bad_chat") from exc
+
+    @api.get("/chats/{chat_id}")
+    async def get_chat(chat_id: str, request: Request) -> dict[str, Any]:
+        return chat_or_404(request, chat_id)
+
+    @api.patch("/chats/{chat_id}")
+    async def patch_chat(chat_id: str, req: ChatPatch, request: Request) -> dict[str, Any]:
+        chat_or_404(request, chat_id)
+        user = request.state.user_id
+        if req.title is not None:
+            history.rename(engine.store, user, chat_id, req.title)
+        if req.pinned is not None:
+            history.pin(engine.store, user, chat_id, req.pinned)
+        return {"ok": True}
+
+    @api.delete("/chats/{chat_id}")
+    async def delete_chat(chat_id: str, request: Request) -> dict[str, Any]:
+        if not history.delete(engine.store, request.state.user_id, chat_id):
+            raise APIError(404, "That chat no longer exists.", code="chat_not_found")
+        return {"ok": True}
+
+    @api.delete("/chats")
+    async def delete_all_chats(request: Request) -> dict[str, Any]:
+        return {"deleted": history.delete(engine.store, request.state.user_id)}
+
+    @api.get("/chats/{chat_id}/export")
+    async def export_chat(chat_id: str, request: Request, format: str = "md") -> Response:
+        chat = chat_or_404(request, chat_id)
+        if format not in ("md", "json"):
+            raise APIError(400, "Export as `md` or `json`.", code="bad_format")
+        body = history.to_markdown(chat) if format == "md" else history.to_json(chat)
+        kind = "text/markdown" if format == "md" else "application/json"
+        name = f"{history.file_stem(chat)}.{format}"
+        return Response(
+            body,
+            media_type=f"{kind}; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+        )
+
+    # --- voice (needs a Groq key; the web app hides the buttons without one) ---------
+
+    def speech_failure(exc: speech.SpeechError) -> APIError:
+        return APIError(
+            exc.status, exc.message, code=exc.code, retry_after=exc.retry_after, kind="tempo_error"
+        )
+
+    @api.post("/speech/transcribe")
+    async def transcribe(request: Request, access: AccessDep, language: str | None = None):
+        try:
+            text = await speech.transcribe(
+                engine,
+                access,
+                await request.body(),
+                request.headers.get("content-type", ""),
+                language=language,
+                transport=app.state.speech_transport,
+            )
+        except speech.SpeechError as exc:
+            raise speech_failure(exc) from exc
+        return {"text": text}
+
+    @api.post("/speech/say", response_model=None)
+    async def say(req: SayRequest, access: AccessDep) -> Response:
+        try:
+            audio = await speech.say(
+                engine, access, req.text, voice=req.voice, transport=app.state.speech_transport
+            )
+        except speech.SpeechError as exc:
+            raise speech_failure(exc) from exc
+        return Response(audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
     @api.get("/quota")
     async def quota(access: AccessDep) -> dict[str, Any]:
@@ -650,6 +786,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                 "name": m.name,
                 "provider": m.provider,
                 "family": m.family,
+                "type": m.type,
                 "status": model_status(m, access),
                 "context_window": m.context_window,
                 "free_rpd": m.free_rpd,
@@ -672,6 +809,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
             provider["health"] = health.get(provider["id"])
         return {"providers": providers, "models": models}
 
+    app.mount("/static", _WebFiles(directory=web_dir), name="static")
     app.include_router(v1)
     app.include_router(api)
     return app

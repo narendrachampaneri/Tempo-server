@@ -489,7 +489,7 @@ class Pipeline:
             time_left_s=round(self.time_left(), 1),
             quota=quota,
         )
-        if self.e.store and self.e.settings.log_questions:
+        if self._logging:
             self.e.store.add_stage(
                 self.qid,
                 idx=stage,
@@ -834,7 +834,7 @@ class Pipeline:
                     execute.check_math, sandbox, answer.text, code, method
                 )
             self.emit("sandbox", stage=stage, model=answer.model, **result.as_dict())
-            if self.e.store and self.e.settings.log_questions:
+            if self._logging:
                 self.e.store.record_execution(self.qid, answer.stage, answer.model, result)
             if result.status == "failed" and result.error:
                 if kind == "code" or result.method == "rules":
@@ -1237,7 +1237,7 @@ class Pipeline:
         messages: list[dict[str, Any]],
         text: str,
     ) -> int | None:
-        if not self.e.store:
+        if not self.e.store or not self.o.log:
             return None
         now = self.clock()
         return self.e.store.add_call(
@@ -1333,8 +1333,12 @@ class Pipeline:
 
     # --- logging ---------------------------------------------------------------------------
 
+    @property
+    def _logging(self) -> bool:
+        return bool(self.e.store and self.e.settings.log_questions and self.o.log)
+
     def _log_start(self) -> None:
-        if self.e.store and self.e.settings.log_questions:
+        if self._logging:
             self.e.store.start_question(
                 self.qid,
                 user_id=self.o.access.user_id,
@@ -1344,7 +1348,7 @@ class Pipeline:
             )
 
     def _log(self, **fields: Any) -> None:
-        if not (self.e.store and self.e.settings.log_questions):
+        if not self._logging:
             return
         if self.profile is not None:
             fields.setdefault("profile", self.profile.model_dump())

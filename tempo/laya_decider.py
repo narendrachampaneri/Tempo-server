@@ -475,7 +475,7 @@ class LayaDecider:
             and (confidence or 0.0) >= self.settings.laya_min_confidence
         )
         value = laya_value if use_laya else rules_value
-        if self.store and pipeline.e.settings.log_questions:
+        if self.store and pipeline.e.settings.log_questions and pipeline.o.log:
             row_id = self.store.add_decision(
                 pipeline.qid,
                 stage=stage,
