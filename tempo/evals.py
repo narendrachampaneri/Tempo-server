@@ -198,7 +198,6 @@ class SkillBook:
         self._loaded = -REFRESH_S
         self._evals: dict[tuple[str, str], tuple[int, float]] = {}
         self._live: dict[tuple[str, str], tuple[int, float]] = {}
-        self._prior_latency: dict[str, tuple[int, float]] = {}
 
     def refresh(self, force: bool = False) -> None:
         if self.store is None or (not force and self._clock() - self._loaded < REFRESH_S):
@@ -210,17 +209,6 @@ class SkillBook:
         self._live = {
             (r["model"], r["task"]): (r["n"], r["score"]) for r in self.store.live_scores()
         }
-        for row in self.store.live_latency():
-            model = self.registry.get(row["model"])
-            if model is None or row["n"] < 5:
-                continue
-            prior = self._prior_latency.setdefault(model.id, (model.ttft_ms, model.tokens_per_sec))
-            weight = row["n"] / (row["n"] + PRIOR_WEIGHT)
-            if row["ttft_ms"] is not None:
-                model.ttft_ms = round(prior[0] * (1 - weight) + row["ttft_ms"] * weight)
-            if row["out_tokens"] and row["gen_ms"] and row["gen_ms"] > 0:
-                measured_tps = row["out_tokens"] / (row["gen_ms"] / 1000)
-                model.tokens_per_sec = prior[1] * (1 - weight) + measured_tps * weight
 
     def detail(self, model: ModelInfo, task: str) -> dict[str, Any]:
         self.refresh()

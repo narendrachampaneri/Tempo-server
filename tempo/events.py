@@ -98,6 +98,9 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         )
         if d.get("parts"):
             line += f" · {d['parts']} parts"
+        est = d.get("estimates") or {}
+        if est.get("draft"):
+            line += f" · answer ~{d.get('est_output_tokens', 0):,} tokens, ~{est['draft']:.0f}s"
         line += f" · {d['reason']}" if d.get("reason") else ""
         return line + (f" · {d['laya']}" if d.get("laya") else "")
     if kind == "stage_start":

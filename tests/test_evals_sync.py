@@ -73,13 +73,15 @@ def test_skillbook_blends_prior_probe_and_live_scores():
 
 
 def test_live_latency_updates_speed_estimates():
+    from tempo.speed import SpeedBook
+
     registry = make_registry()
     store = Store()
-    book = SkillBook(registry, store)
+    book = SpeedBook(registry)
     tiny = registry.get("local/tiny")
     for _ in range(20):
         store.add_call(model="local/tiny", status="ok", ms=1100, ttft_ms=100, output_tokens=100)
-    book.refresh(force=True)
+    assert book.load(store) == 20
     assert tiny.ttft_ms < 800  # moved from the 800 ms prior toward the measured 100 ms
     assert tiny.tokens_per_sec > 40  # measured 100 tokens/s against a 40 prior
 

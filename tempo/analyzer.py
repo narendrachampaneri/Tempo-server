@@ -127,6 +127,60 @@ _BASE_OUTPUT_TOKENS: dict[Task, int] = {
     "extract": 300,
 }
 
+# How long the answer will be: a whole file or app is long; "in one line" is short. Checked in
+# order; the first match wins (tokens).
+_LENGTH_HINTS: list[tuple[re.Pattern[str], int]] = [
+    (
+        re.compile(
+            r"\b(complete|full|entire|whole|working|single[- ]file|self[- ]contained)\b"
+            r"[^.?!\n]{0,40}"
+            r"\b(html|web ?page|website|landing page|app|application|game|program|script|"
+            r"file|module|dashboard|project)\b",
+            _I,
+        ),
+        3500,
+    ),
+    (
+        re.compile(
+            r"\b(html|web ?page|landing page|website|game|dashboard|todo app|calculator app)\b"
+            r"[^.?!\n]{0,40}\b(with|including|that has)\b",
+            _I,
+        ),
+        2500,
+    ),
+    (re.compile(r"\b(essay|article|report|chapter|story|blog post|documentation)\b", _I), 1500),
+    (
+        re.compile(
+            r"\b(in one (line|sentence|word)|one[- ]liner|briefly|in short|tl;?dr|yes or no|"
+            r"just the (answer|number|name))\b",
+            _I,
+        ),
+        60,
+    ),
+]
+_WORD_COUNT = re.compile(r"\b(\d{2,5})[- ]?(words?|शब्द|શબ્દ)\b", _I)
+_LINE_COUNT = re.compile(r"\b(\d{2,5})[- ]?(lines?)( of code)?\b", _I)
+
+
+def expected_output_tokens(text: str, task: Task, last_tokens: int) -> int:
+    """How many tokens the answer needs: from what was asked for (a full HTML file, 800 words,
+    one line), else from the task type."""
+    words = _WORD_COUNT.search(text)
+    if words:
+        return max(60, int(int(words.group(1)) * 1.4))
+    lines = _LINE_COUNT.search(text)
+    if lines and task == "code":
+        return max(100, int(lines.group(1)) * 12)
+    for pattern, tokens in _LENGTH_HINTS:
+        if pattern.search(text):
+            return tokens
+    if task == "translate":
+        return max(200, int(last_tokens * 1.2))
+    if task == "summarize":
+        return min(600, max(150, last_tokens // 5))
+    return _BASE_OUTPUT_TOKENS[task]
+
+
 _CONSTRAINTS = re.compile(
     r"\b(must|should|without|at least|at most|exactly|ensure|handle|edge cases?|"
     r"optimi[sz]e|efficient|include|avoid)\b",
@@ -264,12 +318,7 @@ def analyze(messages: Iterable[Mapping[str, Any]], task: Task | None = None) -> 
     last_tokens = estimate_tokens(last_user, script)
     complexity = _complexity(last_user, task, last_tokens)
 
-    if task == "translate":
-        est_output = max(200, int(last_tokens * 1.2))
-    elif task == "summarize":
-        est_output = min(600, max(150, last_tokens // 5))
-    else:
-        est_output = _BASE_OUTPUT_TOKENS[task]
+    est_output = expected_output_tokens(last_user, task, last_tokens)
 
     needs: list[str] = []
     if complexity >= 0.6 or (task in ("math", "reasoning") and complexity >= 0.45):

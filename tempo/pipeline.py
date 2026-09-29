@@ -38,7 +38,8 @@ from tempo.checks import (
 from tempo.events import Event
 from tempo.laya_decider import DIFFICULTY_COMPLEXITY, complexity_level, quality_level
 from tempo.providers import ERROR_LABELS, ProviderError
-from tempo.router import Candidate
+from tempo.router import TOO_SLOW, Candidate
+from tempo.speed import estimate_seconds
 from tempo.types import ModelInfo, QueryProfile
 
 if TYPE_CHECKING:
@@ -123,6 +124,7 @@ class Pipeline:
         # whose answer text has started (stage, slot) are finished, and what each call has
         # received so far is kept in case even the grace period runs out.
         self._time_up = False
+        self._time_capped = False  # the plan dropped stages that couldn't fit the time budget
         self._started: set[tuple[int, int]] = set()
         self._partial: dict[tuple[int, int], tuple[str, str]] = {}
         # OpenAI features: tool calling and strict JSON (validated per reply; tempo/compat.py).
@@ -254,9 +256,19 @@ class Pipeline:
         )
         return Answer(text=text, model=model_id, stage=stage, job=job, finish_reason="length")
 
+    def _stages_used(self) -> BudgetStop:
+        """No stage left. When the plan had to drop stages to fit the time budget, that is
+        the time budget speaking, and the note says so."""
+        if self._time_capped:
+            return BudgetStop(
+                "time",
+                f"the {self.o.time_budget_s:g}s time budget leaves no time for another stage",
+            )
+        return BudgetStop("stages", f"stage budget of {self.max_stages} used")
+
     def _need_stage(self, job: str) -> None:
         if self.stages_left() <= 0:
-            raise BudgetStop("stages", f"stage budget of {self.max_stages} used")
+            raise self._stages_used()
         if self._time_up or self.time_left() <= 0:
             raise BudgetStop("time", f"time budget of {self.o.time_budget_s:g}s reached")
 
@@ -318,7 +330,7 @@ class Pipeline:
                 self._log(error="requested model unavailable")
                 return
 
-        route = self._rank("draft")
+        route = self._rank("draft", fit=False)
         self._note_quota_fallback(route)
         if not route.candidates:
             self.emit(
@@ -332,9 +344,17 @@ class Pipeline:
 
         self.plan = await self._make_plan()
         self.max_stages = min(o.max_stages, self.plan.stage_budget)
+        estimates = self._stage_estimates()
+        fits = self._stages_that_fit(estimates)
+        if fits < self.max_stages:
+            self.max_stages = fits
+            self._time_capped = True
         self.emit(
             "plan",
             strategy=self.plan.strategy,
+            estimates={k: round(v, 1) for k, v in estimates.items()},
+            fits=fits,
+            est_output_tokens=p.est_output_tokens,
             max_stages=self.max_stages,
             drafts=self.plan.drafts,
             parts=len(self.plan.parts or []),
@@ -447,6 +467,36 @@ class Pipeline:
             reasons={"strategy": why},
         )
 
+    def _stage_estimates(self) -> dict[str, float]:
+        """Seconds each kind of stage is expected to take with the model the router would pick
+        now: from measured speed, the answer's expected length and the models' output limits."""
+        out: dict[str, float] = {}
+        for job, tokens in (
+            ("draft", self._job_tokens("draft")),
+            ("check", self._job_tokens("check")),
+            ("fix", self._job_tokens("fix")),
+        ):
+            ranked = self._rank(job, fit=False).candidates
+            if job == "check" and not self._want_judge():
+                out[job] = 0.0  # heuristics only
+            elif ranked:
+                out[job] = estimate_seconds(ranked[0].model, tokens)
+        return out
+
+    def _stages_that_fit(self, estimates: dict[str, float]) -> int:
+        """Stages (draft, then check and fix in turn) that fit the time budget. At least two
+        when two are allowed: a check with the heuristics alone takes no time."""
+        budget = self.o.time_budget_s
+        spent = estimates.get("draft", 0.0)
+        stages = 1
+        while stages < self.max_stages:
+            job = "check" if stages % 2 else "fix"
+            if spent + estimates.get(job, 0.0) > budget:
+                break
+            spent += estimates.get(job, 0.0)
+            stages += 1
+        return max(stages, min(2, self.max_stages))
+
     # --- ranking and model choice ----------------------------------------------------
 
     def _rank(
@@ -454,7 +504,10 @@ class Pipeline:
         job: str,
         profile: QueryProfile | None = None,
         exclude: Sequence[str] = (),
+        fit: bool = True,
     ):
+        """Models for this job, best first. ``fit``: only models that can finish it in the
+        time left, by their measured speed."""
         o = self.o
         p = profile or self.profile
         assert p is not None
@@ -477,7 +530,18 @@ class Pipeline:
             no_logging=o.no_logging,
             training_only=o.training_only,
             exclude_families=o.exclude_families or (),
+            time_left_s=self.time_left() if fit else None,
         )
+
+    def _job_tokens(self, job: str) -> int:
+        """Output tokens a job's reply is expected to have."""
+        if job in ("check", "split", "compute"):
+            return 200
+        return self.profile.est_output_tokens if self.profile else 500
+
+    def _too_slow(self, route: Any) -> bool:
+        """Every model left was skipped only because it can't finish in the time left."""
+        return not route.candidates and TOO_SLOW in route.skipped
 
     def _slots(self, ranked: list[Candidate], count: int) -> list[list[Candidate]]:
         """``count`` fallback lists whose first choices come from different model families."""
@@ -569,7 +633,21 @@ class Pipeline:
             )
 
     async def _draft(self, count: int, exclude_families: set[str] | None = None) -> None:
-        ranked = self._rank("draft").candidates
+        route = self._rank("draft")
+        ranked = route.candidates
+        if self._too_slow(route):
+            if self.answers:
+                raise BudgetStop("time", "no model can write another draft in the time left")
+            # Nothing is expected to finish in time and there is no answer yet: the fastest
+            # model is still better than no answer.
+            ranked = sorted(self._rank("draft", fit=False).candidates, key=lambda c: c.latency_s)
+            if ranked:
+                self.emit(
+                    "note",
+                    message=f"No model is expected to finish within the {self.time_left():.0f}s "
+                    f"left; trying the fastest, {ranked[0].model.id} "
+                    f"(~{ranked[0].latency_s:.0f}s).",
+                )
         if exclude_families:
             fresh = [c for c in ranked if c.model.family not in exclude_families]
             ranked = fresh or ranked
@@ -965,7 +1043,7 @@ class Pipeline:
                 if self._pending():
                     self.stop_reason = "unchecked"
                     return
-                raise BudgetStop("stages", f"stage budget of {self.max_stages} used")
+                raise self._stages_used()
             await self._check()
             best = self.best()
             assert best is not None and best.check is not None
@@ -993,7 +1071,7 @@ class Pipeline:
                 return
             left = self.stages_left()
             if left <= 0:
-                raise BudgetStop("stages", f"stage budget of {self.max_stages} used")
+                raise self._stages_used()
             latest = [a for a in self.answers if a.stage == max(x.stage for x in self.answers)]
             if left == 1:
                 await self._rewrite("polish")
@@ -1020,7 +1098,10 @@ class Pipeline:
         exclude: list[str] = []
         if job == "fix" and best.check and not best.check.passed:
             exclude = [best.model]
-        ranked = self._rank(job, exclude=exclude).candidates or self._rank(job).candidates
+        route = self._rank(job, exclude=exclude)
+        ranked = route.candidates or self._rank(job).candidates
+        if not ranked and (self._too_slow(route) or self._too_slow(self._rank(job))):
+            raise BudgetStop("time", f"no model can finish a {job} stage in the time left")
         if self.requests_left() <= 0:
             ranked = [c for c in ranked if self.e.registry.providers[c.model.provider].local]
         slots = await self._pick(job, ranked)
@@ -1193,6 +1274,7 @@ class Pipeline:
             if attempts and (
                 e.health.unavailable_reason(model)
                 or (e.quota and e.quota.blocked_reason(model, key_id))
+                or estimate_seconds(model, self._job_tokens(job)) > self.time_left()
             ):
                 continue
             if attempts:
@@ -1291,6 +1373,12 @@ class Pipeline:
             self._usage(model, key_id, messages, text, meta)
             call_id = self._log_call(stage, job, model, "ok", None, started, first, messages, text)
             now = self.clock()
+            e.speed.record(
+                model,
+                (first - started) if first is not None else None,
+                now - started,
+                (len(text) + len(reasoning)) // 4,
+            )
             self.emit(
                 "call_end",
                 stage=stage,
@@ -1397,6 +1485,12 @@ class Pipeline:
                     )
                     continue
                 e.health.record_success(candidate)
+                e.speed.record(
+                    candidate,
+                    (first - started) if first is not None else None,
+                    self.clock() - started,
+                    len(more) // 4,
+                )
                 self._usage(candidate, key_id, cont, more, meta)
                 self._log_call(stage, "continue", candidate, "ok", None, started, first, cont, more)
                 text += more

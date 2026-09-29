@@ -14,6 +14,12 @@ def events_of(result, kind):
     return [e for e in result.events if e.type == kind]
 
 
+def looks_fast(engine):
+    """Every model's speed figures say it is fast (as before any call is measured)."""
+    for model in engine.registry.all():
+        model.ttft_ms, model.tokens_per_sec = 100, 5000
+
+
 def jobs(result):
     return [e.data["job"] for e in events_of(result, "stage_start")]
 
@@ -134,6 +140,7 @@ async def test_time_budget_keeps_a_finished_draft_while_slower_drafts_are_cut():
     scripts = {"beta/mid": [("answer", "Quick draft from beta.")], "alpha/strong": slow}
     scripts["local/tiny"] = slow
     engine, _ = make_engine(scripts)
+    looks_fast(engine)  # the slow ones are only found out when called
     result = await engine.complete(user("hi"), engine.options(mode="best", time_budget_s=1))
     assert result.error is None
     assert result.text == "Quick draft from beta."
@@ -165,6 +172,7 @@ async def test_a_fix_that_finishes_after_the_deadline_is_the_answer():
         ],
     }
     engine, _ = make_engine(scripts)
+    looks_fast(engine)  # the plan allows a fix, which then runs past the deadline
     result = await engine.complete(user(CODE_Q), engine.options(time_budget_s=1))
     assert result.text.startswith("Fixed:") and result.text.endswith("s[::-1]\n```")
     assert events_of(result, "answer_final")[0].data["note"].endswith("(not checked yet).")

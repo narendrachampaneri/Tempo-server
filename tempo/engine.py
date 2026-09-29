@@ -31,6 +31,7 @@ from tempo.quota import QuotaManager
 from tempo.registry import Registry
 from tempo.router import Router, RouteResult
 from tempo.sandbox import Limits, Sandbox, sandbox_home
+from tempo.speed import SpeedBook
 from tempo.store import Store
 from tempo.sync import CATALOG_FILE, RegistrySync, load_catalog, save_catalog
 from tempo.types import MODES, Access, ModelInfo, QueryProfile
@@ -160,6 +161,7 @@ class Engine:
             self.store, load_vault_key(self.settings.secret_key, self.settings.data_dir)
         )
         self.skills = SkillBook(registry, self.store)
+        self.speed = SpeedBook(registry)  # measured time to first token and tokens a second
         self.router = Router(registry, self.health, self.quota, skill_of=self.skills.skill)
         # Runs code and maths answers in WebAssembly (tempo/sandbox.py); None when turned off.
         self.sandbox: Sandbox | None = None
@@ -216,6 +218,7 @@ class Engine:
         if self.settings.data_dir is not None:
             load_catalog(self.registry, self.settings.data_dir / CATALOG_FILE)
         await self.registry.discover_ollama()
+        self.speed.load(self.store)
         loop = asyncio.get_running_loop()
         if self.laya is not None:
             if oneshot and self.settings.laya != "on":

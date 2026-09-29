@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from tempo.health import HealthTracker
 from tempo.quota import QuotaLeft, QuotaManager
 from tempo.registry import Registry, expired
+from tempo.speed import estimate_seconds
 from tempo.types import FLAGGED_POLICIES, Access, ModelInfo, QueryProfile
 
 SkillFn = Callable[[ModelInfo, str], float]
@@ -34,8 +35,8 @@ MODE_WEIGHTS: dict[str, Weights] = {
     "private": Weights(quality=0.70, scarcity=0.15, latency=0.15),
 }
 
-# Extra hidden "thinking" tokens a reasoning model spends before answering.
-REASONING_OVERHEAD_TOKENS = 300
+# Skip reason for a model that can't finish in the time left.
+TOO_SLOW = "can't finish in the time left"
 # Utility lost by a model whose endpoints are degraded or under 95% success in 30 minutes.
 DEGRADED_PENALTY = 0.2
 
@@ -78,8 +79,18 @@ def predicted_quality(
 
 
 def expected_latency(model: ModelInfo, profile: QueryProfile) -> float:
-    tokens = profile.est_output_tokens + (REASONING_OVERHEAD_TOKENS if model.reasoning else 0)
-    return model.ttft_ms / 1000 + tokens / max(model.tokens_per_sec, 1.0)
+    """Seconds for this answer, from the model's measured speed (tempo/speed.py)."""
+    return estimate_seconds(model, profile.est_output_tokens)
+
+
+def weights_for(mode: str, profile: QueryProfile) -> Weights:
+    """Auto mode prefers fast models for simple questions and quality for hard ones: speed
+    counts twice as much at complexity 0 as the fixed weights give it, and less as the
+    question gets harder."""
+    if mode != "auto":
+        return MODE_WEIGHTS.get(mode, MODE_WEIGHTS["auto"])
+    latency = round(0.30 - 0.20 * profile.complexity, 3)
+    return Weights(quality=round(0.85 - latency, 3), scarcity=0.15, latency=latency)
 
 
 def scarcity(model: ModelInfo, rpd_left: int | None = None) -> float:
@@ -210,7 +221,7 @@ class Router:
         return score(
             model,
             profile,
-            MODE_WEIGHTS.get(mode, MODE_WEIGHTS["auto"]),
+            weights_for(mode, profile),
             skill_of=self.skill_of,
             quota_left=left,
         )
@@ -228,7 +239,10 @@ class Router:
         no_logging: bool = False,
         training_only: bool = False,
         exclude_families: Iterable[str] = (),
+        time_left_s: float | None = None,
     ) -> RouteResult:
+        """``time_left_s``: skip models that can't finish this answer in the time left (by
+        their measured speed)."""
         local_only = local_only or mode == "private"
         allowed = list(allow_providers) if allow_providers is not None else None
         excluded = set(exclude)
@@ -253,7 +267,11 @@ class Router:
             if reason:
                 skipped.setdefault(reason, []).append(model.id)
                 continue
-            candidates.append(self.candidate(model, profile, mode, access))
+            candidate = self.candidate(model, profile, mode, access)
+            if time_left_s is not None and candidate.latency_s > time_left_s:
+                skipped.setdefault(TOO_SLOW, []).append(model.id)
+                continue
+            candidates.append(candidate)
 
         # Stable models first, then previews, then last-resort routers; by utility within each.
         candidates.sort(

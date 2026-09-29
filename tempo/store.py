@@ -394,14 +394,6 @@ class Store:
             (since,),
         )
 
-    def live_latency(self, since: float = 0.0) -> list[dict[str, Any]]:
-        return self.query(
-            "SELECT model, COUNT(*) AS n, AVG(ttft_ms) AS ttft_ms, "
-            "SUM(output_tokens) AS out_tokens, SUM(ms - COALESCE(ttft_ms, 0)) AS gen_ms "
-            "FROM calls WHERE status = 'ok' AND created_at >= ? GROUP BY model",
-            (since,),
-        )
-
     # --- Laya comparison -------------------------------------------------------------
 
     def save_laya_compare(
