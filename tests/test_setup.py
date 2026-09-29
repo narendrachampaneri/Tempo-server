@@ -97,3 +97,30 @@ def test_owner_keys_from_setup_serve_the_admin_but_no_other_user(home):
     assert engine.access_for(ADMIN_USER).user_keys == {"groq": "placeholder-groq-key"}
     friend, _ = engine.accounts.create_user("friend")
     assert engine.access_for(friend.id).user_keys == {}
+
+
+def test_non_interactive_setup_asks_and_stores_nothing(home, monkeypatch):
+    tmp_path, checked = home
+    monkeypatch.setenv("GROQ_API_KEY", "placeholder-env-key")
+    result = CliRunner().invoke(
+        app, ["setup", "--non-interactive", "--no-sync", "--only", "groq,gemini,nvidia"], input=""
+    )
+    assert result.exit_code == 0, result.output
+    assert "Key from GROQ_API_KEY (fp:" in result.output
+    assert "No key yet." in result.output and "Off (turn on" in result.output
+    assert "placeholder-env-key" not in result.output
+    assert checked == [] and vault_keys() == {}
+    assert not (tmp_path / "settings.env").exists()
+
+
+def test_version_and_the_alias_notice(capsys, monkeypatch):
+    from tempo import __version__, cli
+
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0 and result.output.strip() == f"tempo-server {__version__}"
+    monkeypatch.setattr(cli.sys, "argv", ["tempo", "--version"])
+    with pytest.raises(SystemExit):
+        cli.main_alias()
+    captured = capsys.readouterr()
+    assert "removed before Tempo-server 1.0" in captured.err
+    assert f"tempo-server {__version__}" in captured.out

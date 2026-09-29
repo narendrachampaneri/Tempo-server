@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 # Who counts as the owner: the implicit local user and the TEMPO_API_KEY admin.
 OWNER_IDS = frozenset({"local", "admin"})
-# The owner's own background jobs (tempo collect), which may use the owner's server keys.
+# The owner's own background jobs (tempo-server collect), which may use the owner's server keys.
 OWNER_JOBS = frozenset({"collect"})
 
 OLLAMA_DEFAULT_BASE = "http://localhost:11434"

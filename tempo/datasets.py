@@ -1,4 +1,4 @@
-"""Openly licensed public question sets for `tempo collect`, with their licences.
+"""Openly licensed public question sets for `tempo-server collect`, with their licences.
 
 Every dataset records its licence and where it was checked, and none holds private personal
 data by its own documentation. On top of that, items that look like they contain an email

@@ -1,4 +1,4 @@
-"""`tempo terms --check`: fetch each provider's terms page and check that the sentences each
+"""`tempo-server terms --check`: fetch each provider's terms page and check that the sentences each
 training verdict and data policy rests on are still there, word for word.
 
 A verdict whose quote is gone is reported as "changed" (the terms may have moved on); a page
@@ -78,7 +78,7 @@ async def check(
         transport=transport,
         timeout=30.0,
         follow_redirects=True,
-        headers={"User-Agent": "Mozilla/5.0 (tempo terms check)"},
+        headers={"User-Agent": "Mozilla/5.0 (tempo-server terms check)"},
     ) as client:
         for provider in registry.providers.values():
             if provider.local or provider.id == "mock" or not provider.training_terms_url:

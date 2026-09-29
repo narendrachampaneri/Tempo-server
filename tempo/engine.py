@@ -62,12 +62,12 @@ class RunOptions:
     restart_on_partial_failure: bool = True
     use_cache: bool = True
     access: Access = field(default_factory=Access)
-    # Share of each model's daily free quota to leave untouched (tempo collect keeps some for
+    # Share of each model's daily free quota to leave untouched (tempo-server collect keeps some for
     # real users); 0 uses everything.
     quota_reserve: float = 0.0
     # Privacy "no_logging": never send to models whose free tier may log or train on prompts.
     no_logging: bool = False
-    # Only models whose outputs may be training data (tempo collect --yes-only).
+    # Only models whose outputs may be training data (tempo-server collect --yes-only).
     training_only: bool = False
     # OpenAI request features: tool calling and structured output (tempo/compat.py).
     tools: list[dict[str, Any]] | None = None
@@ -245,7 +245,8 @@ class Engine:
 
     def listing_keys(self) -> dict[str, str]:
         """Keys used only to read providers' model lists: the owner's keys from the vault (what
-        `tempo setup` stores), and for providers that take only users' own keys, one user's."""
+        `tempo-server setup` stores), and for providers that take only users' own keys, one
+        user's."""
         from tempo.accounts import ADMIN_USER, LOCAL_USER
 
         byok = {p.id for p in self.registry.providers.values() if p.byok_only}
@@ -277,7 +278,8 @@ class Engine:
 
     def access_for(self, user_id: str) -> Access:
         """The credentials a user's requests run with: their own keys, then the server's. The
-        admin (TEMPO_API_KEY holder) is the owner, so also gets the keys `tempo setup` stored."""
+        admin (TEMPO_API_KEY holder) is the owner, so also gets the keys `tempo-server setup`
+        stored."""
         from tempo.accounts import ADMIN_USER, LOCAL_USER
 
         keys = self.accounts.keys(user_id)
@@ -325,14 +327,14 @@ class Engine:
         reasons = route.skipped_summary()
         if set(reasons) <= {"provider not configured"}:
             return (
-                "No model providers are configured. Run `tempo setup` to add your free keys "
+                "No model providers are configured. Run `tempo-server setup` to add your free keys "
                 "(or set them in .env), or start Ollama for local models."
             )
         if any("used up" in reason for reason in reasons):
             return (
                 "Free quota is used up on every provider for now, and no local model is "
-                "running. Start Ollama for local answers (tempo setup), or try again later "
-                "(see Retry-After and `tempo quota`)."
+                "running. Start Ollama for local answers (tempo-server setup), or try again later "
+                "(see Retry-After and `tempo-server quota`)."
             )
         detail = ", ".join(f"{n} {reason}" for reason, n in reasons.items())
         return f"No available model can handle this request ({detail})."

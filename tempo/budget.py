@@ -1,6 +1,6 @@
 """Free capacity per provider: how many requests a day the free tiers give, and what is left
-today. Used by `tempo setup`, `tempo quota`, the web page's quota panel, and the fallback to
-local models when every free quota is used up."""
+today. Used by `tempo-server setup`, `tempo-server quota`, the web page's quota panel, and the
+fallback to local models when every free quota is used up."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""The live free-model catalog: one row per model, as `tempo models --free` shows it."""
+"""The live free-model catalog: one row per model, as `tempo-server models --free` shows it."""
 
 from __future__ import annotations
 

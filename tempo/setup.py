@@ -1,4 +1,4 @@
-"""`tempo setup`: walk a new user through each free provider.
+"""`tempo-server setup`: walk a new user through each free provider.
 
 For each provider it shows where to get a key, the free limits (with their source and date), the
 terms (may outputs train other models, what the free tier does with prompts) and any rule Tempo
@@ -108,7 +108,7 @@ def write_settings(path: Path | None, updates: dict[str, str | None]) -> None:
         else:
             values[name] = value
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# Written by `tempo setup`. Non-secret settings only: keys live in the vault."]
+    lines = ["# Written by `tempo-server setup`. Non-secret settings only: keys live in the vault."]
     lines += [f"{name}={value}" for name, value in sorted(values.items())]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -178,8 +178,11 @@ async def probe_ollama(base: str, transport: httpx.AsyncBaseTransport | None = N
 
 
 class Wizard:
-    def __init__(self, engine: Engine, console: Console, sync: bool = True) -> None:
+    def __init__(
+        self, engine: Engine, console: Console, sync: bool = True, interactive: bool = True
+    ) -> None:
         self.engine = engine
+        self.interactive = interactive
         self.console = console
         self.sync = sync
         self.settings_file = settings_path(engine)
@@ -191,11 +194,18 @@ class Wizard:
     def run(self, only: set[str] | None = None) -> None:
         registry = self.engine.registry
         self.say("Tempo-server setup", style="bold")
-        self.say(
-            "Each provider below has a free tier. Paste your own key, or press Enter to skip. "
-            "Keys are checked with the provider, stored encrypted, and never shown again "
-            "(only a fingerprint)."
-        )
+        if self.interactive:
+            self.say(
+                "Each provider below has a free tier. Paste your own key, or press Enter to "
+                "skip. Keys are checked with the provider, stored encrypted, and never shown "
+                "again (only a fingerprint)."
+            )
+        else:
+            self.say(
+                "Non-interactive: nothing is asked or stored. Shows which keys Tempo-server "
+                "already has (the vault, or the environment) and what each provider offers. "
+                "Run `tempo-server setup` in a terminal to add keys."
+            )
         if self.settings_file is None:
             self.say("TEMPO_DATA_DIR=memory: nothing is saved after this run.", style="yellow")
         for pid in ORDER:
@@ -226,8 +236,8 @@ class Wizard:
         if count is None:
             self.say(
                 f"Ollama is not running at {base}. Optional: install it, then run "
-                "`ollama pull qwen3:1.7b` and `tempo setup --only ollama` again. Local models "
-                "answer simple questions (saving free quota) and take over when every free "
+                "`ollama pull qwen3:1.7b` and `tempo-server setup --only ollama` again. Local "
+                "models answer simple questions (saving free quota) and take over when every free "
                 "quota is used up."
             )
             return
@@ -239,6 +249,9 @@ class Wizard:
     def keyed(self, provider: ProviderInfo) -> None:
         registry = self.engine.registry
         pid = provider.id
+        if not self.interactive:
+            self.report(provider)
+            return
         question = OPT_IN.get(pid)
         if question is not None and not registry.is_enabled(pid):
             if not typer.confirm(question, default=False):
@@ -281,6 +294,20 @@ class Wizard:
         state = "verified" if verified else "stored (could not verify now)"
         self.say(f"{provider.label} key {fingerprint(api_key)} {state}.", style="green")
         self.stored.append(pid)
+
+    def report(self, provider: ProviderInfo) -> None:
+        """Non-interactive: say whether a key is there, without asking or storing anything."""
+        registry = self.engine.registry
+        stored = self.engine.accounts.keys(LOCAL_USER).get(provider.id)
+        env_key = os.environ.get(provider.key_env or "", "").strip()
+        if not registry.is_enabled(provider.id):
+            self.say("Off (turn on with `tempo-server setup` in a terminal).")
+        elif stored:
+            self.say(f"Key in the vault ({fingerprint(stored)}).", style="green")
+        elif env_key and not provider.byok_only:
+            self.say(f"Key from {provider.key_env} ({fingerprint(env_key)}).", style="green")
+        else:
+            self.say("No key yet.")
 
     def enable(self, provider: ProviderInfo) -> None:
         if provider.enabled:
@@ -333,7 +360,10 @@ def summary(engine: Engine, console: Console) -> int:
         console.print(text, markup=False, highlight=False)
 
     if not view:
-        say("No provider is set up yet. Run `tempo setup` again with a free key, or start Ollama.")
+        say(
+            "No provider is set up yet. Run `tempo-server setup` again with a free key, or "
+            "start Ollama."
+        )
     else:
         say(f"In total about {total:,} free requests a day, plus any local models.")
         say(

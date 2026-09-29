@@ -350,7 +350,7 @@ class Store:
             (decision, n, laya_accuracy, rules_accuracy, time.time(), laya_model),
         )
 
-    # --- tempo collect ------------------------------------------------------------
+    # --- tempo-server collect ------------------------------------------------------------
 
     def collect_item(self, dataset: str, item_id: str) -> dict[str, Any] | None:
         rows = self.query(

@@ -979,16 +979,16 @@ model: "<registry id>"   try that model first, e.g. "groq/openai/gpt-oss-120b"
 
 Streams carry the checked final answer; with "max_stages": 1 tokens stream live.`;
   $("#snip-cli").textContent =
-`tempo ask "What is the capital of Australia?"
-tempo ask --mode best "Prove that the square root of 2 is irrational"
-tempo ask --private "Summarize this" < notes.txt
-tempo ask --max-stages 10 --time-budget 90 "Plan a 3-day trip to Jaipur with a budget"
-tempo chat
-tempo models
-tempo keys add groq          # your own key, stored encrypted
-tempo eval --limit 2         # measure models on the probe set
-tempo export-laya --out ds   # decisions for Laya's fine-tuning notebook
-tempo serve --port 8000`;
+`tempo-server ask "What is the capital of Australia?"
+tempo-server ask --mode best "Prove that the square root of 2 is irrational"
+tempo-server ask --private "Summarize this" < notes.txt
+tempo-server ask --max-stages 10 --time-budget 90 "Plan a 3-day trip to Jaipur with a budget"
+tempo-server chat
+tempo-server models
+tempo-server keys add groq          # your own key, stored encrypted
+tempo-server eval --limit 2         # measure models on the probe set
+tempo-server export-laya --out ds   # decisions for Laya's fine-tuning notebook
+tempo-server serve --port 8000`;
 
   refreshStatus();
   loadQuota();

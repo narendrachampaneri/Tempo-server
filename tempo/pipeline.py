@@ -559,7 +559,8 @@ class Pipeline:
             )
 
     def _local_first(self, ranked: list[Candidate]) -> list[Candidate]:
-        """Simple questions go to a local model first when Ollama has one (TEMPO_LOCAL_FIRST)."""
+        """Simple questions go to a local model first when Ollama is running with a model
+        installed (TEMPO_LOCAL_FIRST=auto, the default; off turns it off)."""
         s, p = self.e.settings, self.profile
         if s.local_first == "off" or p is None or self.o.mode in ("best", "private"):
             return ranked
@@ -567,11 +568,21 @@ class Pipeline:
             return ranked
         if p.complexity > s.local_first_max_complexity:
             return ranked
-        local = [c for c in ranked if self.e.registry.providers[c.model.provider].local]
+        # Only a model Ollama reported as installed: Ollama is running and has it.
+        local = [
+            c
+            for c in ranked
+            if self.e.registry.providers[c.model.provider].local and c.model.installed is True
+        ]
         if not local or local[0] is ranked[0]:
             return ranked
         best = local[0]
         best.why = "simple question: a local model saves free quota"
+        self.emit(
+            "note",
+            message=f"Local first: a simple question, so local model {best.model.id} answers "
+            "and your free quota is saved (turn off with TEMPO_LOCAL_FIRST=off).",
+        )
         return [best, *[c for c in ranked if c is not best]]
 
     async def _tools(self) -> None:
@@ -788,7 +799,7 @@ class Pipeline:
             rules_level = quality_level(best.check.score)
             threshold = PASS_THRESHOLD.get(self.o.mode, PASS_THRESHOLD["auto"])
             heuristic = best.check.heuristic_score or 0.0
-            baseline = {  # what the heuristics alone would decide (for `tempo laya compare`)
+            baseline = {  # what the heuristics alone would decide (for `tempo-server laya compare`)
                 "heuristic_level": quality_level(heuristic),
                 "heuristic_passed": heuristic >= threshold and not best.check.hard_fail,
                 "judged": best.check.judge_score is not None,

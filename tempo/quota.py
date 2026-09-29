@@ -185,7 +185,7 @@ class QuotaManager:
         self, model: ModelInfo, key_id: str = "server", tokens: int = 0, reserve: float = 0.0
     ) -> str | None:
         """Why this model cannot take a request of ``tokens`` now. ``reserve`` keeps that share
-        of each daily free limit untouched (for background jobs such as `tempo collect`)."""
+        of each daily free limit untouched (for background jobs such as `tempo-server collect`)."""
         left = self.left(model, key_id)
         if left.rpmonth == 0:
             return "free requests/month used up"

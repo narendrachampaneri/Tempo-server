@@ -44,10 +44,10 @@ embeddings = ["fastembed>=0.5"]
 terms = ["pypdf>=4"]
 
 [project.scripts]
-# `tempo-server` is the main command: Grafana Tempo also installs a `tempo` program, so the short
-# name is kept only as a convenience (docs/PUBLISHING.md, "Name").
+# `tempo-server` is the command. Grafana Tempo also installs a `tempo` program, so the short
+# alias prints a notice and goes away before 1.0 (owner's decision, step 6).
 tempo-server = "tempo.cli:main"
-tempo = "tempo.cli:main"
+tempo = "tempo.cli:main_alias"
 
 [tool.setuptools.packages.find]
 include = ["tempo*"]

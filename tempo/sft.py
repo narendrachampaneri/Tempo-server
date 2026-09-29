@@ -1,5 +1,5 @@
-"""Training data for Tempo's own writing model (Tempo-Core): `tempo export-sft` and
-`tempo export-pairs`.
+"""Training data for Tempo's own writing model (Tempo-Core): `tempo-server export-sft` and
+`tempo-server export-pairs`.
 
 - **SFT rows**: the conversation, then the checked final answer. Only questions whose final
   answer passed its check (stop reason ``passed``) and got no 👎.
@@ -8,10 +8,10 @@
   first, else the lowest score).
 
 Only "yes" rows: every model whose text or grade shaped the question (drafts, fixes, judges)
-must be "yes" (`tempo terms`), and the question itself must come from an openly licensed
-dataset (`tempo collect`) or from the owner. Every row carries its source and licences. The
-train/test split is by question, with the same hash as `tempo export-laya`, so a question is in
-the held-out set of every export.
+must be "yes" (`tempo-server terms`), and the question itself must come from an openly
+licensed dataset (`tempo-server collect`) or from the owner. Every row carries its source and
+licences. The train/test split is by question, with the same hash as `tempo-server export-laya`,
+so a question is in the held-out set of every export.
 
 Nothing here trains anything; the plan is in docs/TEMPO_MODELS.md.
 """
@@ -31,10 +31,10 @@ from tempo.registry import Registry
 from tempo.store import Store
 from tempo.tuning import OWN_TRAFFIC, _licence, _loads, _split, _terms
 
-# Whose questions may become training data without asking: `tempo collect` (public datasets)
+# Whose questions may become training data without asking: `tempo-server collect` (public datasets)
 # and the owner (the local user and the TEMPO_API_KEY admin). Other users' questions are used
-# only if that user opted in (`tempo users consent`, off by default, can be withdrawn); text from
-# Tempo's own traffic is scrubbed of personal data first (tempo/privacy.py).
+# only if that user opted in (`tempo-server users consent`, off by default, can be withdrawn);
+# text from Tempo's own traffic is scrubbed of personal data first (tempo/privacy.py).
 DEFAULT_USERS = frozenset({"collect", "local", "admin"})
 ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
 
@@ -257,7 +257,7 @@ def mix_warnings(stats: SftStats, min_public: float, max_self: float) -> list[st
     if stats.rows and stats.public_share < min_public:
         notes.append(
             f"public or human data is {stats.public_share:.0%} of training rows, below "
-            f"{min_public:.0%}: add public data (tempo collect) before training"
+            f"{min_public:.0%}: add public data (tempo-server collect) before training"
         )
     if stats.self_share > max_self:
         notes.append(

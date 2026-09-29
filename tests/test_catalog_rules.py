@@ -165,7 +165,7 @@ async def test_eval_and_collect_refuse_blocked_providers():
     await run_evals(engine, engine.registry.all(), tasks=["chat"], limit=1)
     assert not any(m.startswith("alpha/") for m in backend.called)
     assert "alpha" not in col.default_providers(engine.registry)
-    with pytest.raises(ValueError, match="not allowed for tempo collect: alpha"):
+    with pytest.raises(ValueError, match="not allowed for tempo-server collect: alpha"):
         await col.run(engine, {}, providers=["alpha"])
 
 

@@ -1,6 +1,6 @@
 """Measured skill scores.
 
-``tempo eval`` sends a small probe set (tempo/data/evalset.yaml) to each model, grades every
+``tempo-server eval`` sends a small probe set (tempo/data/evalset.yaml) to each model, grades every
 reply automatically, and stores a score per (model, task). Real traffic adds the judge's scores
 from check stages. ``SkillBook`` blends both with the registry's priors, weighted by how many
 samples back them, and the router uses the result as each model's skill.

@@ -4,7 +4,7 @@ Listing models costs no generation quota, so it doubles as a health check: a 401
 key is bad (the whole provider cools down), a timeout or 5xx is reported as degraded. Models a
 provider no longer lists are marked ``listed=False`` and skipped by the router; new models are
 added with their type (chat, code, vision, speech-to-text, ...) and priors guessed from their
-name and size until `tempo eval` measures them.
+name and size until `tempo-server eval` measures them.
 
 Public lists are read without a key (OpenRouter, NVIDIA, OpenCode Zen); the others only when a
 key is set. OpenRouter's free models also get a health check from their endpoint list, at most

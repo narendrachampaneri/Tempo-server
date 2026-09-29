@@ -77,7 +77,9 @@ def parse_takeover(spec: str) -> dict[str, str]:
     return modes
 
 
-SETTINGS_FILE = "settings.env"  # non-secret settings `tempo setup` writes in the data directory
+SETTINGS_FILE = (
+    "settings.env"  # non-secret settings `tempo-server setup` writes in the data directory
+)
 
 
 @dataclass(frozen=True)
@@ -150,8 +152,8 @@ class Settings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         if env is None:
             load_dotenv(override=False)
-            # Non-secret settings written by `tempo setup` (never keys: those are encrypted in
-            # the vault). The environment and .env win over them.
+            # Non-secret settings written by `tempo-server setup` (never keys: those are encrypted
+            # in the vault). The environment and .env win over them.
             home = resolve_data_dir(os.environ)
             if home is not None and (home / SETTINGS_FILE).exists():
                 load_dotenv(home / SETTINGS_FILE, override=False)

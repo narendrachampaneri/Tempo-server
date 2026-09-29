@@ -10,7 +10,7 @@ one forward pass. It does not generate text. Tempo asks it three groups of quest
 
 Every decision starts in shadow mode: Laya predicts, the rules decide, and both are logged so
 Laya can be fine-tuned on Tempo's own outcomes. TEMPO_LAYA_TAKEOVER hands a decision to Laya
-("laya"), or to Laya only once `tempo laya compare` shows it beats the rules on held-out data
+("laya"), or to Laya only once `tempo-server laya compare` shows it beats the rules on held-out data
 ("auto"). If Laya is missing, errors, is busy, or takes longer than the timeout (200 ms by
 default), the rules decide and the reason is logged.
 
@@ -414,7 +414,7 @@ class LayaDecider:
 
     async def drain(self, timeout: float = 60.0) -> None:
         """Wait for predictions still running, so their answers reach the log (tests, and
-        commands such as `tempo collect` before they exit)."""
+        commands such as `tempo-server collect` before they exit)."""
         if self._running:
             await asyncio.wait(list(self._running), timeout=timeout)
         for _ in range(3):  # let the done-callbacks that write the log run
@@ -592,7 +592,7 @@ class LayaDecider:
         finished: str = "late",
     ) -> None:
         """A prediction nobody waited for (or that ran past the limit) finished: record what
-        Laya said, for tuning and for `tempo laya compare`."""
+        Laya said, for tuning and for `tempo-server laya compare`."""
         if self.store is None or done.cancelled():
             return
         if done.exception() is not None:

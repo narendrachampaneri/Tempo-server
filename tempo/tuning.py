@@ -278,7 +278,7 @@ class ExportStats:
     skipped_terms: int = 0
     unclear_terms_providers: set[str] = field(default_factory=set)
     unverified_providers: set[str] = field(default_factory=set)  # terms check did not pass
-    sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo collect)
+    sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo-server collect)
 
 
 def _terms(
@@ -307,7 +307,7 @@ def _terms(
     return "yes" if "yes" in verdicts else "unclear"
 
 
-# Questions typed by Tempo's own users (not from a `tempo collect` dataset).
+# Questions typed by Tempo's own users (not from a `tempo-server collect` dataset).
 OWN_TRAFFIC = {
     "dataset": "tempo-traffic",
     "license": "owner's own questions (not published)",
@@ -464,8 +464,8 @@ def build_rows(
 
 NOTEBOOK_README = """# Tempo decisions for fine-tuning Laya
 
-Exported by `tempo export-laya`. Same columns as `LocalLLaMA/typed-decisions`, which the official
-notebook `notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb` trains on.
+Exported by `tempo-server export-laya`. Same columns as `LocalLLaMA/typed-decisions`, which the
+official notebook `notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb` trains on.
 
 - `train.jsonl`: {train} rows · `test.jsonl`: {test} rows (split by question, so no leakage)
 - workflows: {workflows}
@@ -499,8 +499,8 @@ question went), `judge` / `judge+feedback` (the LLM judge's grade, moved by thum
 A row is left out when any model that answered or judged its question (so its text or its labels
 come from that model) belongs to a provider marked `training_on_outputs: no` in the registry,
 and so were `unclear` ones{unclear_note}. Providers marked unclear that appeared in the log:
-{unclear}. `tempo terms` shows each provider's verdict, the link and the exact sentences it rests
-on.
+{unclear}. `tempo-server terms` shows each provider's verdict, the link and the exact sentences
+it rests on.
 
 ## Where the questions came from
 
@@ -510,9 +510,9 @@ on.
 
 def _sources_text(sources: dict[str, int]) -> str:
     if not sources:
-        return "All questions came from Tempo's own traffic (no `tempo collect` datasets)."
+        return "All questions came from Tempo's own traffic (no `tempo-server collect` datasets)."
     lines = [
-        "Rows from `tempo collect` carry `factors.source` with the dataset and its licence:",
+        "Rows from `tempo-server collect` carry `factors.source` with the dataset and its licence:",
         "",
     ]
     share_alike = False

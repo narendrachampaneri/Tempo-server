@@ -1,5 +1,5 @@
-"""`tempo collect`: make Laya training data by running openly licensed public questions through
-Tempo, slowly and within every free limit.
+"""`tempo-server collect`: make Laya training data by running openly licensed public questions
+through Tempo, slowly and within every free limit.
 
 - One question at a time, at most ``per_minute`` questions a minute.
 - Never works around a limit: no extra keys, no retries against a model that said 429. The
@@ -118,7 +118,7 @@ async def run(
     providers = providers if providers is not None else default_providers(engine.registry)
     blocked = [p for p in providers if engine.registry.blocked_for(p, "collect")]
     if blocked:
-        raise ValueError(f"not allowed for tempo collect: {', '.join(blocked)}")
+        raise ValueError(f"not allowed for tempo-server collect: {', '.join(blocked)}")
     gap = 60.0 / per_minute if per_minute > 0 else 0.0
     options = engine.options(
         mode="auto",
@@ -127,7 +127,7 @@ async def run(
         use_cache=False,
         live=False,
         quota_budget=min(engine.settings.quota_budget, 6),
-        # the owner's job: the owner's keys (from `tempo setup`), counted in the same buckets
+        # the owner's job: the owner's keys (from `tempo-server setup`), counted in the same buckets
         access=Access(user_id=COLLECT_USER, user_keys=engine.access_for(LOCAL_USER).user_keys),
         training_only=yes_only,
     )

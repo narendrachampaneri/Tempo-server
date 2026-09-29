@@ -46,10 +46,16 @@ async def test_used_up_with_no_local_model_explains_what_to_do():
 
 async def test_local_first_sends_simple_questions_to_ollama():
     engine, backend = make_engine(local_first="auto")
+    tiny = engine.registry.get("local/tiny")
+    tiny.installed = None  # Ollama not reached: no local first
+    assert (await engine.complete(user("hi there"))).model != "local/tiny"
+    tiny.installed = True  # reported by a running Ollama
     simple = await engine.complete(user("hi there"))
     assert simple.model == "local/tiny"
     stage = next(e for e in simple.events if e.type == "stage_start")
     assert "local model saves free quota" in stage.text
+    notes = [e.text for e in simple.events if e.type == "note"]
+    assert notes and "Local first" in notes[0] and "TEMPO_LOCAL_FIRST=off" in notes[0]
     hard = await engine.complete(
         user("Write a production-ready, thread-safe LRU cache in Python with unit tests")
     )

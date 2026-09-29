@@ -1,12 +1,13 @@
 """The ``tempo`` command: ask questions, chat, list models, run the server.
 
-Trace lines go to stderr and the answer to stdout, so ``tempo ask "..." > answer.md`` works.
+Trace lines go to stderr and the answer to stdout, so ``tempo-server ask "..." > answer.md`` works.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Annotated, Any
@@ -15,6 +16,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from tempo import paths
 from tempo.config import Settings
 from tempo.engine import DEFAULT_SYSTEM_PROMPT, Engine, RunOptions, RunResult, collect
 from tempo.types import MODES
@@ -25,6 +27,26 @@ app = typer.Typer(
     help="Tempo-server: ask once, and Tempo picks the best available free or open-source model.",
 )
 err = Console(stderr=True, highlight=False)
+
+
+def _version(value: bool) -> None:
+    if value:
+        from tempo import __version__
+
+        print(f"tempo-server {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_version, is_eager=True, help="Show the version."),
+    ] = False,
+) -> None:
+    """Tempo-server: ask once, and Tempo picks the best available free or open-source model."""
+
+
 out = Console(highlight=False)
 
 ModeOption = Annotated[str, typer.Option("--mode", "-m", help=f"Routing mode: {', '.join(MODES)}.")]
@@ -33,7 +55,7 @@ NoLoggingOption = Annotated[
     bool,
     typer.Option(
         "--no-logging",
-        help="Never use models whose free tier may log or train on prompts (tempo terms).",
+        help="Never use models whose free tier may log or train on prompts (tempo-server terms).",
     ),
 ]
 TraceOption = Annotated[
@@ -363,7 +385,7 @@ def models(
         table.add_column(column)
     for m in sorted(registry.all(), key=lambda m: (m.provider, m.id)):
         if not m.chat_capable:
-            continue  # speech, safety, embedding...: `tempo models --free` lists them
+            continue  # speech, safety, embedding...: `tempo-server models --free` lists them
         if not registry.is_enabled(m.provider):
             status = "[dim]off by default[/dim]"
         elif not registry.is_configured(m.provider):
@@ -483,12 +505,42 @@ def setup(
     no_sync: Annotated[
         bool, typer.Option("--no-sync", help="Don't read the live model lists at the end.")
     ] = False,
+    non_interactive: Annotated[
+        bool,
+        typer.Option(
+            "--non-interactive",
+            help="Ask nothing and store nothing: report keys found and the free capacity.",
+        ),
+    ] = False,
 ) -> None:
     """Set up free providers: keys, free limits and terms; shows your free requests a day."""
     from tempo.setup import Wizard
 
     names = {n.strip().lower() for n in only.split(",") if n.strip()} if only else None
-    Wizard(_engine(), out, sync=not no_sync).run(names)
+    Wizard(_engine(), out, sync=not no_sync, interactive=not non_interactive).run(names)
+
+
+@app.command()
+def doctor(
+    port: Annotated[int, typer.Option(help="The port `tempo-server serve` will use.")] = 8000,
+    offline: Annotated[bool, typer.Option("--offline", help="Skip the network checks.")] = False,
+) -> None:
+    """Check the install (Python, data folder, keys, network, Ollama, port) and how to fix it."""
+    from tempo import doctor as doc
+
+    engine = _engine()
+    checks = asyncio.run(doc.run_checks(engine, port=port, offline=offline))
+    for check in checks:
+        mark, style = doc.MARKS[check.status]
+        out.print(f"{mark} {check.area}: {check.message}", style=style, markup=False)
+        if check.fix and check.status != "ok":
+            out.print(f"    fix: {check.fix}", markup=False)
+    failed = [c for c in checks if c.status == "fail"]
+    warned = [c for c in checks if c.status == "warn"]
+    if failed:
+        err.print(f"{len(failed)} problem(s) to fix.", style="red")
+        raise typer.Exit(1)
+    err.print("All good." if not warned else f"Works; {len(warned)} thing(s) worth a look.")
 
 
 @app.command(name="record-demo")
@@ -542,7 +594,7 @@ def quota(
         )
     out.print(table)
     if not view:
-        err.print("No providers configured. Run: tempo setup", style="dim")
+        err.print("No providers configured. Run: tempo-server setup", style="dim")
     elif budget.all_used_up(view):
         err.print(
             "Every free quota is used up: Tempo answers with local models (Ollama) and the cache"
@@ -587,8 +639,9 @@ def collect_data(
         bool,
         typer.Option(
             "--yes-only",
-            help="Only models whose outputs may be training data (tempo terms: yes), for every "
-            "stage including the judge. Local Apache-2.0 or MIT models through Ollama qualify.",
+            help="Only models whose outputs may be training data (tempo-server terms: yes), for "
+            "every stage including the judge. Local Apache-2.0 or MIT models through Ollama "
+            "qualify.",
         ),
     ] = False,
     show_estimate: Annotated[
@@ -637,17 +690,19 @@ def collect_data(
         return
     data_dir = engine.settings.data_dir
     if data_dir is None:
-        raise typer.BadParameter("tempo collect needs a data directory to resume (TEMPO_DATA_DIR).")
+        raise typer.BadParameter(
+            "tempo-server collect needs a data directory to resume (TEMPO_DATA_DIR)."
+        )
     providers = provider or col.default_providers(engine.registry)
     blocked = [p for p in providers if engine.registry.blocked_for(p, "collect")]
     if blocked:
-        raise typer.BadParameter(f"not allowed for tempo collect: {', '.join(blocked)}")
+        raise typer.BadParameter(f"not allowed for tempo-server collect: {', '.join(blocked)}")
     if yes_only:
         providers = [p for p in providers if col.has_yes_models(engine.registry, p)]
     if not providers:
         err.print(
-            "No provider to collect with: add a key (see `tempo models`). Providers whose terms "
-            "say no (see `tempo terms`) are left out.",
+            "No provider to collect with: add a key (see `tempo-server models`). Providers whose "
+            "terms say no (see `tempo-server terms`) are left out.",
             style="red",
             markup=False,
         )
@@ -679,7 +734,7 @@ def collect_data(
     try:
         stats = asyncio.run(main())
     except KeyboardInterrupt:
-        err.print("Stopped. Progress is saved; run `tempo collect` again to resume.")
+        err.print("Stopped. Progress is saved; run `tempo-server collect` again to resume.")
         return
     err.print(
         f"{stats.done} questions answered, {stats.failed} failed, {stats.skipped} skipped "
@@ -759,7 +814,7 @@ def _terms_gate(engine: Engine) -> set[str]:
             failed.add(result.provider)
             err.print(
                 f"  {result.provider}: {result.status}; its rows are left out of this export "
-                "(run `tempo terms --check`, re-read the terms, update models.yaml).",
+                "(run `tempo-server terms --check`, re-read the terms, update models.yaml).",
                 style="yellow",
                 markup=False,
             )
@@ -769,7 +824,8 @@ def _terms_gate(engine: Engine) -> set[str]:
 
 
 def _training_users(engine: Engine) -> set[str]:
-    """The owner, tempo collect, and users who opted in to training (`tempo users consent`)."""
+    """The owner, `tempo-server collect`, and users who opted in to training
+    (`tempo-server users consent`)."""
     from tempo.sft import DEFAULT_USERS
 
     return set(DEFAULT_USERS) | engine.accounts.consented_users()
@@ -797,8 +853,8 @@ def _export_writing(kind: str, out_dir: Path, test_percent: int) -> None:
     notes = {
         "final answer did not pass its check": stats.skipped_not_passed,
         "👎 from the user": stats.skipped_feedback,
-        "text from a model or provider that is not 'yes' (tempo terms)": stats.skipped_terms,
-        "asked by a user who has not opted in (tempo users consent)": stats.skipped_user,
+        "text from a model or provider that is not 'yes' (tempo-server terms)": stats.skipped_terms,
+        "asked by a user who has not opted in (tempo-server users consent)": stats.skipped_user,
     }
     if kind == "pairs":
         notes["no failed draft to pair with"] = stats.skipped_no_rejected
@@ -846,7 +902,7 @@ def export_laya(
         typer.Option(
             "--include-unclear",
             help="Also use outputs from providers whose terms are unclear (read them first: "
-            "tempo terms).",
+            "tempo-server terms).",
         ),
     ] = False,
 ) -> None:
@@ -880,7 +936,7 @@ def export_laya(
     if stats.unclear_terms_providers:
         providers = ", ".join(sorted(stats.unclear_terms_providers))
         err.print(
-            f"Terms are unclear for: {providers}. Read them with `tempo terms`"
+            f"Terms are unclear for: {providers}. Read them with `tempo-server terms`"
             + ("." if include_unclear else "; --include-unclear then keeps their rows."),
             style="yellow",
             markup=False,
@@ -1124,7 +1180,7 @@ def keys_list(user: UserOption = None) -> None:
     engine = _engine()
     rows = engine.accounts.key_info(_user_id(engine, user))
     if not rows:
-        err.print("No keys stored. Add one with: tempo keys add groq", style="dim")
+        err.print("No keys stored. Add one with: tempo-server keys add groq", style="dim")
         return
     table = Table(header_style="bold")
     for column in ("provider", "key", "verified"):
@@ -1160,8 +1216,33 @@ def serve(
     uvicorn.run(create_app(), host=host, port=port, log_level="info")
 
 
+def _utf8_console() -> None:
+    """Windows consoles and pipes may use a legacy code page that can't print ▸ or ✗."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> None:
+    _utf8_console()
+    for note in paths.notices:
+        err.print(note, style="yellow", markup=False)
     app()
+
+
+ALIAS_NOTICE = (
+    "Note: `tempo` is a short alias that will be removed before Tempo-server 1.0 (Grafana Tempo "
+    "also has a `tempo` program). Use `tempo-server` instead."
+)
+
+
+def main_alias() -> None:
+    """The `tempo` command: the same as `tempo-server`, with a notice that it will go away."""
+    _utf8_console()
+    if not os.environ.get("TEMPO_NO_ALIAS_NOTICE"):
+        err.print(ALIAS_NOTICE, style="dim", markup=False)
+    main()
 
 
 if __name__ == "__main__":
