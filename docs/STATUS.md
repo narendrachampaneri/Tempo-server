@@ -520,7 +520,16 @@ download, import, compare, promote.
   on a T4, real run times). The first real run measures them.
 - Tests: 408 pass locally (Linux, Python 3.11; the 50 sandbox tests skip here because its runtimes are not installed in this session, CI requires them), lint clean.
 
-**CI results, step 9**: manual run 43 on `main` (commit `a61ff5c`) is running; results follow in the next commit.
+**CI results, step 9** (manual run 43 on `main`, commit `a61ff5c`, 2026-09-29; all green; the
+sandbox installed and required on every system):
+
+| System | Server tests | SDK job | Install tests | Training dry run |
+|---|---|---|---|---|
+| Linux | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓, Node 20 ✓ | ✓ | ✓ (8 min: 1 min install, 6.6 min dry run) |
+| Windows | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓ | ✓ | Linux only (GGUF step) |
+| macOS | 3.13 ✓ | Node 22 ✓ | ✓ | Linux only |
+
+Lint and the package build pass. The push runs of each step-9 commit (Linux) were green too.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
