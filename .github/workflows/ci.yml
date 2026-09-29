@@ -160,6 +160,30 @@ jobs:
             ${{ runner.temp }}/dry-run/data/models/models.json
           if-no-files-found: ignore
 
+  web-e2e:
+    # The web app in a real browser (Chromium via Playwright): main flows, accessibility basics,
+    # contrast in both themes, and screenshots at phone, tablet and desktop widths. Linux only.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,e2e]"
+      - run: playwright install --with-deps chromium
+      - name: Browser tests
+        run: TEMPO_REQUIRE_E2E=1 TEMPO_SCREENSHOTS=1 pytest tests/test_web_e2e.py -q
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-screenshots
+          path: docs/screenshots
+          if-no-files-found: ignore
+
   package:
     runs-on: ubuntu-latest
     steps:

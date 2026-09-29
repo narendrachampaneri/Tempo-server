@@ -259,11 +259,16 @@ Other commands:
 
 `tempo-server serve`, then open http://127.0.0.1:8000.
 
-- **Ask:** a prompt box with a mode switch and a ⚙ settings panel for the stage, time and free-quota budgets. Each answer gets a live thinking window (auto-scrolling, collapsible) with a stage progress bar. The first draft streams right away, later stages replace it live, and a 👍/👎 under each answer is saved for tuning. A strip shows the free requests left today per provider; when every free quota is used up it says so, and Tempo answers with local models and the cache (a note in the thinking window).
+- **Ask:** a warm white-and-brown chat (and a dark brown theme that follows your system) with an animated **thinking timeline**: each stage lights up as it runs and every model appears as it is called. Streaming answers with Stop, regenerate, edit and resend, copy, Markdown with tables, maths and highlighted code, sandboxed HTML/SVG/Mermaid previews with download, file and image attachments (drag, drop, paste), voice input and read-aloud when a Groq key allows it, modes (Auto, Fast, Best, Private), a model picker and stage/time settings, keyboard shortcuts (`?` shows them) and friendly errors with the next step. A 👍/👎 under each answer is saved for tuning, and a strip shows the free requests left today per provider.
+- **History:** past chats in the sidebar (Today, Yesterday, Last 7 days, Older), with search, rename, pin, delete and export as Markdown or JSON. Opening one shows it exactly as it was, thinking timeline included, and you can continue it. Chats stay on your computer, in the data folder, and saving them is not consent to train. **Private** mode uses local models only and saves nothing.
 - **Models:** providers and models, ready or not and why, with measured skill scores and health.
 - **Usage:** questions, pass rate, median and p95 time, average stages, free requests used, feedback, the models used, why questions stopped, free quota left today, and how often Laya agrees with the rules. Users see only their own questions.
 - **Keys:** add your own provider keys (bring your own key). A key is checked with the provider before it is saved, stored encrypted, and never sent back to the page.
 - **Developers:** copy-paste snippets for the API.
+
+Everything the page needs (fonts, KaTeX, Mermaid) is bundled, so it works offline. More in [docs/WEB_UI.md](docs/WEB_UI.md), with screenshots for phone, tablet and desktop in both themes in [docs/screenshots](docs/screenshots).
+
+![The web app: a question with the thinking timeline and a table answer](docs/screenshots/04-answer-desktop-light.png)
 
 ### OpenAI-compatible API
 

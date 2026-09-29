@@ -54,6 +54,8 @@ Issues = "https://github.com/narendrachampaneri/Tempo-server/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.16,<0.17"]
+# Browser tests for the web app (tests/test_web_e2e.py): then run `playwright install chromium`.
+e2e = ["playwright>=1.50"]
 # Laya decision engine on CPU (pulls in torch + transformers for the one-time ONNX export, and
 # ONNX Runtime; about 0.8 GB per checkpoint on first load).
 laya = ["laya[onnx]>=0.3.21"]

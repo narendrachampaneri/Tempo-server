@@ -721,6 +721,34 @@ def test_text_contrast_meets_wcag_aa_in_both_themes(browser, site, scheme):
     page.context.close()
 
 
+def test_landing_page_and_demo_share_the_theme_and_work_from_a_file(browser):
+    for name, scheme, bg in (
+        ("index.html", "light", "rgb(250, 246, 240)"),
+        ("demo/index.html", "dark", "rgb(27, 20, 17)"),
+    ):
+        context = browser.new_context(viewport={"width": 1100, "height": 800}, color_scheme=scheme)
+        page = context.new_page()
+        problems = []
+        page.on("pageerror", lambda e, sink=problems: sink.append(str(e)))
+        page.on(
+            "console", lambda m, sink=problems: sink.append(m.text) if m.type == "error" else None
+        )
+        page.goto((ROOT / "docs" / name).as_uri())
+        page.wait_for_load_state("load")
+        page.wait_for_function(f"() => getComputedStyle(document.body).backgroundColor === '{bg}'")
+        assert page.evaluate("() => document.fonts.check('16px \"Inter Variable\"')")
+        if name.startswith("demo"):
+            expect(page.locator(".thinking-head .title")).to_have_text(
+                "Thought it through", timeout=30000
+            )
+            assert page.locator(".node").count() >= 3 and page.locator(".mchip").count() >= 1
+            expect(page.locator(".answer")).not_to_be_empty()
+        else:
+            assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth")
+        assert not [p for p in problems if "iframe" not in p and "file://" not in p], problems
+        context.close()
+
+
 # ---------------------------------------------------------------------------------------------
 # Screenshots at phone, tablet and desktop widths, in both themes (docs/screenshots).
 
@@ -839,4 +867,14 @@ def test_screenshots(browser, site, shots_dir, size, scheme):
             shoot(page, shots_dir / f"{file}-{tag}.png")
         page.keyboard.press("?")
         shoot(page, shots_dir / f"11-shortcuts-{tag}.png")
+    for label, name in (("12-landing", "index.html"), ("13-demo", "demo/index.html")):
+        docs_page = browser.new_page(
+            viewport={"width": width, "height": height}, color_scheme=scheme
+        )
+        docs_page.goto((ROOT / "docs" / name).as_uri())
+        docs_page.wait_for_load_state("load")
+        if name.startswith("demo"):
+            docs_page.wait_for_selector(".thinking.finished", timeout=30000)
+        shoot(docs_page, shots_dir / f"{label}-{tag}.png")
+        docs_page.close()
     page.context.close()

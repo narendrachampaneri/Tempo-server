@@ -205,6 +205,7 @@ model: "<registry id>"   try that model first, e.g. "groq/openai/gpt-oss-120b"
 }
 
 Streams carry the checked final answer; with "max_stages": 1 tokens stream live.`;
+  $$(".snippet pre").forEach(pre => pre.setAttribute("tabindex", "0"));
   $("#snip-cli").textContent =
 `tempo-server ask "What is the capital of Australia?"
 tempo-server ask --mode best "Prove that the square root of 2 is irrational"

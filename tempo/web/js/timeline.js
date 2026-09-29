@@ -27,8 +27,8 @@ export class Timeline {
         <span class="clock"></span>${icon("chevron", "chev")}
       </button>
       <div class="thinking-body"><div class="thinking-inner">
-        <ol class="tl" aria-label="What Tempo is doing, step by step"></ol>
-        <details class="raw"><summary>Full log</summary><pre></pre></details>
+        <ol class="tl" tabindex="0" aria-label="What Tempo is doing, step by step"></ol>
+        <details class="raw"><summary>Full log</summary><pre tabindex="0"></pre></details>
       </div></div>`;
     this.head = root.querySelector(".thinking-head");
     this.list = root.querySelector(".tl");

@@ -266,3 +266,16 @@ def test_split_for_speech_respects_the_model_limit():
     pieces = speech.split_for_speech(text)
     assert pieces and all(len(p) <= speech.TTS_MAX_CHARS for p in pieces)
     assert "code omitted" in " ".join(pieces) and "http" not in " ".join(pieces)
+
+
+def test_docs_site_uses_the_apps_own_theme_and_fonts():
+    """docs/ (GitHub Pages) can't reach tempo/web, so it carries copies of the theme and fonts.
+    To refresh: cp tempo/web/css/*.css docs/assets/css/; cp tempo/web/fonts/* docs/assets/fonts/"""
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent
+    for folder in ("css", "fonts"):
+        for source in sorted((root / "tempo" / "web" / folder).iterdir()):
+            copy = root / "docs" / "assets" / folder / source.name
+            assert copy.exists(), f"{copy} is missing (see this test's docstring)"
+            assert copy.read_bytes() == source.read_bytes(), f"{copy} is out of date"

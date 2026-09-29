@@ -139,7 +139,7 @@ export function blocks(text) {
       const rows = [];
       while (i < lines.length && lines[i].trim() && lines[i].includes("|")) rows.push(cells(lines[i++]));
       const cell = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ""}>${inline(c)}</${tag}>`;
-      html += `<div class="tablewrap"><table><thead><tr>${head.map((c, k) => cell("th", c, k)).join("")}</tr></thead><tbody>` +
+      html += `<div class="tablewrap" tabindex="0" role="region" aria-label="Table"><table><thead><tr>${head.map((c, k) => cell("th", c, k)).join("")}</tr></thead><tbody>` +
         rows.map(r => `<tr>${head.map((_, k) => cell("td", r[k] ?? "", k)).join("")}</tr>`).join("") + "</tbody></table></div>";
       continue;
     }

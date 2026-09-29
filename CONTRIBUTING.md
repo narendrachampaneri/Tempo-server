@@ -30,6 +30,8 @@ git clone https://github.com/narendrachampaneri/Tempo-server && cd Tempo-server
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"                   # editable: your changes apply without reinstalling
 pytest -q                                 # the full suite runs offline
+# browser tests for the web app (skipped without Playwright):
+#   pip install -e ".[e2e]" && playwright install chromium && pytest tests/test_web_e2e.py
 ruff check . && ruff format --check .     # lint
 TEMPO_ENABLE_MOCK=1 tempo-server serve    # demo models, no keys needed
 ```

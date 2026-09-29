@@ -116,7 +116,7 @@
           <h2>Models</h2>
           <p class="sub">Tempo routes only to models whose provider is configured. Every provider below has a free tier.</p>
           <div class="cards" id="provider-cards"></div>
-          <div class="table-wrap"><table>
+          <div class="table-wrap" tabindex="0" role="region" aria-label="All models"><table>
             <thead><tr><th>Status</th><th>Model</th><th>Type</th><th>Free / day</th><th>Context</th><th>Strength</th><th>Best at</th><th>Features</th></tr></thead>
             <tbody id="model-rows"></tbody>
           </table></div>
@@ -147,7 +147,7 @@
         <div class="page">
           <h2>Your provider keys</h2>
           <p class="sub">Add your own free keys. Tempo then uses them for your questions, with their own free-tier limits. Keys are encrypted at rest and never shown again; only a fingerprint (not part of the key) is displayed.</p>
-          <div class="table-wrap" id="key-list"></div>
+          <div class="table-wrap" id="key-list" role="group" aria-label="Provider keys"></div>
           <h3>Your data</h3>
           <div class="table-wrap" id="data-box">
             <div class="key-row">

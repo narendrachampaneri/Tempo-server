@@ -1,7 +1,7 @@
 # Status
 
-_Last updated 2026-09-29, at the end of step 9 (the training kit and a first end-to-end tuning
-test). Branch: `main` (work goes straight to `main` in small commits)._
+_Last updated 2026-09-29, at the end of step 11 (the new web UI). Branch: `claude/friendly-dirac-uzfo1y`
+(this session's designated branch; `main` was not touched, see decision 1 of step 11)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -531,6 +531,68 @@ sandbox installed and required on every system):
 
 Lint and the package build pass. The push runs of each step-9 commit (Linux) were green too.
 
+### Step 11: the new web UI
+
+Full description: **[WEB_UI.md](./WEB_UI.md)**. Screenshots (phone 390, tablet 820, desktop 1440; light
+and dark; home, history drawer, live thinking timeline, answer, preview, maths, Models, Usage, Keys,
+Developers, shortcuts, landing page, demo): [`docs/screenshots/`](./screenshots).
+
+- **Look**: white-and-brown theme, dark brown theme (system by default; the button cycles
+  system, light, dark), animations everywhere (messages, streaming caret, timeline, chips, hover
+  and press, page transitions, skeletons) that stop under `prefers-reduced-motion`, phone/tablet/
+  desktop layouts (sidebar drawer on small screens). Plain ES modules, no framework, no build
+  step. Fonts (Inter, JetBrains Mono, Noto Sans Gujarati and Devanagari; OFL), KaTeX and Mermaid
+  are bundled with their licences ([tempo/web/LICENSES.md](../tempo/web/LICENSES.md), NOTICE); the
+  page loads nothing from the network (a test checks every request and every URL in the code).
+- **Thinking timeline**: a node per step that lights up while it runs, model chips (spinner,
+  tick or cross) as they are called, notes for checks, sandbox runs, fallbacks; full log below.
+- **History**: `tempo/history.py`, `/api/chats*` (list with search, open, save, rename, pin,
+  delete, export Markdown/JSON), per user, in the data folder, own table (never read by any
+  training export; tested); sidebar groups Pinned/Today/Yesterday/Last 7 days/Older; an old chat
+  reopens with its timeline and continues. "Delete my data" removes chats too. **Private** mode:
+  local models only and `save: false`: nothing in history, question log, calls, stages,
+  decisions or cache (tested).
+- **Assistant**: streaming with Stop (button and `Esc`), regenerate, edit and resend, copy answer
+  and code; own safe Markdown (tables, lists, quotes, task lists) with maths (KaTeX, only when
+  needed) and syntax highlighting; HTML/SVG/Mermaid preview in a sandboxed frame with a CSP that
+  blocks the network, download, expand; attach files and images (button, drag and drop, paste;
+  images only when a vision model is ready); mode picker, model picker, stage/time/free-request
+  settings; Models, Usage, Keys, Developers restyled; status badge; shortcuts + help panel;
+  friendly errors with next steps (add key, see models, retry, enter API key).
+- **Voice**: `/api/speech/transcribe` and `/api/speech/say` call Groq's free whisper and Orpheus
+  (limits and 200-character input from console.groq.com, checked 2026-09-29); `/api/capabilities`
+  hides the buttons without a key. Tested against a fake provider only (**needs key**).
+- **Quality**: first load median 80 ms to `load`, 70 ms to first paint, 19 requests, 211 KB
+  (five runs, localhost). axe-core audit clean on every page in both themes (scrollable regions
+  made keyboard-focusable). Browser tests `tests/test_web_e2e.py` (Playwright): first load and
+  no external requests, streaming and timeline, Markdown/maths/code, previews sandboxed and
+  downloadable, Stop/`Esc`/regenerate/edit, history end to end, Private, attachments, errors,
+  shortcuts, theme, reduced motion, pages, delete-my-data, voice, small screens, WCAG AA
+  contrast in both themes, docs pages, screenshots. New CI job `web-e2e` (Linux; sets
+  `TEMPO_REQUIRE_E2E=1`, keeps the screenshots as an artifact).
+- **docs/index.html and docs/demo** restyled to the same theme with the app's screenshots; the
+  demo replays recordings with the same timeline and still works from a file. `docs/assets/`
+  holds copies of the theme and fonts (a test fails when they drift).
+- Tests: 453 pass locally (Linux, Python 3.11; 50 sandbox tests skip here), lint clean.
+  **CI for this step has not been run yet** (no GitHub access from this session at the end).
+
+**Decisions for the owner (step 11)**
+
+1. **Branch**: the session was told to use `claude/friendly-dirac-uzfo1y`, the task said "work on
+   main". Everything is pushed to the branch; `main` was not touched. Fast-forward `main` to it
+   when you agree (`git push origin claude/friendly-dirac-uzfo1y:main`).
+2. **Mermaid ships EPL code**: Mermaid's single-file build bundles elkjs (EPL-2.0), unmodified.
+   It adds 5.5 MB to the package (2.6 MB wheel in total) and loads only when you press Preview
+   on a diagram. Keep it, or drop `vendor/mermaid/` and its branch in `js/preview.js`
+   (details in tempo/web/LICENSES.md).
+3. **Voice is Groq-only** and hidden without a key. The browser's own speech features are not
+   used (Chrome's speech recognition sends audio to Google, against "only your computer").
+   Read-aloud reads at most about 1,100 characters per click to protect Groq's free
+   100-requests-a-day limit; the voice name (`hannah`) is one of three Groq's docs name.
+4. **Private mode** also skips the answer cache and feedback (no question id is kept).
+5. **PDF attachments** are refused with a clear message (no PDF reader bundled yet).
+6. **Chat size**: a saved chat is limited to 12 MB (images are shrunk to 1280 px first).
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -561,7 +623,7 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 9 is finished.
+Nothing. Step 11 is finished (waiting for its CI run and the owner's decisions above).
 
 ## Blocked: needs the owner
 
@@ -598,6 +660,8 @@ server:
 | Strict JSON reliability per real model | keys | demo and scripted models |
 | `tempo-server setup` key checks against real providers | a key per provider | `verify_key` monkeypatched; its HTTP checks tested with mocks earlier |
 | `tempo-server quota` with real limits (headers, OpenRouter `/key`) | keys | seed limits and recorded calls |
+| Web voice input and read-aloud (Groq whisper and Orpheus, terms acceptance for Orpheus) | `GROQ_API_KEY` or a user's own Groq key | fake provider (`tests/test_web_history.py`, `tests/test_web_e2e.py`) |
+| Web attachments of images to a real vision model | a key for a vision model | scripted models |
 | Local first and the used-up fallback with a real Ollama | Ollama running | scripted local model |
 | Demo re-recorded with real models | keys | recorded in demo mode |
 | `models compare` judged by real models | any key, or a local judge model | the demo judge (dry run) |
