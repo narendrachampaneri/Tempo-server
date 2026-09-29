@@ -1,8 +1,8 @@
 # Status
 
-_Last updated 2026-09-29, at the end of step 6 (works on Windows, macOS and Linux; installs like
-a professional tool). Branch:
-`claude/multi-model-ai-platform-o0fx9v`._
+_Last updated 2026-09-29, at the end of step 7 (MCP server and SDKs). Branch: `main` (the owner
+created it from steps 1–6 and made it the default; work now goes straight to `main` in small
+commits)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -340,6 +340,50 @@ or secrets found.
 Lint and the package build (`twine check --strict`) pass. The first Windows run failed (56
 tests and `install.ps1`'s setup step) on the missing time-zone database; `tzdata` fixed it.
 
+### Step 7: MCP server and SDKs
+
+- **MCP server** (`tempo/mcp_server.py`, official MCP Python SDK 2.2, MIT; now a core
+  dependency): `tempo-server mcp` (stdio, for desktop apps; the caller is the local owner) and
+  `tempo-server mcp --http [--host] [--port 8001]` (Streamable HTTP at `/mcp`; every request
+  needs a Tempo key, else 401; each caller uses their own provider keys; it refuses to start when
+  no key exists yet). Tools:
+  - `ask(question, mode auto/fast/best, private, local_only)`: the answer, the model, every model
+    used, the check results, stages, stop reason;
+  - `second_opinion(question, private)`: two different families answer; a third family (when
+    there is one) lists agreements and differences as strict JSON;
+  - `verify(question, answer, answer_model)`: quick checks plus a judge from a different family
+    than the answer's: pass/fail, score 0–10, problems;
+  - `models(include_all)`: the live free-model list with health and "ready for you";
+  - `quota()`: free requests left today.
+  They run through the engine (`tempo/assist.py`), so quota, fallbacks, health, privacy and each
+  caller's own keys apply. New run option `exclude_families` (router skips those families; such
+  runs bypass the cache).
+- **Tested with the SDK's own client** (`tests/test_mcp.py`): in-process, over HTTP (user key and
+  admin key accepted; no key and a wrong key get 401) and over stdio (`python -m tempo.cli mcp` as
+  a real subprocess).
+- **docs/MCP.md**: Claude Desktop (macOS, Windows; no official Linux build), Claude Code (one
+  command, stdio or HTTP), Cursor and VS Code (Windows, macOS, Linux), full paths for GUI apps,
+  HTTP with the key from the environment or a secure prompt, troubleshooting. A test parses every
+  JSON snippet.
+- **Python SDK** `sdk/python` (`tempo-server-client`, import `tempo_server_client`; httpx only;
+  Python 3.9+; sync and async): `stream()` (live thinking-window events), `ask()` (folded
+  `Answer`), `feedback()`, `models()`, `quota()`, `me()`, `health()`, `consent()`,
+  `set_consent()`, `delete_my_data()`; `TempoError` with status, code and `retry_after`.
+  Localhost traffic never goes through a proxy.
+- **JavaScript/TypeScript SDK** `sdk/js` (`tempo-server-client`; fetch, no dependencies, types;
+  Node 18+ and browsers; ESM): the same methods (`setConsent`, `deleteMyData`, `retryAfter`),
+  `stream()` as an async iterator with an `AbortSignal`. Built with TypeScript 5.9 (strict).
+- **SDK tests** against a real demo-mode server with a real user key (`sdk/python/tests`, also in
+  the main `pytest` run; `sdk/js/test` with `node --test`). CI job `sdk` installs Tempo-server and
+  the Python SDK as users get them, runs both suites, and checks both packages (`twine check`,
+  `npm pack --dry-run`); Node 22 on every system and Node 20 on Linux.
+- **Names** (checked 2026-09-29): `tempo-server-client` is free on PyPI and npm; `tempo-client`
+  is taken on both; the npm scope `@tempo-server` is free. Nothing published.
+- **Examples** `examples/mcp_config.json`, `sdk_python.py`, `sdk_js.mjs` (both SDK examples run
+  against a demo server); README "Use it from any AI assistant"; landing-page links;
+  ARCHITECTURE §6.2 and USE_CASES #17 updated.
+- Tests: 376 pass locally (Linux, Python 3.11), JS 6 pass (Node 22), lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -370,15 +414,13 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 6 is finished. The pull request into `main` waits on the owner creating `main` (see Blocked).
+Nothing. Step 7 is finished.
 
 ## Blocked: needs the owner
 
-- **Pull request into `main`**: `main` does not exist, and creating it was refused to this
-  session (a push outside its branch). Once the owner creates `main`, the pull request body is
-  ready in [PR_STEPS_1-6.md](./PR_STEPS_1-6.md).
 - **Publishing**: PyPI (Trusted Publishing to configure on pypi.org), the Docker image (a GitHub
-  release) and GitHub Pages (Settings → Pages) wait for the owner. The one-line installers and
+  release), GitHub Pages (Settings → Pages) and the two SDK packages (PyPI and npm) wait for the
+  owner. The one-line installers and
   the GitHub-archive install need the repository to be public.
 
 ## Blocked: needs key
@@ -457,13 +499,27 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
   - Human reference answers for the data mix.
   - GitHub Actions warns that `actions/download-artifact@v5` runs on a deprecated Node 20; move
     to the next major version when it is out.
+  - MCP: tools with real models (needs keys), progress notifications during long `ask` runs, and
+    an A2A agent card (ARCHITECTURE Phase 4).
+  - The JS SDK is built with TypeScript 5.9; TypeScript 7 (the native compiler) is now `latest`
+    on npm. Move when its declaration output is proven identical.
 
 ## Decisions for the owner
 
-1. **The `main` branch**: the owner reported creating `main` from `bd57172` and making it the
-   default (2026-09-29), but GitHub still lists only `claude/multi-model-ai-platform-o0fx9v`
-   (checked through the API and `git ls-remote`), so the pull request could not be opened.
-   Please check that `main` exists in `narendrachampaneri/Tempo-server` (Code → Branches).
+1. **Publishing the SDKs**: publish `tempo-server-client` to PyPI and npm with 0.1.0? PyPI can use
+   the same Trusted Publishing as the server (a second pending publisher); npm needs an account
+   (npm also supports trusted publishing from GitHub Actions). I can add the workflows.
+2. **MCP over HTTP always needs a key**, even on a server only you use (stdio needs none). Keep
+   that, or allow keyless HTTP when bound to 127.0.0.1 with no users?
+3. **Browsers**: the JS SDK works in browsers, but Tempo-server sends no CORS headers, so only
+   pages it serves itself (or behind a proxy) can call it. Add an opt-in
+   `TEMPO_CORS_ORIGINS` setting?
+4. **MCP questions in the log**: questions from an assistant over stdio count as the owner's
+   (logged, usable for training like your own); over HTTP they belong to the key's user (their
+   consent applies). Keep, or log MCP questions apart (like `collect`)?
+5. **MCP SDK in the core install**: `mcp` 2.x adds httpx2, pyjwt and opentelemetry-api to every
+   install. Keep it core (so `tempo-server mcp` always works), or make it an extra
+   (`tempo-server[mcp]`)?
 
 ## How the checks were run (for the next session)
 

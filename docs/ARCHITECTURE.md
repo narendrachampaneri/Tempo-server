@@ -513,27 +513,22 @@ Because this is the OpenAI format, Tempo drops into LangChain, LlamaIndex, Open 
 
 ### 6.2 MCP server (for AI agents and assistants)
 
-```python
-from mcp.server.fastmcp import FastMCP
+**Built in step 7** (`tempo/mcp_server.py`, official MCP Python SDK 2.x; how to connect:
+[MCP.md](./MCP.md)). `tempo-server mcp` serves stdio for desktop apps (the caller is the local
+owner, with the keys `tempo-server setup` stored); `tempo-server mcp --http` serves Streamable
+HTTP at `/mcp` and refuses any request without a Tempo key (401), so each caller uses their own
+provider keys. The tools are thin wrappers over `tempo/assist.py`, which runs everything through
+the engine (routing, quota, fallbacks, privacy):
 
-mcp = FastMCP("tempo")
+| Tool | How |
+|---|---|
+| `ask(question, mode, private, local_only)` | one normal engine run; returns the answer, every model used, the check results |
+| `second_opinion(question, private)` | two single-stage runs, the second with the first answer's family excluded (`RunOptions.exclude_families`); a third run with both families excluded compares them into `{verdict, agree, differ, summary}` (strict JSON), falling back to any family when no third exists |
+| `verify(question, answer, answer_model)` | the quick checks plus a judge run that excludes the answer's family, returning `{verdict, score, problems, summary}` |
+| `models(include_all)` | the live catalog with health, and whether each model is ready for this caller |
+| `quota()` | free requests left today (the same view as `tempo-server quota`) |
 
-@mcp.tool()
-async def ask_tempo(question: str, mode: str = "auto", privacy: str = "default") -> str:
-    """Answer a question by routing it to the best available model(s)."""
-    result = await brain.run(question, mode=mode, privacy=privacy)
-    return result.text
-
-@mcp.tool()
-async def list_models(task: str | None = None) -> list[dict]:
-    """List healthy models, optionally filtered by task, with remaining free quota."""
-    return registry.available(task=task)
-
-if __name__ == "__main__":
-    mcp.run()
-```
-
-Any MCP client (Claude, IDE agents, other agent frameworks) can then call Tempo as a tool.
+Tested with the SDK's own client in-process, over HTTP and over stdio (`tests/test_mcp.py`).
 
 ### 6.3 Other surfaces
 
@@ -625,7 +620,7 @@ tempo-server/
 │   ├── cache/          # semantic cache, memory
 │   └── learn/          # dataset export, router training, A/B
 ├── cli/                # `tempo` command
-├── mcp/                # MCP server
+├── mcp_server.py       # MCP server (assist.py does the work)
 ├── web/                # Next.js app
 ├── evals/              # fixed eval sets per skill
 └── docs/

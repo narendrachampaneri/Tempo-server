@@ -178,9 +178,11 @@ calls tested with real providers. **Phase 4.**
 
 **Example:** a coding agent calls a `second_opinion` MCP tool: "Is this migration safe?", and
 Tempo answers with models from other families than the agent's.
-**Today:** the engine can already exclude families and mix drafts.
-**Still needs:** the MCP server (ARCHITECTURE §6.2) with `ask_tempo`, `second_opinion` and
-`list_models` tools. **Phase 4.**
+**Today (step 7):** the MCP server has `second_opinion` (two families, then a third compares
+them), `verify` (a judge from another family than the answer's), `ask`, `models` and `quota`
+([MCP.md](./MCP.md)).
+**Still needs:** measured agreement per model pair, so disagreements are weighted by who is
+usually right. **Phase 4.**
 
 ### 18. Benchmark lab
 
