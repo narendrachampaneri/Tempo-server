@@ -454,6 +454,20 @@ Markdown and docstrings (README, `examples/sdk_python.py`). Fixed in `0d58022`; 
   and limits. README, ARCHITECTURE (§5 checks, tech stack) and USE_CASES (#1, #3, #12) updated.
 - Tests: 433 pass locally with the sandbox installed (Linux, Python 3.11), lint clean.
 
+**CI results, step 8** (manual run 36 on `main`, commit `c91615d`, 2026-09-29; all green; the
+sandbox installed on every system and its tests required, never skipped):
+
+| System | Server tests incl. 31 sandbox safety + 22 sandbox pipeline tests | SDK job | Install tests |
+|---|---|---|---|
+| Linux | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓, Node 20 ✓ | ✓ |
+| Windows | 3.11 ✓ 3.12 ✓ 3.13 ✓ 3.14 ✓ | Node 22 ✓ | ✓ |
+| macOS | 3.13 ✓ | Node 22 ✓ | ✓ |
+
+The run before it (33) failed on Windows only: each sandbox run left its temporary folder
+behind, because Wasmtime still held the folder and output files open when they were deleted.
+Fixed in `c91615d` (close Wasmtime's objects first, then delete with short retries), found by
+`test_each_run_is_fresh_and_leaves_nothing`.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
