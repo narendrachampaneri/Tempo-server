@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
-from conftest import ENV_ALL, ScriptedBackend, make_engine, make_registry
+from conftest import ENV_ALL, ScriptedBackend, judge_reply, make_engine, make_registry, sleep
 
 from tempo.api import create_app
 from tempo.config import Settings
@@ -97,10 +97,22 @@ def last_user_text(messages) -> str:
     return content if isinstance(content, str) else " ".join(p.get("text", "") for p in content)
 
 
+REVISE_DRAFT = "Draft that needs fixing:\n\n```python\ndef tidy(items):\n    return items\n```"
+
+
+def judge_script(messages):
+    """Grades 3 for the draft of the "revise" question (so it gets fixed), else 9; slowly, so
+    the answer is visibly ready while the check runs."""
+    grades = judge_reply(lambda cands: [3 if "needs fixing" in c else 9 for c in cands])(messages)
+    return [sleep(0.8), *grades]
+
+
 def draft_script(messages):
     text = last_user_text(messages).lower()
     if "boom" in text:
         raise ProviderError("unavailable", "boom")
+    if "revise" in text:
+        return [("answer", REVISE_DRAFT)]
     body = f"Sure. You asked: {text[:60]}"
     for key, answer in ANSWERS.items():
         if key in text:
@@ -150,7 +162,7 @@ class Site:
 
 @pytest.fixture(scope="module")
 def site():
-    scripts = {"*:draft": draft_script}
+    scripts = {"*:draft": draft_script, "*:judge": judge_script}
     engine, backend = make_engine(scripts=scripts, sync_interval_s=0)
     app = create_app(
         engine=engine, settings=Settings(data_dir=ROOT / "data")
@@ -348,6 +360,27 @@ def test_html_svg_and_mermaid_previews_are_sandboxed_and_downloadable(page):
     with page.expect_download() as info:
         block.get_by_role("button", name=re.compile("Download diagram.svg")).click()
     assert info.value.suggested_filename == "diagram.svg"
+
+
+def test_the_answer_is_ready_at_once_and_a_revision_shows_what_changed(page):
+    ask(page, "Write a Python function to revise a list", wait=False)
+    bot = page.locator(".msg-bot").last
+    # ready while the (slow) check still runs: tools and the background-check chip are shown
+    expect(bot.locator(".bg-check")).to_contain_text("Checking in the background", timeout=10000)
+    expect(bot.get_by_role("button", name="Copy answer")).to_be_visible()
+    expect(bot.locator(".answer")).to_contain_text("Draft that needs fixing")
+    finish(page)
+    expect(bot.locator(".bg-check")).to_have_count(0)
+    expect(bot.locator(".answer")).to_contain_text("Fix from")
+    revision = bot.locator(".revision")
+    expect(revision).to_contain_text("Revised after the check")
+    expect(revision).to_contain_text("needs work")
+    revision.locator("summary").click()
+    assert revision.locator(".d-add").count() >= 1 and revision.locator(".d-del").count() >= 1
+    # the revision is saved with the chat and shown again when it is reopened
+    page.reload()
+    page.locator("#history .chat-open").first.click()
+    expect(page.locator(".msg-bot .revision")).to_contain_text("Revised after the check")
 
 
 def test_stop_button_ends_a_running_answer(page):
@@ -867,6 +900,12 @@ def test_screenshots(browser, site, shots_dir, size, scheme):
             shoot(page, shots_dir / f"{file}-{tag}.png")
         page.keyboard.press("?")
         shoot(page, shots_dir / f"11-shortcuts-{tag}.png")
+        page.keyboard.press("Escape")
+        page.get_by_role("button", name="New chat").click()
+        ask(page, "Write a Python function to revise a list")
+        page.locator(".revision summary").last.click()
+        page.locator(".revision").last.scroll_into_view_if_needed()
+        shoot(page, shots_dir / f"14-revision-{tag}.png")
     for label, name in (("12-landing", "index.html"), ("13-demo", "demo/index.html")):
         docs_page = browser.new_page(
             viewport={"width": width, "height": height}, color_scheme=scheme

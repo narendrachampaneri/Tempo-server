@@ -82,8 +82,9 @@ async def _stream_answer(
 ) -> RunResult:
     """Stream the answer to stdout and the thinking window to stderr.
 
-    A later stage that replaces the draft is printed again below it; if the final answer
-    differs from what was streamed last, it is printed once more at the end.
+    The first good answer streams at once; if the background check finds a real problem, the
+    revised answer is printed below it with what was found. If the final answer differs from
+    what was shown last, it is printed once more at the end.
     """
     result = RunResult()
     shown = ""  # text of the answer currently on screen
@@ -118,6 +119,14 @@ async def _stream_answer(
         if event.type == "answer_reset":
             shown = ""
             close_answer()
+        if event.type == "answer_revised" and data["answer"].strip() != shown.strip():
+            close_answer()
+            found = "; ".join(data.get("issues") or []) or "a better answer"
+            err.rule(f"Revised after the check: {found}", style="yellow")
+            sys.stdout.write(data["answer"].rstrip() + "\n")
+            sys.stdout.flush()
+            shown = data["answer"]
+            continue
         if event.type == "answer_final" and data["answer"].strip() != shown.strip():
             close_answer()
             if show_trace:
@@ -125,6 +134,9 @@ async def _stream_answer(
             sys.stdout.write(data["answer"].rstrip() + "\n")
             sys.stdout.flush()
             shown = data["answer"]
+        if event.type == "answer_final" and data.get("note"):
+            close_answer()
+            _trace(data["note"], style="yellow")
 
         text = event.to_dict().get("text")
         if not text:

@@ -27,6 +27,7 @@ async def test_happy_path_drafts_checks_and_finishes():
         "call_start",
         "call_end",
         "stage_end",
+        "answer_ready",  # shown at once; the check runs in the background
         "stage_start",
         "check",
         "stage_end",

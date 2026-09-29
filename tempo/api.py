@@ -349,6 +349,7 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
                 "requests": result.requests,
                 "stop_reason": result.stop_reason,
                 "score": result.score,
+                "note": result.note,
             }
             if req.tempo.trace:
                 tempo_info["trace"] = result.trace

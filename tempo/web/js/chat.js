@@ -1,6 +1,6 @@
 // One conversation: rendering, streaming an answer, stop, regenerate, edit and resend,
 // saving to history (never for Private turns), and opening an old chat exactly as it was.
-import { $, el, icon, iconEl, uid, toast, announce, copyText, flash, reducedMotion, BRAND_PATH } from "./util.js";
+import { $, el, icon, iconEl, uid, toast, announce, copyText, flash, lineDiff, BRAND_PATH } from "./util.js";
 import { api, errorFrom, friendly, json, put } from "./api.js";
 import { renderMarkdown, typesetMath } from "./markdown.js";
 import { Timeline, keepForHistory } from "./timeline.js";
@@ -98,8 +98,34 @@ function botEl(msg, index, live = false) {
 }
 
 function paintAnswer(view, streaming) {
+  streaming = streaming && !view.ready;  // a ready answer is complete; checks run in the background
   view.answer.innerHTML = renderMarkdown(view.msg.content) + (streaming ? '<span class="caret" aria-hidden="true"></span>' : "");
   if (!streaming) typesetMath(view.answer);
+}
+
+// "Revised after the check": what the check found, and a line diff of the change.
+function revisionView(rev) {
+  const found = rev.issues?.length ? rev.issues.join("; ") : "a better answer was found";
+  const rows = lineDiff(rev.previous, rev.answer);
+  const body = el("div", { class: "diff", role: "region", "aria-label": "Changes", tabindex: "0" });
+  if (!rows) body.append(el("div", { class: "muted" }, "The answer was rewritten."));
+  else {
+    let same = [];
+    const flush = () => {
+      if (same.length > 4) body.append(el("div", { class: "d-skip" }, `… ${same.length - 2} unchanged lines …`), el("div", { class: "d-same" }, same[same.length - 1] || " "));
+      else same.forEach(line => body.append(el("div", { class: "d-same" }, line || " ")));
+      same = [];
+    };
+    for (const [kind, line] of rows) {
+      if (kind === "same") { same.push(line); continue; }
+      flush();
+      body.append(el("div", { class: "d-" + kind }, el("span", { class: "sr-only" }, kind === "add" ? "Added: " : "Removed: "), line || " "));
+    }
+    flush();
+  }
+  return el("details", { class: "revision" },
+    el("summary", {}, el("b", {}, "Revised after the check"), ` · ${found} · `, el("span", { class: "link" }, "What changed")),
+    el("div", { class: "muted small" }, `Was ${rev.previous_model}, now ${rev.model} (${rev.job}).`), body);
 }
 
 function errorBox(err) {
@@ -119,6 +145,8 @@ function finishBot(view, index) {
   tools.replaceChildren();
   if (msg.content) paintAnswer(view, false);
   else answer.replaceChildren();
+  if (msg.revisions?.length) answer.append(...msg.revisions.map(revisionView));
+  if (msg.note) answer.append(el("div", { class: "answer-note", role: "note" }, msg.note));
   if (msg.error && !msg.content) answer.replaceChildren(errorBox(msg.error));
   else if (msg.stopped && !msg.content) answer.replaceChildren(el("div", { class: "stopped" }, "Stopped before an answer came back."));
   else if (msg.stopped) answer.append(el("div", { class: "stopped" }, "Stopped. The answer above is partial."));
@@ -209,7 +237,27 @@ async function runTurn({ mode, model, settings }) {
     switch (ev.type) {
       case "answer_delta": msg.content += ev.delta; schedule(); break;
       case "answer_reset": msg.content = ""; schedule(); break;
-      case "answer_final": msg.content = ev.answer; msg.model = ev.model; msg.score = ev.score; schedule(); break;
+      case "answer_ready":
+        msg.content = ev.answer; msg.model = ev.model; view.ready = true;
+        if (frame) { cancelAnimationFrame(frame); frame = 0; }
+        finishBot(view, index);
+        if (ev.checking) view.tools.append(el("span", { class: "bg-check", role: "status" }, el("i", { class: "spin", "aria-hidden": "true" }), "Checking in the background…"));
+        announce("Answer ready. Tempo is still checking it.");
+        break;
+      case "answer_revised":
+        (msg.revisions ||= []).push({ previous: msg.content, answer: ev.answer, model: ev.model, previous_model: ev.previous_model, job: ev.job, issues: ev.issues });
+        msg.content = ev.answer; msg.model = ev.model;
+        if (view.ready) {
+          finishBot(view, index);
+          view.tools.append(el("span", { class: "bg-check", role: "status" }, el("i", { class: "spin", "aria-hidden": "true" }), "Checking in the background…"));
+          view.answer.classList.remove("revised"); void view.answer.offsetWidth; view.answer.classList.add("revised");
+          announce("The answer was revised after the check.");
+        } else schedule();
+        break;
+      case "answer_final":
+        msg.note = ev.note || null;
+        if (msg.content !== ev.answer) { msg.content = ev.answer; if (view.ready) paintAnswer(view, false); else schedule(); }
+        msg.model = ev.model; msg.score = ev.score; break;
       case "received": msg.question_id = ev.question_id; break;
       case "done": msg.stages = ev.stages; msg.elapsed_ms = ev.total_ms; msg.stop_reason = ev.stop_reason; msg.model = ev.model || msg.model; break;
       case "error": failure = { message: ev.message, kind: ev.kind }; break;

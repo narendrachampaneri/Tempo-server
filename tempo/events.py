@@ -151,6 +151,12 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         if d.get("has_answer", True):
             return f"Budget: {d['detail']} · using the best answer so far"
         return f"Budget: {d['detail']}"
+    if kind == "answer_ready":
+        tail = " · checking it in the background" if d.get("checking") else ""
+        return f"Answer shown (from {d['model']}){tail}"
+    if kind == "answer_revised":
+        found = f": {'; '.join(d['issues'][:2])}" if d.get("issues") else ""
+        return f"Revised after the check{found} · new answer from {d['model']} ({d['job']})"
     if kind == "answer_final":
         if d.get("cached"):
             return None

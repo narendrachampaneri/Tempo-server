@@ -125,6 +125,9 @@ class Pipeline:
         # received so far is kept in case even the grace period runs out.
         self._time_up = False
         self._time_capped = False  # the plan dropped stages that couldn't fit the time budget
+        # The first good answer is shown as soon as it arrives ("answer_ready"); checking goes
+        # on in the background and a better answer replaces it with "answer_revised".
+        self._shown_answer: Answer | None = None
         self._started: set[tuple[int, int]] = set()
         self._partial: dict[tuple[int, int], tuple[str, str]] = {}
         # OpenAI features: tool calling and strict JSON (validated per reply; tempo/compat.py).
@@ -683,6 +686,7 @@ class Pipeline:
                 self._failure_message(), [c.model.id for s in slots for c in s], kind=kind
             )
         self.answers.extend(outputs)
+        self._maybe_ready(stage, results)
 
     def _note_quota_fallback(self, route: Any) -> None:
         """When every free quota is used up, say so: local models (and the cache, already
@@ -943,6 +947,10 @@ class Pipeline:
             passed=bool(best and best.check and best.check.passed),
         )
         self._end(stage, "check", [], check=results)
+        if best is not None and best.check is not None and self._shown_answer is not None:
+            shown = self._shown_answer
+            if best is not shown and best.score > shown.score:
+                self._revise(best)
 
     # --- running code and maths in the sandbox (tempo/execute.py) ----------------------------
 
@@ -1143,6 +1151,7 @@ class Pipeline:
             self.final = result
             self.stop_reason = "polished"
         self.answers.append(result)
+        self._maybe_ready(stage, [result])
 
     async def _decompose(self) -> None:
         assert self.plan is not None and self.profile is not None
@@ -1184,6 +1193,7 @@ class Pipeline:
         if result is None:
             raise _NoAnswer("No model could combine the parts.", [slots[0][0].model.id])
         self.answers.append(result)
+        self._maybe_ready(stage, [result])
 
     async def _split(self) -> list[str] | None:
         ranked = self._rank("split").candidates
@@ -1259,7 +1269,7 @@ class Pipeline:
         slot_id: int = 0,
     ) -> Answer | None:
         e, o = self.e, self.o
-        live = live and o.live
+        live = live and o.live and self._shown_answer is None
         purpose = {"check": "judge", "tools": "draft"}.get(job, job)
         attempts = 0
         previous: str | None = None
@@ -1571,6 +1581,56 @@ class Pipeline:
 
     # --- finish ----------------------------------------------------------------------------
 
+    def _maybe_ready(self, stage: int, results: Sequence[Answer | None]) -> None:
+        """The answer that streamed in this stage is shown as ready as soon as it passes the
+        quick checks; anything later happens in the background."""
+        if self._shown_answer is not None or not self.o.live or self._live_owner is None:
+            return
+        owner_stage, slot = self._live_owner
+        if owner_stage != stage or slot >= len(results) or results[slot] is None:
+            return
+        answer = results[slot]
+        heur = run_heuristics(
+            self.profile,
+            self.question,
+            answer.text,
+            answer.finish_reason,
+            self.json_fmt is not None,
+        )
+        if heur.hard_fail:
+            return  # not good enough to show as ready: later stages stream as before
+        self._shown_answer = answer
+        checking = self.stages_left() > 0 and not self._time_up and self.final is None
+        self.emit(
+            "answer_ready",
+            answer=answer.text,
+            model=answer.model,
+            stage=stage,
+            checking=checking,
+        )
+
+    def _revise(self, answer: Answer) -> None:
+        """A better answer replaces the one shown: say what the check found and which model
+        wrote the new one (the client shows the difference)."""
+        shown = self._shown_answer
+        if shown is None or answer.text.strip() == shown.text.strip():
+            self._shown_answer = answer
+            return
+        issues = (shown.check.issues if shown.check else []) or []
+        self.emit(
+            "answer_revised",
+            answer=answer.text,
+            model=answer.model,
+            stage=answer.stage,
+            job=answer.job,
+            previous_model=shown.model,
+            previous_stage=shown.stage,
+            issues=issues[:5],
+            score=answer.check.score if answer.check else None,
+            previous_score=shown.check.score if shown.check else None,
+        )
+        self._shown_answer = answer
+
     def _late_improvement(self) -> Answer | None:
         """A fix, merge or combine that finished after the time budget ended: nothing could
         check it, but it was written to improve on the best answer, so it wins unless the quick
@@ -1602,6 +1662,8 @@ class Pipeline:
             self._log(error="no answer within budget")
             return
         self.final = final
+        if self._shown_answer is not None and final is not self._shown_answer:
+            self._revise(final)
         if self.stop_reason == "passed" and not (final.check and final.check.passed):
             self.stop_reason = "not_passed"  # e.g. the last rewrite failed a hard check too
         self.emit(

@@ -34,22 +34,53 @@ async def test_stops_as_soon_as_the_answer_passes():
     assert check.data["passed"] and check.data["judge_model"]
 
 
-async def test_failed_check_runs_a_fix_that_replaces_the_draft_live():
+async def test_the_draft_is_shown_at_once_and_a_failed_check_revises_it_in_the_background():
+    """Step 10: the first good answer is shown as soon as it arrives; checking goes on in
+    the background, and a real problem found by the check is fixed and shown as a revision
+    (not by wiping the answer while the user reads it)."""
     scores = lambda cands: [9 if c.startswith("Fix") else 4 for c in cands]  # noqa: E731
     engine, backend = make_engine({"*:judge": judge_reply(scores)})
     result = await engine.complete(user(CODE_Q))
     assert jobs(result) == ["draft", "check", "fix", "check"]
     assert result.text.startswith("Fix from")
-    assert result.score >= 0.7  # judge 9/10 minus heuristic soft issues (short, no code block)
-    # The draft streamed first; the fix replaced it on screen.
     kinds = [e.type for e in result.events]
-    first_delta = kinds.index("answer_delta")
-    reset = kinds.index("answer_reset")
-    assert first_delta < reset < len(kinds) - 1 - kinds[::-1].index("answer_delta")
-    stages = [e.data["stage"] for e in events_of(result, "answer_delta")]
-    assert stages[0] == 1 and stages[-1] == 3
-    # The fixer is not the model whose draft failed.
+    ready = kinds.index("answer_ready")
+    assert kinds.index("stage_end") < ready < kinds.index("stage_start", ready)  # before checking
+    assert events_of(result, "answer_ready")[0].data["checking"] is True
+    # nothing streams over the shown answer after it is ready
+    assert "answer_reset" not in kinds
+    assert all(e.data["stage"] == 1 for e in events_of(result, "answer_delta"))
+    revised = events_of(result, "answer_revised")
+    assert len(revised) == 1
+    data = revised[0].data
+    assert data["answer"] == result.text and data["job"] == "fix"
+    assert data["previous_stage"] == 1 and data["issues"] == ["needs work"]
+    assert "Revised after the check: needs work" in revised[0].text
+    assert kinds.index("answer_revised") < kinds.index("answer_final")
     assert backend.called_for("fix")[0] != backend.called_for("draft")[0]
+
+
+async def test_a_draft_that_passes_is_ready_and_never_revised():
+    engine, _ = make_engine(judge_score=9)
+    result = await engine.complete(user(CODE_Q))
+    assert len(events_of(result, "answer_ready")) == 1
+    assert not events_of(result, "answer_revised")
+    assert events_of(result, "answer_ready")[0].data["answer"] == result.text
+
+
+async def test_a_draft_failing_the_quick_checks_is_not_shown_as_ready():
+    engine, _ = make_engine({"*:draft": [("answer", "I'm sorry, but I can't help with that.")]})
+    result = await engine.complete(user(CODE_Q))
+    ready = events_of(result, "answer_ready")
+    assert not ready or ready[0].data["stage"] > 1  # a later, better answer may be shown
+
+
+async def test_clients_that_cannot_replace_text_get_no_ready_event():
+    engine, _ = make_engine(judge_score=9)
+    options = engine.options()
+    options.live = False  # OpenAI streams: only the checked final answer
+    result = await engine.complete(user(CODE_Q), options)
+    assert not events_of(result, "answer_ready") and not events_of(result, "answer_revised")
 
 
 async def test_mixture_drafts_in_parallel_and_streams_one_of_them():

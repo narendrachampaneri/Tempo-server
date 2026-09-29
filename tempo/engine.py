@@ -99,6 +99,7 @@ class RunResult:
     score: float | None = None
     error: str | None = None
     error_kind: str | None = None
+    note: str | None = None  # e.g. the time budget ended the work with this answer in hand
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
 
@@ -121,6 +122,7 @@ class RunResult:
             self.text = data["answer"]
             self.reasoning = data.get("reasoning") or self.reasoning
             self.score = data.get("score")
+            self.note = data.get("note")
             self.tool_calls = data.get("tool_calls") or []
         elif event.type == "received":
             self.question_id = data.get("question_id")
