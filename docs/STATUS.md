@@ -1,8 +1,7 @@
 # Status
 
-_Last updated 2026-09-29, at the end of step 7 (MCP server and SDKs). Branch: `main` (the owner
-created it from steps 1–6 and made it the default; work now goes straight to `main` in small
-commits)._
+_Last updated 2026-09-29, at the end of step 8 (checking code and maths answers by running them
+in a WebAssembly sandbox). Branch: `main` (work goes straight to `main` in small commits)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -396,6 +395,65 @@ The only failure in that run was lint: `ruff format --check` also formats Python
 Markdown and docstrings (README, `examples/sdk_python.py`). Fixed in `0d58022`; its push run
 (lint and Linux) is green.
 
+### Step 8: the owner's decisions on step 7
+
+1. **SDK publishing**: `.github/workflows/sdk-publish.yml` publishes `tempo-server-client` to PyPI
+   (Trusted Publishing, environment `pypi-sdk`) and npm (npm Trusted Publishing, environment
+   `npm`, npm ≥ 11.5.1, provenance added by npm), only when a GitHub release is published; tests
+   first, and the tag must match both SDK versions. Nothing published.
+2. **MCP over HTTP** keeps requiring a key, even on 127.0.0.1 (no change).
+3. **`TEMPO_CORS_ORIGINS`**: an exact list of websites allowed to call the API from a browser; off
+   by default; a wildcard, a path or anything but an `http(s)://host[:port]` origin stops the
+   server from starting. No credentials; `Retry-After` exposed (`tests/test_cors.py`).
+4. **MCP questions** are logged with `source = mcp` (a new column) and kept out of `export-sft`,
+   `export-pairs` and `export-laya`, which report how many they skipped; `TEMPO_TRAIN_ON_MCP=1`
+   includes them.
+5. The MCP SDK stays in the core install; 6. TypeScript stays on 5.9 for 0.1.0 (no change).
+
+### Step 8: checking code and maths answers by running them
+
+- **Research and choice** (details in [SANDBOX.md](./SANDBOX.md)): **Wasmtime** (`pip install
+  wasmtime`, Bytecode Alliance, monthly releases, wheels for Windows/macOS/Linux on x86-64 and
+  ARM64, Python 3.9–3.14) running **CPython 3.14.5 for WASI** (Brett Cannon's builds; PSF) and
+  **QuickJS-ng 0.17.0** (`qjs-wasi.wasm`; MIT). Rejected: Pyodide (needs a JS runtime),
+  MicroPython (not CPython), `llm-wasm-sandbox` (old Wasmtime pin, generic top-level package
+  names, one maintainer), Docker/gVisor/seccomp (not allowed or not on Windows/macOS),
+  RestrictedPython (not a security boundary).
+- **`tempo/sandbox.py`**: `tempo-server sandbox install` downloads the two runtimes once
+  (SHA-256 pinned; unsafe archive paths refused), unpacks them in `<data>/sandbox`
+  (`TEMPO_SANDBOX_HOME`), compiles them for the machine (rebuilt if copied from another). Each run:
+  a fresh instance and engine, its own temporary folder (`/work`), the standard library
+  read-only, no network, no processes, no host environment; wall-clock limit by epoch
+  interruption; memory cap; a watchdog stops runaway output and disk use; at most two runs at
+  once. Output goes to files (Wasmtime's Python callbacks for output panic at interpreter exit,
+  so they are not used).
+- **`tempo/execute.py`**: code answers (Python or JavaScript) run with tests from the question
+  and answer (`assert`, `test_*`, unittest, a pytest stand-in with `raises`/`approx`/
+  `parametrize`, solution modules the tests import). Results: passed, failed (with the error for
+  the fix stage) or inconclusive (third-party packages, input, network, or a limit hit without
+  tests). Maths: rules for arithmetic ("17% of 2,340", "(3.5 + 2) * 4", square roots, powers),
+  else a model-written program (once per question, one free request; `TEMPO_SANDBOX_MATH=rules`
+  never asks), compared with the answer's final number allowing for rounding.
+- **In the pipeline**: the check stage runs them ("+ sandbox"); a failed run is a hard failure
+  (code, or maths by rules) or a strong penalty (maths by a model's program), and its error goes
+  to the fix stage, whose answer is run again. The thinking window shows one ✓/✗ line per run,
+  or a note when the sandbox is not installed. Each run is saved (`executions` table) and
+  exported as a reward (`execution` in SFT rows; `chosen_execution` / `rejected_execution` in
+  pairs).
+- **Settings**: `TEMPO_SANDBOX` (auto/off), `TEMPO_SANDBOX_MATH` (auto/rules/off),
+  `TEMPO_SANDBOX_TIMEOUT` (10 s), `TEMPO_SANDBOX_MEMORY_MB` (256), `TEMPO_SANDBOX_OUTPUT_KB` (64).
+  `tempo-server sandbox status|run`, `doctor` and `setup` cover it.
+- **Safety tests** (`tests/test_sandbox.py`, 31): endless loops (Python and JS), huge output,
+  memory bombs, disk filling, deep recursion, reading `/etc/passwd`, `/`, `..`, `C:/Windows`, the
+  host's real files, writing the standard library, sockets, DNS and `urllib`, `subprocess`,
+  `os.system`, `fork`, `exec`, host environment variables, fresh runs, parallel runs, a bad
+  checksum, an archive escaping its folder, a stale compiled cache. All stopped cleanly.
+  Pipeline tests (`tests/test_sandbox_checks.py`, 22). CI installs the sandbox on every system
+  (cached) with `TEMPO_SANDBOX_REQUIRED=1`, so these tests run there, never skip.
+- **docs/SANDBOX.md**: the choice, what code can and can't do, how answers are checked, settings
+  and limits. README, ARCHITECTURE (§5 checks, tech stack) and USE_CASES (#1, #3, #12) updated.
+- Tests: 433 pass locally with the sandbox installed (Linux, Python 3.11), lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -426,7 +484,7 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 7 is finished.
+Nothing. Step 8 is finished.
 
 ## Blocked: needs the owner
 
@@ -515,23 +573,27 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
     an A2A agent card (ARCHITECTURE Phase 4).
   - The JS SDK is built with TypeScript 5.9; TypeScript 7 (the native compiler) is now `latest`
     on npm. Move when its declaration output is proven identical.
+  - Sandbox: tests Tempo writes itself when a code question has none; mutation testing for
+    test-writing answers; units, fractions in words and several results for maths; keeping one
+    warm interpreter to save the ~0.1–0.8 s start per Python run; the Docker image could ship
+    the runtimes pre-installed.
 
 ## Decisions for the owner
 
-1. **Publishing the SDKs**: publish `tempo-server-client` to PyPI and npm with 0.1.0? PyPI can use
-   the same Trusted Publishing as the server (a second pending publisher); npm needs an account
-   (npm also supports trusted publishing from GitHub Actions). I can add the workflows.
-2. **MCP over HTTP always needs a key**, even on a server only you use (stdio needs none). Keep
-   that, or allow keyless HTTP when bound to 127.0.0.1 with no users?
-3. **Browsers**: the JS SDK works in browsers, but Tempo-server sends no CORS headers, so only
-   pages it serves itself (or behind a proxy) can call it. Add an opt-in
-   `TEMPO_CORS_ORIGINS` setting?
-4. **MCP questions in the log**: questions from an assistant over stdio count as the owner's
-   (logged, usable for training like your own); over HTTP they belong to the key's user (their
-   consent applies). Keep, or log MCP questions apart (like `collect`)?
-5. **MCP SDK in the core install**: `mcp` 2.x adds httpx2, pyjwt and opentelemetry-api to every
-   install. Keep it core (so `tempo-server mcp` always works), or make it an extra
-   (`tempo-server[mcp]`)?
+1. **How the runtimes are installed.** `pip install tempo-server` brings Wasmtime; the Python and
+   JavaScript interpreters (about 16 MB) are downloaded once by `tempo-server sandbox install` (or
+   `setup`) from their GitHub releases, pinned by SHA-256. Keep that, or publish a small
+   `tempo-server-sandbox` package on PyPI that bundles them (so everything comes from pip, at the
+   cost of a ~15 MB package to publish and update)?
+2. **Install the sandbox automatically** the first time a code or maths question needs it (a
+   one-time 16 MB download during that question), or keep it an explicit step (today: setup offers
+   it; the thinking window says when it is missing)?
+3. **Maths by a model-written program** costs one extra free request per maths question that the
+   rules can't handle. Keep `auto`, or default to `rules` (no extra request)?
+4. **Model-program mismatches**: today they lower the score strongly but don't fail the check on
+   their own (the program could be the wrong one). Make them a hard failure like rule-based ones?
+5. **Wasmtime updates** every month; the dependency allows `>=49,<60`. Keep a wide range (security
+   fixes arrive without a Tempo release), or pin one major version and update on purpose?
 
 ## How the checks were run (for the next session)
 
