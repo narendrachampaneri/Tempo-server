@@ -13,6 +13,13 @@ authors = [{name = "The Tempo-server authors"}]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -33,8 +40,13 @@ dependencies = [
     "jsonschema>=4",  # validates tool-call arguments and strict JSON answers (MIT)
 ]
 
+[project.urls]
+Homepage = "https://github.com/narendrachampaneri/Tempo-server"
+Documentation = "https://github.com/narendrachampaneri/Tempo-server#readme"
+Issues = "https://github.com/narendrachampaneri/Tempo-server/issues"
+
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.16,<0.17"]
 # Laya decision engine on CPU (pulls in torch + transformers for the one-time ONNX export, and
 # ONNX Runtime; about 0.8 GB per checkpoint on first load).
 laya = ["laya[onnx]>=0.3.21"]

@@ -1,0 +1,7 @@
+# Same line endings on every system: LF in the repository and in checkouts (Windows included),
+# so shell scripts run, tests that read files match, and diffs stay clean.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.gz binary
+*.whl binary

@@ -1,23 +1,199 @@
-# Tests, lint, and a package build on every push and pull request. Publishes nothing.
+# Tests, lint, the package build and install tests. Publishes nothing.
+#
+# To save free CI minutes while the repository is private (owner's decision, step 6):
+#   - every push:                Linux, every supported Python version, and a Linux install test
+#   - pull requests and releases: also Windows (every Python version) and macOS (one version),
+#                                 and install tests on all three systems
 name: CI
 
 on:
   push:
   pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "0"  # test with each system's own default encoding, as users have it
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
 jobs:
-  test:
+  lint:
+    # A pull request from this repository already ran everything on its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-      - run: pip install -e ".[dev]" build
-      - run: ruff check . && ruff format --check .
+          python-version: "3.13"
+      - run: pip install "ruff>=0.16,<0.17"
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test-linux:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
       - run: pytest -q
-      - name: Build the pip package (not uploaded anywhere)
-        run: python -m build
+
+  test-windows:
+    if: github.event_name != 'push'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  test-macos:
+    if: github.event_name != 'push'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  install:
+    needs: package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event_name == 'push' && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+    env:
+      TEMPO_EMBEDDINGS: "off"
+      TEMPO_SERVER_SETUP_ARGS: "--non-interactive --no-sync"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Smoke-test helper
+        run: |
+          cat > "$RUNNER_TEMP/smoke.sh" <<'EOF'
+          # usage: smoke.sh <path to tempo-server>
+          set -euo pipefail
+          bin="$1"
+          export TEMPO_DATA_DIR="$RUNNER_TEMP/tempo-data-$RANDOM"
+          "$bin" --version | grep -q "^tempo-server "
+          "$bin" setup --non-interactive --no-sync
+          TEMPO_ENABLE_MOCK=1 "$bin" ask "What is 17% of 2,340?" > "$RUNNER_TEMP/answer.txt"
+          grep -q "demo answer" "$RUNNER_TEMP/answer.txt"
+          "$bin" doctor --offline --port 8765
+          echo "OK: $("$bin" --version)"
+          EOF
+          echo "WHEEL=$(ls "$PWD"/dist/*.whl)" >> "$GITHUB_ENV"
+          # where uv and its tools go (~/.local/bin; on Windows %USERPROFILE%\.local\bin)
+          if [ "$RUNNER_OS" = Windows ]; then home="$(cygpath -u "$USERPROFILE")"; else home="$HOME"; fi
+          echo "LOCAL_BIN=$home/.local/bin" >> "$GITHUB_ENV"
+          command -v uv && echo "uv is already on this runner" || echo "no uv: the installer installs it"
+
+      # The one-line installers first, on a runner without uv: they must install it themselves.
+      - name: install.sh (installs uv, then tempo-server)
+        if: runner.os != 'Windows'
+        run: |
+          TEMPO_SERVER_SOURCE="$WHEEL" TEMPO_SERVER_INSTALLER=uv sh install.sh
+          bash "$RUNNER_TEMP/smoke.sh" "$(uv tool dir --bin)/tempo-server"
+          uv tool uninstall tempo-server
+      - name: install.sh with pipx
+        if: runner.os != 'Windows'
+        run: |
+          TEMPO_SERVER_SOURCE="$WHEEL" TEMPO_SERVER_INSTALLER=pipx sh install.sh
+          bash "$RUNNER_TEMP/smoke.sh" "$(pipx environment --value PIPX_BIN_DIR)/tempo-server"
+          pipx uninstall tempo-server
+      - name: install.ps1 (installs uv, then tempo-server)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:TEMPO_SERVER_SOURCE = (Get-ChildItem dist\*.whl).FullName
+          $env:TEMPO_SERVER_INSTALLER = "uv"
+          ./install.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Smoke test after install.ps1
+        if: runner.os == 'Windows'
+        run: |
+          export PATH="$LOCAL_BIN:$PATH"
+          bash "$RUNNER_TEMP/smoke.sh" "$(cygpath -u "$(uv tool dir --bin)")/tempo-server.exe"
+          uv tool uninstall tempo-server
+      - name: install.ps1 with pipx
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:TEMPO_SERVER_SOURCE = (Get-ChildItem dist\*.whl).FullName
+          $env:TEMPO_SERVER_INSTALLER = "pipx"
+          ./install.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & pipx uninstall tempo-server
+
+      # Then the two tools directly, as the README shows them.
+      - name: pipx install
+        run: |
+          pipx install "$WHEEL"
+          bin_dir="$(pipx environment --value PIPX_BIN_DIR)"
+          [ "$RUNNER_OS" = Windows ] && bin_dir="$(cygpath -u "$bin_dir")"
+          bash "$RUNNER_TEMP/smoke.sh" "$bin_dir/tempo-server"
+          pipx uninstall tempo-server
+      - name: uv tool install
+        run: |
+          export PATH="$LOCAL_BIN:$PATH"
+          uv tool install --python 3.12 "$WHEEL"
+          bin_dir="$(uv tool dir --bin)"
+          [ "$RUNNER_OS" = Windows ] && bin_dir="$(cygpath -u "$bin_dir")"
+          bash "$RUNNER_TEMP/smoke.sh" "$bin_dir/tempo-server"
+          uv tool uninstall tempo-server

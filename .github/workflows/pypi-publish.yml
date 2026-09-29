@@ -1,0 +1,78 @@
+# Publishes tempo-server to PyPI with Trusted Publishing (OpenID Connect): no token is stored
+# anywhere. It runs only when the owner publishes a GitHub release (PyPI), or by hand
+# (TestPyPI, to try a release first).
+#
+# One-time setup on PyPI (owner): Account → Publishing → "Add a new pending publisher":
+#   PyPI project name: tempo-server
+#   Owner: narendrachampaneri   Repository: Tempo-server
+#   Workflow name: pypi-publish.yml   Environment: pypi
+# (and the same on test.pypi.org with environment "testpypi"). Then create the two
+# environments in GitHub (Settings → Environments), optionally with required reviewers.
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Tests must pass before anything is published
+        run: |
+          pip install -e ".[dev]" build twine
+          pytest -q
+      - name: The release tag must match the package version
+        if: github.event_name == 'release'
+        run: |
+          version="$(python -c 'import tempo; print(tempo.__version__)')"
+          [ "${GITHUB_REF_NAME#v}" = "$version" ] || {
+            echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/tempo-server
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tempo-server
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
