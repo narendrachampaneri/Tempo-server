@@ -47,8 +47,8 @@ Checked 2026-09-28 (step 5):
 | Grafana Tempo | its Makefile builds `tempo`, `tempo-query`, `tempo-cli` and `tempo-vulture`; the `grafana/tempo` image has over 100M pulls |
 
 So a `tempo` command can clash with Grafana Tempo on a machine that has both. Tempo-server
-installs **`tempo-server`** as its main command (the docs and the Docker image use it) and keeps
-`tempo` as a short alias. Suggested: drop the alias before 1.0 if clashes are reported (owner).
+installs **`tempo-server`** as its main command (every doc and the Docker image use it). The
+`tempo` alias stays for 0.x with a notice and is removed before 1.0 (owner's decision, step 6).
 
 ## 2. No keys in the repository
 
@@ -123,8 +123,14 @@ without an account.
 - [ ] Docker image: publishing the GitHub release runs `.github/workflows/docker-publish.yml`
       (tests first, then `ghcr.io/<owner>/tempo-server:<version>` and `latest`, amd64 and
       arm64). Then make the package public under the repository's Packages settings.
-- [ ] PyPI: `python -m build && twine upload dist/*` from a clean checkout (or add a trusted
-      publishing workflow). Until then the README installs from GitHub.
-- [ ] GitHub Pages: Settings → Pages → Deploy from branch `main`, folder `/docs`.
+- [ ] PyPI with Trusted Publishing (no token): on pypi.org, Account → Publishing → add a pending
+      publisher (project `tempo-server`, owner `narendrachampaneri`, repository `Tempo-server`,
+      workflow `pypi-publish.yml`, environment `pypi`); the same on test.pypi.org with
+      environment `testpypi`; create both environments in GitHub (Settings → Environments). A
+      manual run of "Publish to PyPI" tries TestPyPI; publishing the `v0.1.0` release publishes
+      to PyPI (the tag must match the version).
+- [ ] GitHub Pages: Settings → Pages → Deploy from branch `main`, folder `/docs`. The landing
+      page is `docs/index.html`, the demo `docs/demo/`.
+- [ ] Make `main` the default branch: the installers and README links point at it.
 - [ ] Models, when trained: model cards and licences (TEMPO_MODELS.md §5), promotion-gate
       results attached.

@@ -1,6 +1,7 @@
 # Status
 
-_Last updated 2026-09-28, at the end of step 5 (making Tempo-server easy for other people). Branch:
+_Last updated 2026-09-29, at the end of step 6 (works on Windows, macOS and Linux; installs like
+a professional tool). Branch:
 `claude/multi-model-ai-platform-o0fx9v`._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
@@ -259,6 +260,55 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   Docker; the name clash.
 - Tests: 344 pass, lint clean.
 
+### Step 6: the owner's decisions on step 5
+
+- **`.env` keys are the owner's**: other users of a server use only their own keys unless
+  `TEMPO_SHARE_SERVER_KEYS=1`. The owner's own jobs (`collect`) count as the owner. Quota buckets
+  are per key (a one-way fingerprint), so one key used by the owner, the admin and collect is
+  counted once (before, the same vault key had one bucket per user).
+- **`tempo` alias** kept for 0.x with a notice that it goes away before 1.0; `tempo-server` in
+  every doc, hint and message.
+- **PyPI**: `pypi-publish.yml` with Trusted Publishing (no token stored); runs on a published
+  release (PyPI) or by hand (TestPyPI). The owner creates the Hugging Face organisation.
+- **Image size** 627 MB accepted for 0.1; a slimmer image is a later task (Next).
+- **Local first** only when Ollama reported the model as installed, with a note in the thinking
+  window ("Local first: … TEMPO_LOCAL_FIRST=off to turn off").
+- **Landing page** `docs/index.html` for GitHub Pages from `/docs` on `main`: what Tempo-server
+  is, install per system, the demo, links (`docs/.nojekyll` so Pages serves it as is).
+
+### Step 6: works on Windows, macOS and Linux
+
+- **CI** (`.github/workflows/ci.yml`): lint, Linux tests on Python 3.11, 3.12, 3.13 and 3.14 and a
+  Linux install test on every push; Windows (3.11–3.14), macOS (3.13) and install tests on all
+  three systems on pull requests, releases and manual runs. Results: see "CI results" below.
+- **Install tests** on each system: `install.sh` / `install.ps1` (installing uv themselves),
+  the installers with pipx, `pipx install` and `uv tool install` of the built wheel; each then
+  runs `tempo-server --version`, `setup --non-interactive`, a demo question and `doctor --offline`.
+- **Fixed for other systems**:
+  - data folder per system (`%LOCALAPPDATA%\tempo-server`, `~/Library/Application
+    Support/tempo-server`, `$XDG_DATA_HOME/tempo-server`), with a safe one-time move of an old
+    `~/.tempo` (rename, or copy → swap → delete across drives; never over a folder in use);
+  - every text file read and written as UTF-8 (ruff `PLW1514` enforces it where it can see);
+  - console output switched to UTF-8 when Windows gives a legacy code page (▸, ✗, Gujarati);
+  - `tzdata` on Windows: it has no IANA time zones, so Google's midnight-Pacific reset failed to
+    load (found by the first Windows CI run: 56 tests);
+  - line endings: `.gitattributes` keeps LF (CRLF for `.ps1`);
+  - file permissions: the data folder is created 0700 and the secret 0600 on POSIX; the test
+    for it runs only on POSIX (Windows keeps profile folders private with ACLs);
+  - tests get a private home folder, so nothing reads or moves the real one;
+  - asyncio: nothing POSIX-only (no signal handlers); the default Windows event loop works.
+- **Professional install**: `install.sh` and `install.ps1` (uv if present, else pipx if present,
+  else install uv; tool Python pinned to 3.12 unless `TEMPO_SERVER_PYTHON`; setup on the terminal
+  even when piped, else non-interactive). README install per system (one line, pipx/uv, Docker,
+  the GitHub archive URL until PyPI); venv and editable installs moved to CONTRIBUTING.md.
+- **`tempo-server doctor`**: Python version, the command on PATH, the data folder (writable, old
+  folder left, secret file mode), keys (vault and environment, fingerprints only), which
+  providers are reachable (a plain request without a key), Ollama, and the port; a fix for each
+  problem; exit code 1 when something must be fixed.
+- Also: `tempo-server --version`, `setup --non-interactive`, Python 3.11–3.14 classifiers,
+  project URLs, `twine check --strict` in CI.
+- Tests: 361 pass locally (Linux, Python 3.11 and 3.13), lint clean.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -289,7 +339,16 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 5 (the last planned step) is finished; the owner decides what comes next.
+Nothing. Step 6 is finished. The pull request into `main` waits on the owner creating `main` (see Blocked).
+
+## Blocked: needs the owner
+
+- **Pull request into `main`**: `main` does not exist, and creating it was refused to this
+  session (a push outside its branch). Once the owner creates `main`, the pull request body is
+  ready in [PR_STEPS_1-6.md](./PR_STEPS_1-6.md).
+- **Publishing**: PyPI (Trusted Publishing to configure on pypi.org), the Docker image (a GitHub
+  release) and GitHub Pages (Settings → Pages) wait for the owner. The one-line installers and
+  the GitHub-archive install need the repository to be public.
 
 ## Blocked: needs key
 
@@ -355,40 +414,35 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
 
 ## Next
 
-- The owner's plan: `tempo-server collect --yes-only` on their computer with a local Apache-2.0 model,
-  then the first exports.
-- Noticed, not started:
-  - Keys in `.env` or the environment (server-wide) are used for every user of a shared server
-    when the user has no key of their own (decision 1 below); keys from `tempo-server setup` are
-    already owner-only.
+- The owner's plan: `tempo-server collect --yes-only` on their computer with a local Apache-2.0
+  model, then the first exports.
+- Later tasks (noted, not started):
+  - A slimmer Docker image (owner's decision: 627 MB is fine for 0.1).
+  - Drop the `tempo` alias before 1.0.
   - Google AI Studio's free limits in `models.yaml` cite a community list
     (github.com/raullenchai/free-llm-api-resources); re-check them on Google's own rate-limit
     page, which needs a signed-in console.
   - NVIDIA's model list gives no context sizes; routing assumes 8K.
   - Human reference answers for the data mix.
-  - A PyPI publish workflow (trusted publishing), if the owner wants PyPI.
+  - GitHub Actions warns that `actions/download-artifact@v5` runs on a deprecated Node 20; move
+    to the next major version when it is out.
 
 ## Decisions for the owner
 
-1. **Server-wide keys on a shared server**: keys from `tempo-server setup` are only for the owner, but
-   keys in `.env`/the environment are also used for other users who have no key of their own.
-   Make env keys owner-only too, with an opt-in `TEMPO_SHARE_SERVER_KEYS=1`? (Recommended, since
-   "my keys are only for my own use"; it changes behaviour for existing shared servers.)
-2. **Command name**: keep `tempo-server` as the documented command and `tempo` as an alias
-   (today), or drop the `tempo` alias before 1.0 to avoid clashing with Grafana Tempo on PATH?
-3. **Reserve the names**: publish a first `tempo-server` release to PyPI and create the
-   `tempo-server` Hugging Face org soon, before someone else takes them?
-4. **Docker image size** (627 MB, mostly LiteLLM and its dependencies): fine, or look into a
-   slimmer image?
-5. **Local first**: default `auto` with complexity up to 0.3 goes to a running Ollama model.
-   Keep, lower, or make it opt-in?
-6. **Demo hosting**: GitHub Pages from `/docs` on `main` (demo at
-   `https://<owner>.github.io/Tempo-server/demo/`), or a separate `gh-pages` branch?
+1. **The `main` branch**: the repository has no `main` yet (only this branch), and this session
+   may not create one. Suggested: create `main` at `bd57172` (the last commit before step 1), so
+   the pull request shows steps 1 to 6; or at the first commit `ce66bc5` to review everything.
+2. **Default branch**: make `main` the default once it exists (the installers, the README links
+   and GitHub Pages all point at `main`).
+3. **Windows and macOS CI on every push** while private costs more free minutes (Windows 2×,
+   macOS 10×). Keep them on pull requests and releases only (today), or add a nightly run?
+4. **Installer Python**: the installers pin the tool's Python to 3.12 (uv downloads it if
+   missing) for predictable installs. Keep 3.12, or move to 3.13?
 
 ## How the checks were run (for the next session)
 
 ```bash
-python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev,terms]"
+python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev,terms]"   # see CONTRIBUTING.md
 pytest -q && ruff check . && ruff format --check .
 export TEMPO_ENABLE_MOCK=1 TEMPO_DATA_DIR=memory TEMPO_SYNC_INTERVAL=0
 tempo-server ask "hi there!"                    # and the other questions above
