@@ -49,6 +49,7 @@ class SftStats:
     skipped_terms: int = 0
     skipped_user: int = 0
     skipped_mcp: int = 0  # asked by an AI assistant over MCP (TEMPO_TRAIN_ON_MCP to include)
+    with_execution: int = 0  # rows whose answer was run in the sandbox (a reward to train on)
     skipped_no_rejected: int = 0
     unverified_providers: set[str] = field(default_factory=set)
     sources: Counter[str] = field(default_factory=Counter)  # dataset (or tempo-traffic) -> rows
@@ -142,6 +143,18 @@ def build(
             call["training_verdict"],
         )
     origins = store.collect_sources()
+    # Sandbox runs per answer (tempo/execute.py): the reward for code and maths answers.
+    runs: dict[tuple[str, int, str], dict[str, Any]] = {}
+    for run in store.query("SELECT * FROM executions ORDER BY id"):
+        runs[(run["question_id"], run["stage"], run["model"])] = {
+            "kind": run["kind"],
+            "language": run["language"],
+            "status": run["status"],
+            "reward": run["reward"],
+            "tests_passed": run["tests_passed"],
+            "tests_total": run["tests_total"],
+            "method": run["method"],
+        }
 
     sft: list[dict[str, Any]] = []
     pairs: list[dict[str, Any]] = []
@@ -205,10 +218,13 @@ def build(
                 "messages": [*prompt, {"role": "assistant", "content": chosen_text}],
                 "answer_model": chosen.model,
                 "score": chosen.check.get("score"),
+                "execution": runs.get((qid, chosen.stage, chosen.model)),
                 **common,
             }
         )
         stats.rows += 1
+        if sft[-1]["execution"]:
+            stats.with_execution += 1
         stats.sources[source["dataset"]] += 1
         stats.splits[split] += 1
 
@@ -239,6 +255,8 @@ def build(
                 "chosen_score": chosen.check.get("score"),
                 "rejected_score": rejected.check.get("score"),
                 "rejected_issues": rejected.check.get("issues") or [],
+                "chosen_execution": runs.get((qid, chosen.stage, chosen.model)),
+                "rejected_execution": runs.get((qid, rejected.stage, rejected.model)),
                 **common,
             }
         )
@@ -285,6 +303,11 @@ Exported by `tempo export-{kind}` on {date}. Nothing in it was trained yet.
   `output_terms` (verdict and licence per model) and its question's origin in `source`.
 - Answers passed Tempo's checks (heuristics plus a judge from another model family); answers
   with a 👎 are left out.
+- Code and maths answers that were run in the sandbox carry the result in `execution`
+  (`chosen_execution` / `rejected_execution` in pairs): `status` passed, failed or
+  inconclusive, and `reward` (tests passed / tests run for code with tests, 1 or 0 otherwise,
+  null when nothing could be checked), usable as a reward for reinforcement learning. Rows with
+  one: {with_execution}.
 - Repetition of the answers (compare between versions to catch model collapse):
   distinct word pairs {distinct_2}, repeated 4-word sequences {repeated_4}.
 - Data mix of the training rows: {public_share} from public datasets (target at least
@@ -374,6 +397,7 @@ def export(
             self_share=f"{stats.self_share:.0%}",
             min_public=f"{min_public:.0%}",
             max_self=f"{max_self:.0%}",
+            with_execution=stats.with_execution,
             sources=_sources(rows),
         ),
         encoding="utf-8",

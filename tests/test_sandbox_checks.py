@@ -159,3 +159,17 @@ def test_numbers_match_when_rounded_as_shown():
     assert execute.same_number(397.8, 397.8000000001)
     assert execute.same_number(0.33, 1 / 3)
     assert not execute.same_number(400, 397.8)
+
+
+async def test_exports_carry_the_run_as_a_reward():
+    from tempo import sft
+
+    engine, _ = make_engine(
+        {"*:draft": [("answer", BUGGY)], "*:fix": [("answer", FIXED)]}, sandbox="auto"
+    )
+    await engine.complete(user("Write a Python function add(a, b) with a test"))
+    rows, pairs, stats = sft.build(engine.store, None, users={"local"})
+    assert rows[0]["execution"]["status"] == "passed" and rows[0]["execution"]["reward"] == 1.0
+    assert pairs[0]["rejected_execution"]["status"] == "failed"
+    assert pairs[0]["rejected_execution"]["reward"] == 0.0
+    assert stats.with_execution == 1
