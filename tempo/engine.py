@@ -74,6 +74,9 @@ class RunOptions:
     tool_choice: Any = None
     parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
+    # Model families never used for this run (second opinions and verification ask a family
+    # other than the one that wrote the first answer).
+    exclude_families: list[str] | None = None
 
 
 @dataclass

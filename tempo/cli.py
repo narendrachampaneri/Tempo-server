@@ -1202,6 +1202,50 @@ def keys_remove(
     err.print(f"Removed the {provider} key.", markup=False)
 
 
+@app.command(name="mcp")
+def mcp_command(
+    http: Annotated[
+        bool,
+        typer.Option(
+            "--http", help="Serve MCP over HTTP at /mcp (needs a Tempo key) instead of stdio."
+        ),
+    ] = False,
+    host: Annotated[str, typer.Option(help="Interface to bind (with --http).")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port (with --http).")] = 8001,
+) -> None:
+    """Run Tempo-server as an MCP server for AI assistants (docs/MCP.md): stdio by default."""
+    from tempo.mcp_server import build_server, http_app
+
+    settings = Settings.from_env()
+    engine = Engine.from_settings(settings)
+    if not http:  # stdout carries the protocol: everything else goes to stderr
+
+        async def run_stdio() -> None:
+            await engine.startup()
+            await build_server(engine, settings.api_key).run_stdio_async()
+
+        asyncio.run(run_stdio())
+        return
+    if not settings.api_key and not engine.accounts.has_users():
+        err.print(
+            "MCP over HTTP needs a Tempo key: create one with `tempo-server users add <name>` "
+            "(or set TEMPO_API_KEY), then send it as Authorization: Bearer <key>.",
+            style="red",
+            markup=False,
+        )
+        raise typer.Exit(1)
+    import uvicorn
+
+    async def run_http() -> None:
+        await engine.startup()
+        app = http_app(engine, settings.api_key, host=host)
+        config = uvicorn.Config(app, host=host, port=port, log_level="info")
+        await uvicorn.Server(config).serve()
+
+    err.print(f"Tempo-server MCP on http://{host}:{port}/mcp (needs a Tempo key)", markup=False)
+    asyncio.run(run_http())
+
+
 @app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Interface to bind.")] = "127.0.0.1",

@@ -247,6 +247,7 @@ class Pipeline:
                 no_logging=o.no_logging,
                 training_only=o.training_only,
                 explicit=True,
+                exclude_families=o.exclude_families or (),
             )
             if reason:
                 message = f"{o.model} is unavailable: {reason}"
@@ -331,7 +332,12 @@ class Pipeline:
         if self.tool_req or self.json_fmt:
             return False
         turns = [m for m in self.messages if m.get("role") in ("user", "assistant")]
-        return len(turns) == 1 and self.o.model is None and not self.o.allow_providers
+        return (
+            len(turns) == 1
+            and self.o.model is None
+            and not self.o.allow_providers
+            and not self.o.exclude_families
+        )
 
     # --- planning ------------------------------------------------------------------
 
@@ -405,6 +411,7 @@ class Pipeline:
             reserve=o.quota_reserve,
             no_logging=o.no_logging,
             training_only=o.training_only,
+            exclude_families=o.exclude_families or (),
         )
 
     def _slots(self, ranked: list[Candidate], count: int) -> list[list[Candidate]]:

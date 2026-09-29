@@ -41,6 +41,7 @@ dependencies = [
     # Windows has no IANA time-zone database; free quotas reset at midnight in the provider's
     # zone (e.g. America/Los_Angeles for Google). Apache-2.0.
     "tzdata; sys_platform == 'win32'",
+    "mcp>=2.2,<3",  # the official MCP Python SDK: `tempo-server mcp` (MIT)
 ]
 
 [project.urls]

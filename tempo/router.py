@@ -150,6 +150,7 @@ class Router:
         no_logging: bool = False,
         training_only: bool = False,
         explicit: bool = False,
+        exclude_families: Iterable[str] = (),
     ) -> str | None:
         """Why this model can't take the request, or None. ``explicit``: the caller asked for
         this model by name, so a specialist may answer outside its field."""
@@ -176,6 +177,8 @@ class Router:
             return "not local"
         if allow_providers is not None and model.provider not in set(allow_providers):
             return "provider not allowed"
+        if model.family in set(exclude_families):
+            return f"{model.family} family excluded for this request"
         reason = self.health.unavailable_reason(model)
         if reason:
             return reason
@@ -222,10 +225,12 @@ class Router:
         reserve: float = 0.0,
         no_logging: bool = False,
         training_only: bool = False,
+        exclude_families: Iterable[str] = (),
     ) -> RouteResult:
         local_only = local_only or mode == "private"
         allowed = list(allow_providers) if allow_providers is not None else None
         excluded = set(exclude)
+        families = tuple(exclude_families)
 
         candidates: list[Candidate] = []
         skipped: dict[str, list[str]] = {}
@@ -241,6 +246,7 @@ class Router:
                 reserve=reserve,
                 no_logging=no_logging,
                 training_only=training_only,
+                exclude_families=families,
             )
             if reason:
                 skipped.setdefault(reason, []).append(model.id)
