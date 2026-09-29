@@ -77,6 +77,9 @@ class RunOptions:
     # Model families never used for this run (second opinions and verification ask a family
     # other than the one that wrote the first answer).
     exclude_families: list[str] | None = None
+    # Where the question came from, recorded with it: "mcp" for AI assistants over MCP (kept out
+    # of training exports unless TEMPO_TRAIN_ON_MCP=1: they often carry private code or files).
+    source: str | None = None
 
 
 @dataclass

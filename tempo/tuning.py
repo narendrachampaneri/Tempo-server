@@ -279,6 +279,7 @@ class ExportStats:
     unclear_terms_providers: set[str] = field(default_factory=set)
     unverified_providers: set[str] = field(default_factory=set)  # terms check did not pass
     sources: dict[str, int] = field(default_factory=dict)  # dataset -> rows (tempo-server collect)
+    skipped_mcp: int = 0  # questions from AI assistants over MCP (TEMPO_TRAIN_ON_MCP)
 
 
 def _terms(
@@ -329,18 +330,21 @@ def build_rows(
     check_terms: bool = True,
     unverified: frozenset[str] | set[str] = frozenset(),
     users: frozenset[str] | set[str] | None = None,
+    include_mcp: bool = False,
 ) -> tuple[list[dict[str, Any]], ExportStats]:
     """Typed-decision rows from the log. Rows containing text written by a model whose
     provider's terms say "no" are left out, and so are "unclear" ones unless
     ``include_unclear``. ``check_terms=False`` keeps every row (evaluation, not training)."""
     stats = ExportStats()
-    questions = {
-        q["id"]: q
-        for q in store.query(
-            "SELECT * FROM questions WHERE error IS NULL AND final_answer IS NOT NULL"
-        )
-        if users is None or q["user_id"] in users
-    }
+    logged = store.query("SELECT * FROM questions WHERE error IS NULL AND final_answer IS NOT NULL")
+    questions = {}
+    for q in logged:
+        if users is not None and q["user_id"] not in users:
+            continue
+        if q["source"] == "mcp" and not include_mcp:
+            stats.skipped_mcp += 1
+            continue
+        questions[q["id"]] = q
     decisions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for d in store.query("SELECT * FROM decisions ORDER BY id"):
         if d["question_id"] in questions:
@@ -539,6 +543,7 @@ def export(
     include_unclear: bool = False,
     unverified: frozenset[str] | set[str] = frozenset(),
     users: frozenset[str] | set[str] | None = None,
+    include_mcp: bool = False,
 ) -> ExportStats:
     rows, stats = build_rows(
         store,
@@ -547,6 +552,7 @@ def export(
         include_unclear=include_unclear,
         unverified=unverified,
         users=users,
+        include_mcp=include_mcp,
     )
     stats.unverified_providers = set(unverified)
     out_dir.mkdir(parents=True, exist_ok=True)

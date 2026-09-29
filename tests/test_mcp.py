@@ -172,3 +172,24 @@ def test_every_config_snippet_in_the_docs_is_valid_json():
         entry = servers["tempo-server"]
         assert entry.get("args") == ["mcp"] or entry.get("url", "").endswith("/mcp")
         assert "Bearer placeholder" not in block and "gsk_" not in block
+
+
+async def test_mcp_questions_are_logged_apart_and_kept_out_of_training_exports():
+    from tempo import sft, tuning
+    from tempo.config import Settings
+
+    engine = Engine.from_settings(demo_settings())
+    await engine.startup(oneshot=True)
+    async with Client(build_server(engine)) as c:
+        data(await c.call_tool("ask", {"question": "Review my private code: x = 1"}))
+    sources = {q["source"] for q in engine.store.query("SELECT source FROM questions")}
+    assert sources == {"mcp"}
+    users = {"local", "admin", "collect"}
+    *_, stats = sft.build(engine.store, engine.registry, users=users)
+    assert stats.skipped_mcp == 1
+    *_, opted_in = sft.build(engine.store, engine.registry, users=users, include_mcp=True)
+    assert opted_in.skipped_mcp == 0
+    _, laya = tuning.build_rows(engine.store, engine.registry, users=users)
+    assert laya.skipped_mcp == 1 and laya.rows == 0
+    assert Settings.from_env({"TEMPO_DATA_DIR": "memory"}).train_on_mcp is False
+    assert Settings.from_env({"TEMPO_DATA_DIR": "memory", "TEMPO_TRAIN_ON_MCP": "1"}).train_on_mcp

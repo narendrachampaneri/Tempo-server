@@ -100,7 +100,13 @@ def build_server(engine: Engine, admin_key: str | None = None) -> MCPServer:
         ctx: Context | None = None,
     ) -> dict[str, Any]:
         return await assist.ask(
-            engine, question, mode=mode, private=private, local_only=local_only, access=access(ctx)
+            engine,
+            question,
+            mode=mode,
+            private=private,
+            local_only=local_only,
+            access=access(ctx),
+            source="mcp",
         )
 
     @server.tool(
@@ -113,7 +119,9 @@ def build_server(engine: Engine, admin_key: str | None = None) -> MCPServer:
     async def second_opinion(
         question: str, private: bool = False, ctx: Context | None = None
     ) -> dict[str, Any]:
-        return await assist.second_opinion(engine, question, private=private, access=access(ctx))
+        return await assist.second_opinion(
+            engine, question, private=private, access=access(ctx), source="mcp"
+        )
 
     @server.tool(
         title="Verify an answer",
@@ -137,6 +145,7 @@ def build_server(engine: Engine, admin_key: str | None = None) -> MCPServer:
             answer_model=answer_model,
             private=private,
             access=access(ctx),
+            source="mcp",
         )
 
     @server.tool(

@@ -163,6 +163,9 @@ class Settings:
     local_first_max_complexity: float = 0.3
     # Websites whose pages may call the API from a browser (CORS). Empty: none (the default).
     cors_origins: list[str] = field(default_factory=list)
+    # Questions from AI assistants over MCP are logged apart ("mcp") and kept out of every
+    # training export unless this is on (owner's decision, step 7).
+    train_on_mcp: bool = False
 
     @property
     def db_path(self) -> Path | None:
@@ -217,4 +220,5 @@ class Settings:
             local_first=_choice(env, "TEMPO_LOCAL_FIRST", ("auto", "off"), "auto"),
             local_first_max_complexity=float(env.get("TEMPO_LOCAL_FIRST_MAX_COMPLEXITY") or 0.3),
             cors_origins=parse_origins(env.get("TEMPO_CORS_ORIGINS")),
+            train_on_mcp=_flag(env, "TEMPO_TRAIN_ON_MCP", False),
         )

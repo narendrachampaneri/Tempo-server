@@ -1252,6 +1252,7 @@ class Pipeline:
                 user_id=self.o.access.user_id,
                 mode=self.o.mode,
                 messages=self.messages,
+                source=self.o.source,
             )
 
     def _log(self, **fields: Any) -> None:

@@ -48,6 +48,7 @@ class SftStats:
     skipped_feedback: int = 0
     skipped_terms: int = 0
     skipped_user: int = 0
+    skipped_mcp: int = 0  # asked by an AI assistant over MCP (TEMPO_TRAIN_ON_MCP to include)
     skipped_no_rejected: int = 0
     unverified_providers: set[str] = field(default_factory=set)
     sources: Counter[str] = field(default_factory=Counter)  # dataset (or tempo-traffic) -> rows
@@ -121,6 +122,7 @@ def build(
     test_percent: int = 10,
     users: frozenset[str] | set[str] = DEFAULT_USERS,
     unverified: frozenset[str] | set[str] = frozenset(),
+    include_mcp: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], SftStats]:
     """(SFT rows, preference pairs, stats) from the question log."""
     stats = SftStats(unverified_providers=set(unverified))
@@ -148,6 +150,9 @@ def build(
         qid = q["id"]
         if q["user_id"] not in users:
             stats.skipped_user += 1
+            continue
+        if q["source"] == "mcp" and not include_mcp:
+            stats.skipped_mcp += 1
             continue
         if q["stop_reason"] != "passed":
             stats.skipped_not_passed += 1
@@ -336,12 +341,18 @@ def export(
     unverified: frozenset[str] | set[str] = frozenset(),
     min_public: float = 0.3,
     max_self: float = 0.3,
+    include_mcp: bool = False,
 ) -> SftStats:
     """Write ``kind`` ("sft" or "pairs") rows to ``out_dir`` with a README."""
     import time
 
     sft, pairs, stats = build(
-        store, registry, test_percent=test_percent, users=users, unverified=unverified
+        store,
+        registry,
+        test_percent=test_percent,
+        users=users,
+        unverified=unverified,
+        include_mcp=include_mcp,
     )
     rows = sft if kind == "sft" else pairs
     counts = _write(rows, out_dir)

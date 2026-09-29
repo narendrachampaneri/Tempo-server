@@ -15,6 +15,12 @@ one-line installers, or `uv tool install tempo-server`).
 | `models` | The live free-model list with limits, data policy and health | one row per model, with `ready` for you |
 | `quota` | Free requests left today per provider | per provider, and whether everything is used up |
 
+**Privacy:** assistants often send private code or documents with a question, so questions that
+arrive over MCP are logged apart (tagged `mcp`) and kept out of every training export
+(`export-sft`, `export-pairs`, `export-laya`) unless you set `TEMPO_TRAIN_ON_MCP=1`. Use
+`private: true` to keep them away from free tiers that may log or train on prompts, and
+`local_only: true` to keep them on your computer.
+
 Every call goes through the same engine as the web app and API: free-quota limits, fallbacks,
 health checks and privacy options all apply. The tools cost free requests like any question
 (`quota` and `models` cost none).

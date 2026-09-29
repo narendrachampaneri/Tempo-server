@@ -152,6 +152,7 @@ async def ask(
     private: bool = False,
     local_only: bool = False,
     access: Access | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Answer a question the usual Tempo way: route, draft, check, fix when weak.
 
@@ -163,6 +164,7 @@ async def ask(
         local_only=local_only,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
         access=access or Access(),
+        source=source,
     )
     result = await engine.complete([{"role": "user", "content": question}], options)
     return _summary(engine, result)
@@ -176,18 +178,25 @@ async def _one(
 
 
 async def second_opinion(
-    engine: Engine, question: str, *, private: bool = False, access: Access | None = None
+    engine: Engine,
+    question: str,
+    *,
+    private: bool = False,
+    access: Access | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Ask two different model families the same question, then have a third (when there is
     one) list where they agree and where they differ."""
     access = access or Access()
     user = [{"role": "user", "content": question}]
     common = {"no_logging": private, "system_prompt": DEFAULT_SYSTEM_PROMPT}
-    first = await _one(engine, user, access, **common)
+    first = await _one(engine, user, access, source=source, **common)
     if first.error:
         return {"error": first.error}
     first_family = _family(engine, first.model)
-    second = await _one(engine, user, access, exclude_families=[first_family], **common)
+    second = await _one(
+        engine, user, access, source=source, exclude_families=[first_family], **common
+    )
     if second.error:
         return {
             "error": "Only one model family is available right now, so there is no second "
@@ -208,13 +217,19 @@ async def second_opinion(
         engine,
         judge_input,
         access,
+        source=source,
         no_logging=private,
         response_format=COMPARE_SCHEMA,
         exclude_families=families,
     )
     if compared.error:  # no third family: one of the two compares
         compared = await _one(
-            engine, judge_input, access, no_logging=private, response_format=COMPARE_SCHEMA
+            engine,
+            judge_input,
+            access,
+            source=source,
+            no_logging=private,
+            response_format=COMPARE_SCHEMA,
         )
     comparison: dict[str, Any] | None = None
     if not compared.error:
@@ -236,6 +251,7 @@ async def verify(
     answer_model: str | None = None,
     private: bool = False,
     access: Access | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """Check someone's answer with Tempo's quick checks and a judge from a different model
     family than the one that wrote it (``answer_model``: a model id or a family name)."""
@@ -250,6 +266,7 @@ async def verify(
         engine,
         judge_input,
         access,
+        source=source,
         no_logging=private,
         response_format=VERDICT_SCHEMA,
         exclude_families=[exclude] if exclude else None,

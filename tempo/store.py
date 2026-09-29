@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS questions (
     requests_used INTEGER,
     total_ms INTEGER,
     cache_hit INTEGER DEFAULT 0,
+    source TEXT,
     error TEXT,
     feedback INTEGER,
     feedback_comment TEXT,
@@ -188,6 +189,7 @@ class Store:
                 ("laya_compare", "laya_model"),
                 ("calls", "licence"),
                 ("calls", "training_verdict"),
+                ("questions", "source"),
             ):
                 info = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
                 if column not in {row["name"] for row in info}:
@@ -220,10 +222,12 @@ class Store:
         user_id: str | None,
         mode: str,
         messages: list[dict[str, Any]],
+        source: str | None = None,
     ) -> None:
         self.execute(
-            "INSERT INTO questions (id, created_at, user_id, mode, messages) VALUES (?,?,?,?,?)",
-            (question_id, time.time(), user_id, mode, _json(messages)),
+            "INSERT INTO questions (id, created_at, user_id, mode, messages, source) "
+            "VALUES (?,?,?,?,?,?)",
+            (question_id, time.time(), user_id, mode, _json(messages), source),
         )
 
     def update_question(self, question_id: str, **fields: Any) -> None:

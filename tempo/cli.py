@@ -846,6 +846,7 @@ def _export_writing(kind: str, out_dir: Path, test_percent: int) -> None:
         unverified=_terms_gate(engine),
         min_public=settings.min_public_share,
         max_self=settings.max_self_share,
+        include_mcp=settings.train_on_mcp,
     )
     count = stats.rows if kind == "sft" else stats.pairs
     what = "checked answers" if kind == "sft" else "preference pairs"
@@ -855,6 +856,7 @@ def _export_writing(kind: str, out_dir: Path, test_percent: int) -> None:
         "👎 from the user": stats.skipped_feedback,
         "text from a model or provider that is not 'yes' (tempo-server terms)": stats.skipped_terms,
         "asked by a user who has not opted in (tempo-server users consent)": stats.skipped_user,
+        "asked by an AI assistant over MCP (TEMPO_TRAIN_ON_MCP=1 to include)": stats.skipped_mcp,
     }
     if kind == "pairs":
         notes["no failed draft to pair with"] = stats.skipped_no_rejected
@@ -918,6 +920,7 @@ def export_laya(
         include_unclear=include_unclear,
         unverified=_terms_gate(engine),
         users=_training_users(engine),
+        include_mcp=engine.settings.train_on_mcp,
     )
     err.print(
         f"Wrote {stats.rows} rows ({stats.decisions} labelled decisions from "
