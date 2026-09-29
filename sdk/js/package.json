@@ -1,0 +1,35 @@
+{
+  "name": "tempo-server-client",
+  "version": "0.1.0",
+  "description": "A thin client for Tempo-server's HTTP API: stream the thinking window, ask, models, quota, consent and feedback. Node 18+ and browsers.",
+  "license": "Apache-2.0",
+  "author": "The Tempo-server authors",
+  "homepage": "https://github.com/narendrachampaneri/Tempo-server/tree/main/sdk/js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/narendrachampaneri/Tempo-server.git",
+    "directory": "sdk/js"
+  },
+  "keywords": ["tempo-server", "llm", "client", "sdk", "sse"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/client.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
