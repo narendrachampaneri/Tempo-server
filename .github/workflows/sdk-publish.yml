@@ -1,0 +1,88 @@
+# Publishes the two SDKs with no stored token, only when the owner publishes a GitHub release:
+#   - tempo-server-client on PyPI (Trusted Publishing, OpenID Connect)
+#   - tempo-server-client on npm (npm Trusted Publishing from GitHub Actions; npm adds
+#     provenance itself)
+# Tests run first; the release tag must match both SDK versions.
+#
+# One-time setup (owner):
+#   PyPI: Account → Publishing → add a pending publisher: project tempo-server-client, owner
+#         narendrachampaneri, repository Tempo-server, workflow sdk-publish.yml, environment
+#         pypi-sdk.
+#   npm:  on npmjs.com, the package's Settings → Trusted publisher → GitHub Actions: owner
+#         narendrachampaneri, repository Tempo-server, workflow sdk-publish.yml, environment
+#         npm. (If npm only offers this for a package that already exists, publish 0.1.0 once
+#         by hand with `npm publish` in sdk/js, then add the trusted publisher.)
+#   GitHub: Settings → Environments → create pypi-sdk and npm (optionally with reviewers).
+name: Publish SDKs
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: The release tag must match both SDK versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          py="$(grep -m1 '^version' sdk/python/pyproject.toml | cut -d'"' -f2)"
+          js="$(node -p "require('./sdk/js/package.json').version")"
+          [ "$tag" = "$py" ] && [ "$tag" = "$js" ] || {
+            echo "Tag $GITHUB_REF_NAME does not match the SDKs (python $py, js $js)"; exit 1; }
+      - run: pip install . ./sdk/python pytest
+      - name: Python SDK tests
+        working-directory: sdk/python
+        run: python -m pytest -q tests -p no:cacheprovider
+      - name: JavaScript SDK tests
+        working-directory: sdk/js
+        run: npm ci && npm test
+
+  pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-sdk
+      url: https://pypi.org/p/tempo-server-client
+    permissions:
+      id-token: write  # Trusted Publishing
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - working-directory: sdk/python
+        run: python -m build && twine check --strict dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist/
+
+  npm:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/tempo-server-client
+    permissions:
+      id-token: write  # npm Trusted Publishing
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: npm 11.5.1 or later (needed for trusted publishing)
+        run: npm install -g "npm@>=11.5.1"
+      - working-directory: sdk/js
+        run: npm ci && npm run build && npm publish --access public
