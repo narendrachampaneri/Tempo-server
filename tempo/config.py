@@ -121,6 +121,9 @@ class Settings:
     quota_budget: int = 12  # provider requests per question; local models do not count
     max_parallel: int = 3  # models called in parallel within one stage
     judge: bool = True  # use an LLM judge in check stages
+    # The time budget stops new stages; an answer already arriving may finish, for at most this
+    # many seconds more (then what arrived is kept, marked as cut).
+    finish_grace_s: float = 120.0
 
     # Laya (optional dependency).
     laya: str = "auto"  # "auto": use it when installed; "off": never load it
@@ -208,6 +211,7 @@ class Settings:
             quota_budget=max(1, int(env.get("TEMPO_QUOTA_BUDGET") or 12)),
             max_parallel=max(1, int(env.get("TEMPO_MAX_PARALLEL") or 3)),
             judge=_flag(env, "TEMPO_JUDGE", True),
+            finish_grace_s=float(env.get("TEMPO_FINISH_GRACE") or 120),
             laya=(env.get("TEMPO_LAYA") or "auto").strip().lower(),
             laya_timeout_ms=_timeout(env.get("TEMPO_LAYA_TIMEOUT_MS")),
             laya_backend=_choice(env, "TEMPO_LAYA_BACKEND", LAYA_BACKENDS, "torch"),

@@ -121,7 +121,62 @@ async def test_time_budget_with_no_answer_at_all_is_an_error():
         env={"ALPHA_KEY": "a", "BETA_KEY": "b"},
     )
     result = await engine.complete(user("hi"), engine.options(time_budget_s=1))
-    assert result.error == "No answer was produced within the budget."
+    assert result.error.startswith("No model answered within the 1s time budget.")
+    assert result.error_kind == "budget"
+    # Nothing promises an answer that doesn't exist.
+    assert not any("best answer so far" in (e.text or "") for e in result.events)
+
+
+async def test_time_budget_keeps_a_finished_draft_while_slower_drafts_are_cut():
+    """Step 10 laptop test: Best mode with one fast and two slow models said "using the best
+    answer so far" and then "No answer was produced". The fast draft must be kept."""
+    slow = [sleep(5), ("answer", "late")]
+    scripts = {"beta/mid": [("answer", "Quick draft from beta.")], "alpha/strong": slow}
+    scripts["local/tiny"] = slow
+    engine, _ = make_engine(scripts)
+    result = await engine.complete(user("hi"), engine.options(mode="best", time_budget_s=1))
+    assert result.error is None
+    assert result.text == "Quick draft from beta."
+    assert result.stop_reason == "budget_time"
+    final = events_of(result, "answer_final")[0]
+    assert final.data["note"].startswith("Stopped by the 1s time budget after 1 stage:")
+    assert "best answer so far" in final.data["note"]
+
+
+async def test_an_answer_already_arriving_is_finished_after_the_deadline():
+    """The budget stops new stages, not an answer that is streaming."""
+    streaming = [("answer", "Part one, "), sleep(1.4), ("answer", "part two.")]
+    engine, backend = make_engine({"*:draft": streaming})
+    result = await engine.complete(user("hi"), engine.options(time_budget_s=1))
+    assert result.error is None and result.text == "Part one, part two."
+    assert result.stop_reason == "budget_time"
+    notes = [e.data["message"] for e in events_of(result, "note")]
+    assert any("finishing it" in n for n in notes)
+    assert not backend.called_for("judge")  # no new stage after the deadline
+
+
+async def test_a_fix_that_finishes_after_the_deadline_is_the_answer():
+    scripts = {
+        "*:judge": judge_reply([3]),
+        "*:fix": [
+            ("answer", "Fixed:\n```python\ndef reverse(s):\n"),
+            sleep(1.4),
+            ("answer", "    return s[::-1]\n```"),
+        ],
+    }
+    engine, _ = make_engine(scripts)
+    result = await engine.complete(user(CODE_Q), engine.options(time_budget_s=1))
+    assert result.text.startswith("Fixed:") and result.text.endswith("s[::-1]\n```")
+    assert events_of(result, "answer_final")[0].data["note"].endswith("(not checked yet).")
+
+
+async def test_an_answer_past_the_grace_period_keeps_what_arrived():
+    endless = [("answer", "Kept text")] + [sleep(0.3), ("answer", " more")] * 20
+    engine, _ = make_engine({"*:draft": endless}, finish_grace_s=0.3)
+    result = await engine.complete(user("hi"), engine.options(time_budget_s=1))
+    assert result.error is None and result.text.startswith("Kept text")
+    notes = [e.data["message"] for e in events_of(result, "note")]
+    assert any("grace period" in n for n in notes)
 
 
 async def test_quota_budget_limits_parallel_drafts_and_skips_the_judge():

@@ -119,6 +119,12 @@ class Pipeline:
         self._stage_models: list[str] = []
         self._live_owner: tuple[int, int] | None = None
         self._shown = False
+        # The time budget stops new stages, never an answer that is already arriving: calls
+        # whose answer text has started (stage, slot) are finished, and what each call has
+        # received so far is kept in case even the grace period runs out.
+        self._time_up = False
+        self._started: set[tuple[int, int]] = set()
+        self._partial: dict[tuple[int, int], tuple[str, str]] = {}
         # OpenAI features: tool calling and strict JSON (validated per reply; tempo/compat.py).
         self.tool_req = (
             compat.ToolRequest(
@@ -183,20 +189,76 @@ class Pipeline:
     def requests_left(self) -> int:
         return max(0, self.o.quota_budget - self.requests)
 
-    async def _timed(self, awaitable: Any) -> Any:
-        left = self.time_left()
-        if left <= 0:
-            raise BudgetStop("time", "time budget used up")
+    async def _bounded(
+        self,
+        calls: Sequence[Any],
+        *,
+        stage: int,
+        job: str,
+        finish_started: bool = True,
+    ) -> list[Answer | None]:
+        """Run one stage's model calls (slot i is ``calls[i]``) within the time left.
+
+        When the time budget ends: finished answers are kept; calls whose answer text is
+        already arriving are finished (``finish_started``, for answers; at most
+        TEMPO_FINISH_GRACE seconds more); calls that have not started are cancelled. No new
+        stage starts afterwards (``_need_stage``).
+        """
+        tasks = [asyncio.ensure_future(call) for call in calls]
+        results: list[Answer | None] = [None] * len(tasks)
         try:
-            return await asyncio.wait_for(awaitable, timeout=left)
-        except TimeoutError as exc:
-            raise BudgetStop("time", f"time budget of {self.o.time_budget_s:g}s reached") from exc
+            _, pending = await asyncio.wait(tasks, timeout=self.time_left() or 0.001)
+            if pending:
+                self._time_up = True
+                keep = []
+                for slot, task in enumerate(tasks):
+                    if task.done():
+                        continue
+                    if finish_started and (stage, slot) in self._started:
+                        keep.append(task)
+                    else:
+                        task.cancel()
+                if keep:
+                    self.emit(
+                        "note",
+                        message="Time budget reached while an answer was arriving: finishing it "
+                        "(no new stage starts).",
+                    )
+                    await asyncio.wait(keep, timeout=self.e.settings.finish_grace_s)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for slot, task in enumerate(tasks):
+            if task.cancelled():
+                results[slot] = self._salvage(stage, job, slot)
+                continue
+            error = task.exception()
+            if error is not None:
+                raise error
+            results[slot] = task.result()
+        return results
+
+    def _salvage(self, stage: int, job: str, slot: int) -> Answer | None:
+        """An answer that was still arriving when even the grace period ran out: keep what
+        came (marked as cut, so the checks and the note say so)."""
+        partial = self._partial.get((stage, slot))
+        if partial is None or not partial[1].strip() or job not in ANSWER_JOBS | {"parts"}:
+            return None
+        model_id, text = partial
+        self.emit(
+            "note",
+            message=f"{model_id} was still writing after the {self.e.settings.finish_grace_s:g}s "
+            "grace period: keeping what it wrote so far.",
+        )
+        return Answer(text=text, model=model_id, stage=stage, job=job, finish_reason="length")
 
     def _need_stage(self, job: str) -> None:
         if self.stages_left() <= 0:
             raise BudgetStop("stages", f"stage budget of {self.max_stages} used")
-        if self.time_left() <= 0:
-            raise BudgetStop("time", "time budget used up")
+        if self._time_up or self.time_left() <= 0:
+            raise BudgetStop("time", f"time budget of {self.o.time_budget_s:g}s reached")
 
     # --- main flow -----------------------------------------------------------------
 
@@ -293,7 +355,9 @@ class Pipeline:
                 await self._improve()
         except BudgetStop as stop:
             self.stop_reason = f"budget_{stop.reason}"
-            self.emit("budget", reason=stop.reason, detail=stop.detail)
+            self.emit(
+                "budget", reason=stop.reason, detail=stop.detail, has_answer=bool(self.answers)
+            )
         except _NoAnswer as failure:
             # Models answered, but no reply was a valid tool call or JSON: "invalid" (502).
             kind = "invalid" if self._last_invalid else failure.kind
@@ -525,18 +589,21 @@ class Pipeline:
         reason = slots[0][0].why if count == 1 else f"{count} models from different families"
         stage = self._begin(job, [s[0].model.id for s in slots], reason)
         messages = prompts.draft_messages(self.messages, self.o.system_prompt)
-        results = await self._timed(
-            asyncio.gather(
-                *(
-                    self._call(stage, job, slot, messages, live=True, slot_id=i)
-                    for i, slot in enumerate(slots)
-                )
-            )
+        results = await self._bounded(
+            [
+                self._call(stage, job, slot, messages, live=True, slot_id=i)
+                for i, slot in enumerate(slots)
+            ],
+            stage=stage,
+            job=job,
         )
         outputs = [r for r in results if r is not None]
         self._end(stage, job, outputs)
         if not outputs:
-            raise _NoAnswer(self._failure_message(), [c.model.id for s in slots for c in s])
+            kind = "budget" if self._time_up else "unavailable"
+            raise _NoAnswer(
+                self._failure_message(), [c.model.id for s in slots for c in s], kind=kind
+            )
         self.answers.extend(outputs)
 
     def _note_quota_fallback(self, route: Any) -> None:
@@ -610,12 +677,13 @@ class Pipeline:
             raise BudgetStop("quota", "no model left within the free-quota budget")
         stage = self._begin("tools", [slots[0][0].model.id], slots[0][0].why)
         messages = prompts.draft_messages(self.messages, self.o.system_prompt)
-        result = await self._timed(self._call(stage, "tools", slots[0], messages, live=False))
+        (result,) = await self._bounded(
+            [self._call(stage, "tools", slots[0], messages, live=False)], stage=stage, job="tools"
+        )
         self._end(stage, "tools", [result] if result else [])
         if result is None:
-            raise _NoAnswer(
-                self._failure_message(), [c.model.id for c in slots[0]], kind="unavailable"
-            )
+            kind = "budget" if self._time_up else "unavailable"
+            raise _NoAnswer(self._failure_message(), [c.model.id for c in slots[0]], kind=kind)
         self.answers.append(result)
         if not result.tool_calls and await self._tool_followup(result):
             return  # the text answer went through the judge and fix stages
@@ -761,7 +829,12 @@ class Pipeline:
         judge_model = None
         if judge_slot and gradable:
             messages = prompts.judge_messages(self.messages, [a.text for a in gradable])
-            reply = await self._timed(self._call(stage, "check", judge_slot, messages, live=False))
+            (reply,) = await self._bounded(
+                [self._call(stage, "check", judge_slot, messages, live=False)],
+                stage=stage,
+                job="check",
+                finish_started=False,
+            )
             if reply is not None:
                 grades = parse_judge(reply.text, len(gradable))
                 judge_model = reply.model if grades else None
@@ -865,10 +938,15 @@ class Pipeline:
         if not slots:
             return self._math_code
         prompt = execute.PROGRAM_PROMPT.format(question=self.question)
-        reply = await self._timed(
-            self._call(
-                stage, "compute", slots[0], [{"role": "user", "content": prompt}], live=False
-            )
+        (reply,) = await self._bounded(
+            [
+                self._call(
+                    stage, "compute", slots[0], [{"role": "user", "content": prompt}], live=False
+                )
+            ],
+            stage=stage,
+            job="compute",
+            finish_started=False,
         )
         code = execute.program_from_reply(reply.text) if reply is not None else None
         self._math_code = (code, "program")
@@ -963,7 +1041,9 @@ class Pipeline:
             messages = prompts.fix_messages(self.messages, best.text, issues)
             reason = "fix: " + ("; ".join(issues[:3]) if issues else "raise the quality")
         stage = self._begin(job, [slots[0][0].model.id], reason)
-        result = await self._timed(self._call(stage, job, slots[0], messages, live=True))
+        (result,) = await self._bounded(
+            [self._call(stage, job, slots[0], messages, live=True)], stage=stage, job=job
+        )
         outputs = [result] if result else []
         self._end(stage, job, outputs)
         if result is None:
@@ -1014,7 +1094,11 @@ class Pipeline:
             raise BudgetStop("quota", "free-quota budget used up before combining")
         stage = self._begin("combine", [slots[0][0].model.id], f"combine {len(parts)} parts")
         messages = prompts.combine_parts_messages(self.messages, parts, answers)
-        result = await self._timed(self._call(stage, "combine", slots[0], messages, live=True))
+        (result,) = await self._bounded(
+            [self._call(stage, "combine", slots[0], messages, live=True)],
+            stage=stage,
+            job="combine",
+        )
         self._end(stage, "combine", [result] if result else [])
         if result is None:
             raise _NoAnswer("No model could combine the parts.", [slots[0][0].model.id])
@@ -1027,7 +1111,12 @@ class Pipeline:
             return None
         stage = self._begin("split", [slots[0][0].model.id], "split the request into parts")
         messages = prompts.split_messages(self.messages, max(2, self.stages_left() * 3))
-        reply = await self._timed(self._call(stage, "split", slots[0], messages, live=False))
+        (reply,) = await self._bounded(
+            [self._call(stage, "split", slots[0], messages, live=False)],
+            stage=stage,
+            job="split",
+            finish_started=False,
+        )
         self._end(stage, "split", [])
         if reply is None:
             return None
@@ -1059,7 +1148,7 @@ class Pipeline:
                 self.messages, part, offset + i + 1, total, self.o.system_prompt
             )
             calls.append(self._call(stage, "parts", slot, messages, live=False, slot_id=i))
-        results = await self._timed(asyncio.gather(*calls))
+        results = await self._bounded(calls, stage=stage, job="parts")
         outputs = [r for r in results if r is not None]
         self._end(stage, "parts", outputs)
         return [r.text if r else "(no answer for this part)" for r in results]
@@ -1145,6 +1234,8 @@ class Pipeline:
                             self.emit("reasoning_delta", stage=stage, model=model.id, delta=chunk)
                         continue
                     text += chunk
+                    self._started.add((stage, slot_id))
+                    self._partial[(stage, slot_id)] = (model.id, text)
                     if live and self._claim_live(stage, slot_id):
                         streamed = True
                         self._shown = True
@@ -1262,6 +1353,11 @@ class Pipeline:
         return model.family if model else model_id
 
     def _failure_message(self) -> str:
+        if self._time_up:
+            return (
+                f"No model answered within the {self.o.time_budget_s:g}s time budget. Try Fast "
+                "mode, a longer time budget, or a local model."
+            )
         if self.requests_left() <= 0:
             return "The free-quota budget for this question ran out before any model answered."
         if self._last_invalid:
@@ -1271,13 +1367,33 @@ class Pipeline:
 
     # --- finish ----------------------------------------------------------------------------
 
+    def _late_improvement(self) -> Answer | None:
+        """A fix, merge or combine that finished after the time budget ended: nothing could
+        check it, but it was written to improve on the best answer, so it wins unless the quick
+        checks fail it (empty, cut off, refusal, wrong language...)."""
+        if not self._time_up:
+            return None
+        for answer in reversed(self._pending()):
+            if answer.job not in ("fix", "merge", "combine", "polish"):
+                continue
+            heur = run_heuristics(
+                self.profile,
+                self.question,
+                answer.text,
+                answer.finish_reason,
+                self.json_fmt is not None,
+            )
+            if not heur.hard_fail:
+                return answer
+        return None
+
     def _finish(self) -> None:
-        final = self.final or self.best()
+        final = self.final or self._late_improvement() or self.best()
         if final is None:
             self.emit(
                 "error",
-                message="No answer was produced within the budget.",
-                kind="budget",
+                message=self._failure_message(),
+                kind="budget" if self._time_up else "unavailable",
             )
             self._log(error="no answer within budget")
             return
@@ -1293,6 +1409,7 @@ class Pipeline:
             passed=bool(final.check and final.check.passed),
             reasoning=final.reasoning or None,
             tool_calls=final.tool_calls or None,
+            note=self._budget_note(final),
         )
         if (
             self.e.cache
@@ -1305,6 +1422,25 @@ class Pipeline:
                 self.question, self.o.mode, final.text, final.model, self.o.access.user_id
             )
         self._done()
+
+    def _budget_note(self, final: Answer) -> str | None:
+        """A plain note when a budget ended the work with an answer in hand."""
+        if not self.stop_reason.startswith("budget_"):
+            return None
+        what = {
+            "budget_time": f"the {self.o.time_budget_s:g}s time budget",
+            "budget_stages": f"the {self.max_stages}-stage budget",
+            "budget_quota": "the free-request budget",
+        }.get(self.stop_reason, "the budget")
+        if final.check is not None:
+            quality = f"checked, score {final.check.score:.2f}"
+        else:
+            quality = "not checked yet"
+        return (
+            f"Stopped by {what} after {self.stage} stage{'' if self.stage == 1 else 's'}: "
+            "this is the best answer so far "
+            f"({quality})."
+        )
 
     def _done(self) -> None:
         total_ms = round((self.clock() - self.t0) * 1000)

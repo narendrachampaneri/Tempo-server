@@ -141,7 +141,9 @@ def describe(kind: str, d: dict[str, Any]) -> str | None:
         first = f" (first token {ttft / 1000:.1f}s)" if ttft is not None else ""
         return f"Answer from {d['model']} in {d['ms'] / 1000:.1f}s{first}"
     if kind == "budget":
-        return f"Budget: {d['detail']} · using the best answer so far"
+        if d.get("has_answer", True):
+            return f"Budget: {d['detail']} · using the best answer so far"
+        return f"Budget: {d['detail']}"
     if kind == "answer_final":
         if d.get("cached"):
             return None
