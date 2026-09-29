@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from tempo import laya_runtime
 from tempo.config import Settings
 from tempo.store import Store
 from tempo.types import TASKS
@@ -175,8 +176,10 @@ TIMEOUT_MARGIN = 1.5  # the time limit is this many times the slowest measured g
 
 def checkpoint_name(settings: Settings) -> str:
     """Names the model *and* runtime that make predictions: INT8 weights change answers, so
-    comparisons with the rules only ever count predictions from exactly this setup."""
-    return f"{settings.laya_model or settings.laya_checkpoint}/{settings.laya_backend}"
+    comparisons with the rules only ever count predictions from exactly this setup. "auto"
+    picks one of the fp32 runners, whose answers are PyTorch's."""
+    backend = "torch" if settings.laya_backend == "auto" else settings.laya_backend
+    return f"{settings.laya_model or settings.laya_checkpoint}/{backend}"
 
 
 def cache_dir(settings: Settings) -> Path:
@@ -184,20 +187,54 @@ def cache_dir(settings: Settings) -> Path:
     return base / "laya"
 
 
-def default_loader(settings: Settings) -> Callable[[], LayaRunner]:
-    def load() -> LayaRunner:
-        from tempo import laya_runtime
+def default_loader(
+    settings: Settings,
+    backend: str | None = None,
+    announce: Callable[[str], None] | None = None,
+) -> Callable[[], LayaRunner]:
+    chosen = backend or ("torch" if settings.laya_backend == "auto" else settings.laya_backend)
 
+    def load() -> LayaRunner:
         return laya_runtime.load(
-            backend=settings.laya_backend,
+            backend=chosen,
             stock=settings.laya_checkpoint,
             model=settings.laya_model,
             threads=settings.laya_threads or laya_runtime.default_threads(),
             cache_dir=cache_dir(settings),
             device=settings.laya_device,
+            announce=announce,
         )
 
     return load
+
+
+LEVEL_EDGES = (0.3, 0.55, 0.8)  # complexity where the difficulty level changes
+SURE_EDGE = 0.08  # a complexity this far from every edge is a clear level
+SURE_PICK_LEAD = 0.1  # the router's first choice leads the next by this much utility
+
+
+def rules_sure(pipeline: Pipeline, group: str, context: dict[str, Any]) -> bool:
+    """Is the rules' answer clear enough that asking Laya would only cost time? A clear task
+    type and difficulty (plan), a decisive check (assess), or a clear first choice (pick)."""
+    if group == "plan":
+        from tempo.analyzer import classify
+
+        profile = pipeline.profile
+        if profile is None:
+            return False
+        _, scores = classify(pipeline.question)
+        ranked = sorted(scores.values(), reverse=True)
+        clear_task = (
+            bool(ranked) and ranked[0] >= 3.0 and (len(ranked) == 1 or ranked[1] <= ranked[0] / 2)
+        ) or (not ranked and len(pipeline.question) < 80)
+        clear_level = min(abs(profile.complexity - edge) for edge in LEVEL_EDGES) >= SURE_EDGE
+        return clear_task and clear_level
+    if group == "assess":
+        best = pipeline.best()
+        check = best.check if best is not None else None
+        return check is not None and (check.hard_fail or check.score >= 0.9 or check.score <= 0.3)
+    shortlist = list(context.get("shortlist") or [])
+    return len(shortlist) >= 2 and shortlist[0].utility - shortlist[1].utility >= SURE_PICK_LEAD
 
 
 def calibration_samples() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
@@ -276,7 +313,9 @@ class _Worker:
 
 @dataclass
 class LayaCall:
-    status: str  # ok | off | missing | loading | error | timeout | busy | skipped | background
+    # ok | off | missing | loading | downloading | error | timeout | busy | skipped | background
+    # | sure (the rules' answer was clear, so Laya wasn't asked)
+    status: str
     answers: dict[str, Any] = field(default_factory=dict)
     ms: float | None = None
     error: str | None = None
@@ -291,13 +330,30 @@ class LayaDecider:
         store: Store | None = None,
         loader: Callable[[], LayaRunner] | None = None,
         clock: Callable[[], float] = time.perf_counter,
+        *,
+        loaders: dict[str, Callable[[], LayaRunner]] | None = None,
+        onnx_available: Callable[[], bool] = laya_runtime.onnx_available,
+        memory_gb: Callable[[], float | None] = laya_runtime.total_memory_gb,
     ) -> None:
+        """``loader``: one fixed runner (tests). Otherwise ``loaders`` per backend (default:
+        the real ones), and with TEMPO_LAYA_BACKEND=auto the fp32 runners are timed once on
+        this machine and the faster one is kept."""
         self.settings = settings
         self.store = store
-        self._loader = loader or default_loader(settings)
+        self._fixed_loader = loader
+        self._loaders = loaders or {
+            b: default_loader(settings, b, self._announce) for b in laya_runtime.BACKENDS
+        }
+        self._onnx_available = onnx_available
+        self._memory_gb = memory_gb
         self._clock = clock
         self._runner: LayaRunner | None = None
         self.status = "off" if settings.laya == "off" else "loading"
+        self.backend = "torch" if settings.laya_backend == "auto" else settings.laya_backend
+        self.runner_note: str | None = None  # why this runner (measured, saved, fixed)
+        self.download_note: str | None = None  # what is being downloaded, and how big
+        self.load_s: float | None = None
+        self.comparing: Future[Any] | None = None  # the one-time runner comparison
         # Which checkpoint and runtime made the predictions; comparisons only count their own.
         self.checkpoint = checkpoint_name(settings)
         # How long a prediction may take before the rules decide: set, or measured at load.
@@ -321,48 +377,167 @@ class LayaDecider:
             return None
         return asyncio.wrap_future(self._worker.submit(self._load, urgent=True))
 
+    def _announce(self, message: str) -> None:
+        """The checkpoint is being downloaded: say so (status text, doctor, the log)."""
+        self.status, self.download_note = "downloading", message
+
     def _load(self) -> None:
         started = time.perf_counter()
+        folder = cache_dir(self.settings)
+        auto = self.settings.laya_backend == "auto" and self._fixed_loader is None
+        saved = laya_runtime.saved_runner(folder, self.checkpoint) if auto else None
+        if saved:
+            self.backend = saved["backend"]
+            self.runner_note = saved.get("note") or f"{self.backend}: measured faster here"
         try:
-            self._runner = self._loader()
+            load = self._fixed_loader or self._loaders[self.backend]
+            self._runner = load()
         except ImportError as exc:
             self.status, self.load_error = "missing", str(exc)
             log.warning("Laya is not installed (%s); the rules make every decision", exc)
+            self._save_status()
             return
         except Exception as exc:
             self.status, self.load_error = "error", f"{type(exc).__name__}: {exc}"
             log.warning("Laya failed to load (%s); the rules make every decision", exc)
+            self._save_status()
             return
-        if self.settings.laya_timeout_ms is None:
-            self.calibrate()
+        try:
+            if self.settings.laya_timeout_ms is None:
+                self.calibrate()  # also the warm-up: the first predictions are slow
+            else:
+                self.calibration = self.measure(self._runner, rounds=0)  # warm-up only
+        except Exception as exc:  # loaded but can't predict: the rules decide
+            self.status, self.load_error = "error", f"{type(exc).__name__}: {exc}"
+            log.warning("Laya failed its first predictions (%s); the rules decide", exc)
+            self._save_status()
+            return
         self.status = "ready"
-        log.info("Laya loaded in %.1fs", time.perf_counter() - started)
+        self.load_s = round(time.perf_counter() - started, 1)
+        if self.runner_note is None:
+            self.runner_note = (
+                f"{self.backend}: set by TEMPO_LAYA_BACKEND"
+                if not auto
+                else f"{self.backend}: the default until both runners are timed here"
+            )
+        log.info("Laya loaded in %.1fs (%s)", self.load_s, self.backend)
+        self._save_status()
+        if auto and saved is None:
+            # Between questions: time the other fp32 runner and keep the faster one.
+            self.comparing = self._worker.submit(self._compare_runners, urgent=False)
 
-    def calibrate(self, rounds: int = 3) -> float:
-        """Time each kind of call on this machine and set the time limit to the slowest one
-        times TIMEOUT_MARGIN, so a CPU that is slower or faster gets a limit that fits it."""
-        runner = self._runner
-        assert runner is not None
+    def measure(self, runner: LayaRunner, rounds: int = 3) -> dict[str, float]:
+        """Milliseconds per kind of call (the slowest of ``rounds``, after a warm-up call;
+        with ``rounds=0``, the warm-up call's own time)."""
         slowest: dict[str, float] = {}
         for group, (state, questions) in calibration_samples().items():
+            started = time.perf_counter()
             runner.predict(state, questions)  # warm-up
-            times = []
+            times = [] if rounds else [(time.perf_counter() - started) * 1000]
             for _ in range(rounds):
                 started = time.perf_counter()
                 runner.predict(state, questions)
                 times.append((time.perf_counter() - started) * 1000)
-            slowest[group] = max(times)
-        limit = math.ceil(TIMEOUT_MARGIN * max(slowest.values()) / 10) * 10
-        self.timeout_ms = float(min(MAX_TIMEOUT_MS, max(MIN_TIMEOUT_MS, limit)))
-        self.calibration = {**{k: round(v, 1) for k, v in slowest.items()}}
-        log.info("Laya time limit %.0f ms, measured on this machine: %s", self.timeout_ms, slowest)
+            slowest[group] = round(max(times), 1)
+        return slowest
+
+    def calibrate(self, rounds: int = 3) -> float:
+        """Time each kind of call on this machine and set the time limit to the slowest one
+        times TIMEOUT_MARGIN (unless TEMPO_LAYA_TIMEOUT_MS fixes it), so a CPU that is slower
+        or faster gets a limit that fits it."""
+        runner = self._runner
+        assert runner is not None
+        self.calibration = self.measure(runner, rounds)
+        if self.settings.laya_timeout_ms is None:
+            limit = math.ceil(TIMEOUT_MARGIN * max(self.calibration.values()) / 10) * 10
+            self.timeout_ms = float(min(MAX_TIMEOUT_MS, max(MIN_TIMEOUT_MS, limit)))
+        log.info(
+            "Laya time limit %.0f ms, measured on this machine: %s",
+            self.timeout_ms,
+            self.calibration,
+        )
         return self.timeout_ms
+
+    def _compare_runners(self) -> None:
+        """TEMPO_LAYA_BACKEND=auto, first start on this machine: time ONNX Runtime fp32 against
+        PyTorch fp32 (identical answers) and keep the faster; the choice is saved."""
+        if self.backend != "torch" or self._runner is None:
+            return
+        if not self._onnx_available():
+            self.runner_note = "torch: ONNX Runtime is not installed, so nothing to compare"
+            self._save_status()
+            return
+        memory = self._memory_gb()
+        if memory is not None and memory < laya_runtime.COMPARE_MIN_MEMORY_GB:
+            self.runner_note = (
+                f"torch: {memory:.0f} GB of memory is too little to time both runners "
+                "(set TEMPO_LAYA_BACKEND=onnx to try ONNX Runtime)"
+            )
+            self._save_status()
+            return
+        try:
+            other = self._loaders["onnx"]()
+            onnx_ms = self.measure(other)
+        except Exception as exc:
+            log.warning("Could not time Laya on ONNX Runtime (%s); keeping PyTorch", exc)
+            self.runner_note = f"torch: ONNX Runtime failed to load ({type(exc).__name__})"
+            self._save_status()
+            return
+        torch_ms = dict(self.calibration)
+        faster = sum(onnx_ms.values()) < 0.9 * sum(torch_ms.values())
+        ratio = sum(torch_ms.values()) / max(1.0, sum(onnx_ms.values()))
+        if faster:
+            self._runner, self.backend = other, "onnx"
+            self.calibration = onnx_ms
+            if self.settings.laya_timeout_ms is None:
+                limit = math.ceil(TIMEOUT_MARGIN * max(onnx_ms.values()) / 10) * 10
+                self.timeout_ms = float(min(MAX_TIMEOUT_MS, max(MIN_TIMEOUT_MS, limit)))
+            self.runner_note = f"onnx: measured {ratio:.1f}x faster than torch on this machine"
+        else:
+            del other
+            self.runner_note = (
+                f"torch: onnx measured {1 / ratio:.1f}x the time of torch on this machine"
+            )
+        laya_runtime.save_runner(
+            cache_dir(self.settings),
+            self.checkpoint,
+            {
+                "backend": self.backend,
+                "note": self.runner_note,
+                "ms": {"torch": torch_ms, "onnx": onnx_ms},
+                "measured": time.strftime("%Y-%m-%d"),
+            },
+        )
+        log.info("Laya runner: %s", self.runner_note)
+        self._save_status()
+
+    def _save_status(self) -> None:
+        try:
+            laya_runtime.save_status(cache_dir(self.settings), self.snapshot())
+        except OSError:
+            pass  # a read-only folder must not stop Laya
+
+    def snapshot(self) -> dict[str, Any]:
+        """What `tempo-server doctor` shows: runner, why, and time per kind of decision."""
+        return {
+            "status": self.status,
+            "checkpoint": self.checkpoint,
+            "backend": self.backend,
+            "runner_note": self.runner_note,
+            "ms": self.calibration,
+            "timeout_ms": self.timeout_ms,
+            "load_s": self.load_s,
+            "error": self.load_error,
+            "download": self.download_note,
+            "updated": time.strftime("%Y-%m-%d %H:%M"),
+        }
 
     def status_text(self) -> str:
         return {
-            "ready": f"Laya ready ({self.checkpoint}, {self.timeout_ms:.0f} ms limit; shadow "
-            "unless taken over)",
+            "ready": f"Laya ready ({self.checkpoint} on {self.backend}, {self.timeout_ms:.0f} ms "
+            "limit; shadow unless taken over)",
             "loading": "Laya still loading (rules decide)",
+            "downloading": f"{self.download_note or 'Laya downloading'} (rules decide)",
             "missing": "Laya not installed (rules decide)",
             "error": "Laya failed to load (rules decide)",
             "off": "Laya off",
@@ -505,7 +680,7 @@ class LayaDecider:
                     )
                 )
         # Background (shadow) predictions land in the log later; they add no line here.
-        if call.status not in ("off", "missing", "loading", "background"):
+        if call.status not in ("off", "missing", "loading", "downloading", "background", "sure"):
             pipeline.emit(
                 "decision",
                 stage=stage,
@@ -568,6 +743,8 @@ class LayaDecider:
             if len(shortlist) < 2:
                 call = LayaCall(status="skipped")
                 return call, state, questions, mapping
+        if self.settings.laya_skip_sure and rules_sure(pipeline, group, context):
+            return LayaCall(status="sure"), state, questions, mapping
         taken = {q for q in questions if self.mode_for(q) == "laya"}
         wait = name in taken
         subset = {q: d for q, d in questions.items() if (q in taken) == wait}

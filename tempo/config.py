@@ -41,7 +41,7 @@ def _flag(env: Mapping[str, str], name: str, default: bool) -> bool:
     return default
 
 
-LAYA_BACKENDS = ("torch", "onnx", "onnx-int8")
+LAYA_BACKENDS = ("auto", "torch", "onnx", "onnx-int8")
 LAYA_CHECKPOINTS = ("english", "multilingual")
 
 
@@ -130,15 +130,19 @@ class Settings:
     # None: measured on this machine when Laya loads (see LayaDecider.calibrate).
     laya_timeout_ms: float | None = None
     laya_device: str | None = None
-    # "torch" (fp32), "onnx" (fp32, same answers) or "onnx-int8" (faster, but changes answers;
-    # see docs/LAYA_CPU.md). All run on CPU.
-    laya_backend: str = "torch"
+    # "auto" (the faster fp32 runner, timed once on this machine), "torch" (fp32), "onnx"
+    # (fp32, same answers) or "onnx-int8" (faster, but changes answers; see docs/LAYA_CPU.md).
+    # All run on CPU.
+    laya_backend: str = "auto"
     laya_checkpoint: str = "english"  # stock checkpoint: "english" | "multilingual"
     laya_threads: int | None = None  # CPU threads for Laya; None: up to 4 cores
     # A fine-tuned Laya checkpoint (local folder or Hub repo) that answers every decision.
     laya_model: str | None = None
     laya_takeover: dict[str, str] = field(default_factory=dict)
     laya_min_confidence: float = 0.6  # below this, a taken-over decision falls back to rules
+    # Don't ask Laya when the rules' answer is clear (task type and difficulty, a decisive
+    # check, a clear first choice of model): it would only cost time.
+    laya_skip_sure: bool = True
 
     # Embedding classifier and semantic cache (optional fastembed dependency).
     embeddings: str = "auto"  # "auto" | "off"
@@ -214,7 +218,8 @@ class Settings:
             finish_grace_s=float(env.get("TEMPO_FINISH_GRACE") or 120),
             laya=(env.get("TEMPO_LAYA") or "auto").strip().lower(),
             laya_timeout_ms=_timeout(env.get("TEMPO_LAYA_TIMEOUT_MS")),
-            laya_backend=_choice(env, "TEMPO_LAYA_BACKEND", LAYA_BACKENDS, "torch"),
+            laya_backend=_choice(env, "TEMPO_LAYA_BACKEND", LAYA_BACKENDS, "auto"),
+            laya_skip_sure=_flag(env, "TEMPO_LAYA_SKIP_SURE", True),
             laya_checkpoint=_choice(env, "TEMPO_LAYA_CHECKPOINT", LAYA_CHECKPOINTS, "english"),
             laya_threads=int(env["TEMPO_LAYA_THREADS"]) if env.get("TEMPO_LAYA_THREADS") else None,
             laya_device=env.get("TEMPO_LAYA_DEVICE") or None,

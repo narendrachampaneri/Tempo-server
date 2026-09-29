@@ -1,9 +1,12 @@
 """Laya on an ordinary CPU. Software only, no GPU.
 
-Three backends, all CPU (measured in docs/LAYA_CPU.md):
+Backends, all CPU (measured in docs/LAYA_CPU.md):
 
-- ``torch`` (default): PyTorch fp32. The reference answers; loads in seconds.
-- ``onnx``: ONNX Runtime fp32. Identical answers, no faster, more memory.
+- ``auto`` (default): PyTorch fp32 first; when ONNX Runtime is installed too, both fp32
+  runners are timed once on this machine and the faster one is used from then on (they give
+  identical answers). The choice is saved in the data folder (laya/runner.json).
+- ``torch``: PyTorch fp32. The reference answers; loads in seconds.
+- ``onnx``: ONNX Runtime fp32. Identical answers; faster on some CPUs, not on others.
 - ``onnx-int8``: per-channel INT8 weights, as Laya's own ``scripts/export_onnx.py --quantize``.
   About twice as fast on short inputs, but it changes answers: on a fine-tuned checkpoint its
   accuracy fell from 0.767 to 0.683. Opt in only after checking it on your own decisions.
@@ -15,11 +18,15 @@ recent PyTorch fixes one sequence dimension, and that graph fails on longer inpu
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import logging
 import os
+import platform
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,22 +38,180 @@ STOCK_SUBFOLDER = {"english": None, "multilingual": "multilingual"}
 CHECKPOINT_FILES = ("rl_agent_config.json", "model.safetensors", "tokenizer/*", "encoder/*")
 BACKENDS = ("onnx-int8", "onnx", "torch")
 FORMAT_VERSION = 1  # bump when the export recipe changes, to rebuild cached files
+RUNNER_FILE = "runner.json"  # the runner measured fastest on this machine, per checkpoint
+STATUS_FILE = "status.json"  # what the last load found: runner, times per decision
+# Timing both fp32 runners holds both in memory for a moment (~2.8 + 4.5 GB, LAYA_CPU.md).
+COMPARE_MIN_MEMORY_GB = 12.0
 
 
-def checkpoint_dir(stock: str, model: str | None) -> Path:
-    """The local folder of the checkpoint to load: a stock one, or a tuned one (folder or Hub)."""
+def install_command(gpu: bool | None = None) -> str:
+    """The exact command that adds Laya to this install. On Linux without a GPU, PyTorch's CPU
+    build first: the default wheel from PyPI brings about 2.5 GB of GPU libraries."""
+    laya = '"laya[onnx]>=0.3.21"'
+    if sys.platform.startswith("linux") and not gpu:
+        return (
+            "pip install torch --index-url https://download.pytorch.org/whl/cpu && "
+            f"pip install {laya}   (a pipx install: pipx inject tempo-server torch "
+            '--pip-args="--index-url https://download.pytorch.org/whl/cpu" && '
+            f"pipx inject tempo-server {laya})"
+        )
+    return f"pip install {laya}   (a pipx install: pipx inject tempo-server {laya})"
+
+
+def ensure_installed(backend: str) -> None:
+    """Raise ImportError (with the install command) unless this backend's packages import.
+    Checked before anything is downloaded, so the checkpoint is never fetched for nothing."""
+    try:
+        import laya  # noqa: F401
+
+        if backend == "torch":
+            import torch  # noqa: F401
+        else:
+            import onnxruntime  # noqa: F401
+            from laya.onnx_agent import ONNXAgent  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            f"{exc.name or exc} is missing for Laya ({backend}). Install: {install_command()}"
+        ) from exc
+
+
+def onnx_available() -> bool:
+    try:
+        ensure_installed("onnx")
+    except ImportError:
+        return False
+    return True
+
+
+def _source(stock: str, model: str | None) -> tuple[str, list[str], str | None]:
+    """(Hub repository, file patterns, subfolder) of the checkpoint to load."""
+    if model:
+        return model, list(CHECKPOINT_FILES), None
+    sub = STOCK_SUBFOLDER[stock]
+    prefix = f"{sub}/" if sub else ""
+    return STOCK_REPO, [prefix + f for f in CHECKPOINT_FILES], sub
+
+
+def local_checkpoint(stock: str, model: str | None) -> Path | None:
+    """The checkpoint's folder when its files are already on disk, found without touching the
+    network; else None."""
     if model and Path(model).expanduser().is_dir():
         return Path(model).expanduser().resolve()
     from huggingface_hub import snapshot_download
 
-    if model:
-        return Path(snapshot_download(model, allow_patterns=list(CHECKPOINT_FILES)))
-    sub = STOCK_SUBFOLDER[stock]
-    prefix = f"{sub}/" if sub else ""
-    root = Path(
-        snapshot_download(STOCK_REPO, allow_patterns=[prefix + f for f in CHECKPOINT_FILES])
+    repo, patterns, sub = _source(stock, model)
+    try:
+        root = Path(snapshot_download(repo, allow_patterns=patterns, local_files_only=True))
+    except Exception:  # not in the cache yet (LocalEntryNotFoundError and friends)
+        return None
+    folder = root / sub if sub else root
+    return folder if (folder / "model.safetensors").exists() else None
+
+
+def download_size(repo: str, patterns: list[str]) -> int | None:
+    """Bytes the checkpoint download will take, from the Hub's file list (None if unknown)."""
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(repo, files_metadata=True)
+    except Exception:
+        return None
+    total = 0
+    for sibling in info.siblings or []:
+        if any(fnmatch.fnmatch(sibling.rfilename, p) for p in patterns):
+            total += sibling.size or 0
+    return total or None
+
+
+def checkpoint_dir(
+    stock: str, model: str | None, announce: Callable[[str], None] | None = None
+) -> Path:
+    """The local folder of the checkpoint to load: a stock one, or a tuned one (folder or Hub).
+    Files already on disk are used without a network check; otherwise ``announce`` is told
+    what will be downloaded and how big it is before the download starts."""
+    found = local_checkpoint(stock, model)
+    if found is not None:
+        return found
+    from huggingface_hub import snapshot_download
+
+    repo, patterns, sub = _source(stock, model)
+    size = download_size(repo, patterns)
+    what = f"{repo}" + (f" ({sub})" if sub else f" ({stock})" if not model else "")
+    how_big = f"{size / 1e6:,.0f} MB" if size else "size unknown"
+    message = (
+        f"Downloading the Laya checkpoint {what}: {how_big}, once, into the Hugging Face cache"
     )
+    log.warning(message)
+    if announce is not None:
+        announce(message)
+    root = Path(snapshot_download(repo, allow_patterns=patterns))
     return root / sub if sub else root
+
+
+def machine_id() -> str:
+    """What decides which runner is faster: the CPU and how many threads Laya uses."""
+    return (
+        f"{platform.system()}-{platform.machine()}-{platform.processor() or 'cpu'}-{os.cpu_count()}"
+    )
+
+
+def total_memory_gb() -> float | None:
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _Status(ctypes.Structure):
+                _fields_ = [
+                    ("length", ctypes.c_ulong),
+                    ("load", ctypes.c_ulong),
+                    ("total", ctypes.c_ulonglong),
+                    ("avail", ctypes.c_ulonglong),
+                    ("total_page", ctypes.c_ulonglong),
+                    ("avail_page", ctypes.c_ulonglong),
+                    ("total_virtual", ctypes.c_ulonglong),
+                    ("avail_virtual", ctypes.c_ulonglong),
+                    ("avail_extended", ctypes.c_ulonglong),
+                ]
+
+            status = _Status()
+            status.length = ctypes.sizeof(_Status)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
+            return status.total / 1e9
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def saved_runner(cache_dir: Path, checkpoint: str) -> dict[str, Any] | None:
+    """The runner chosen on this machine for this checkpoint, if it was measured."""
+    entry = _read_json(cache_dir / RUNNER_FILE).get(f"{checkpoint}|{machine_id()}")
+    return entry if isinstance(entry, dict) and entry.get("backend") in BACKENDS else None
+
+
+def save_runner(cache_dir: Path, checkpoint: str, entry: dict[str, Any]) -> None:
+    path = cache_dir / RUNNER_FILE
+    data = _read_json(path)
+    data[f"{checkpoint}|{machine_id()}"] = entry
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1), encoding="utf-8")
+
+
+def save_status(cache_dir: Path, status: dict[str, Any]) -> None:
+    """What `tempo-server doctor` shows about Laya: written by the server at each load."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / STATUS_FILE).write_text(json.dumps(status, indent=1), encoding="utf-8")
+
+
+def read_status(cache_dir: Path) -> dict[str, Any]:
+    return _read_json(cache_dir / STATUS_FILE)
 
 
 def cache_key(model_dir: Path) -> str:
@@ -171,9 +336,12 @@ def load(
     threads: int,
     cache_dir: Path,
     device: str | None = None,
+    announce: Callable[[str], None] | None = None,
 ) -> OnnxRunner | TorchRunner:
-    """Load one Laya checkpoint for CPU inference with ``threads`` threads."""
-    model_dir = checkpoint_dir(stock, model)
+    """Load one Laya checkpoint for CPU inference with ``threads`` threads. The packages are
+    checked first: nothing is downloaded unless the Laya extra is installed."""
+    ensure_installed(backend)
+    model_dir = checkpoint_dir(stock, model, announce)
     if backend == "torch":
         import torch
         from laya.agent import Agent

@@ -186,6 +186,8 @@ class Engine:
         self._classifier_loading: Any = None
         self._warm_up = warm_up
         self._clock = clock
+        self._http_transport: Any = None  # tests replace it with a fake Ollama
+        self.warming: asyncio.Task[str | None] | None = None  # the local model warm-up
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Engine:
@@ -233,8 +235,45 @@ class Engine:
                 await self._classifier_loading
         if not oneshot and self.sync is not None and self.settings.sync_interval_s > 0:
             self._maintenance = asyncio.create_task(self._sync_loop())
+        if not oneshot:
+            self.warming = asyncio.create_task(self.warm_local_model())
         if self._warm_up:
             await self._warm_up()
+
+    async def warm_local_model(self) -> str | None:
+        """Ask Ollama to load the local model that would answer first, so the first question
+        isn't slowed by loading it (Ollama loads a model on an empty request and keeps it for
+        a while). Returns the model warmed, or None."""
+        import httpx
+
+        from tempo.analyzer import analyze
+        from tempo.registry import OLLAMA_DEFAULT_BASE
+
+        if "ollama" not in self.registry.providers or not self.registry.is_configured("ollama"):
+            return None
+        simple = analyze([{"role": "user", "content": "hi"}])
+        local = [
+            c.model
+            for c in self.router.rank(simple, mode="private").candidates
+            if c.model.provider == "ollama" and c.model.installed is True
+        ]
+        if not local:
+            return None
+        model = local[0]
+        base = self.registry.credentials("ollama").get("api_base", OLLAMA_DEFAULT_BASE)
+        name = model.id.split("/", 1)[1]
+        started = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(transport=self._http_transport, timeout=180) as client:
+                response = await client.post(
+                    f"{base}/api/generate", json={"model": name, "keep_alive": "15m"}
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            log.info("Could not warm up local model %s: %s", model.id, exc)
+            return None
+        log.info("Local model %s loaded in %.1fs", model.id, time.perf_counter() - started)
+        return model.id
 
     async def _sync_loop(self) -> None:
         """Refresh provider model lists (and check provider health) now and then."""

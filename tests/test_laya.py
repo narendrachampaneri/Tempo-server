@@ -61,10 +61,16 @@ class FakeLaya:
 
 
 def with_laya(fake=None, takeover="", loader=None, timeout_ms=200.0, scripts=None, **kw):
+    """An engine whose Laya is ``fake``. These tests are about Laya itself, so it is asked
+    even when the rules are sure (tested separately below)."""
     engine, backend = make_engine(scripts, **kw)
-    settings = Settings(laya_takeover=parse_takeover(takeover), laya_timeout_ms=timeout_ms)
+    settings = Settings(
+        laya_takeover=parse_takeover(takeover), laya_timeout_ms=timeout_ms, laya_skip_sure=False
+    )
     engine.laya = LayaDecider(settings, engine.store, loader=loader or (lambda: fake))
     engine.laya._load()
+    if fake is not None:
+        fake.calls.clear()  # the warm-up calls at load
     return engine, backend
 
 
@@ -212,6 +218,7 @@ def test_default_loader_runs_the_chosen_checkpoint_on_cpu(monkeypatch, tmp_path)
         "threads": 2,
         "cache_dir": tmp_path / "laya",
         "device": None,
+        "announce": None,
     }
     # Predictions are logged under the model *and* runtime that made them.
     assert checkpoint_name(settings) == "./laya-tuned/torch"
@@ -230,7 +237,8 @@ def test_time_limit_is_measured_on_this_machine():
 
     fixed = LayaDecider(Settings(laya_timeout_ms=350), loader=lambda: FakeLaya(delay=0.12))
     fixed._load()
-    assert fixed.timeout_ms == 350 and fixed.calibration == {}  # a set limit is not measured
+    assert fixed.timeout_ms == 350  # a set limit stays; the warm-up calls are still timed
+    assert set(fixed.calibration) == {"plan", "assess", "pick"}
 
     fast = LayaDecider(Settings(), loader=lambda: FakeLaya())
     fast._load()

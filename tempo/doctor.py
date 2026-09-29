@@ -302,12 +302,69 @@ def check_sandbox(engine: Engine) -> Check:
     return Check("Sandbox", "ok", f"Python and JavaScript ready in {box.home}.")
 
 
+LAYA_DOWNLOAD = "about 846 MB, once"  # the stock English checkpoint (tempo/laya_runtime.py)
+
+
+def check_laya(engine: Engine) -> Check:
+    """Laya: installed or not (with the exact install command), whether the checkpoint is on
+    disk (found without touching the network), and what the server measured when it last
+    loaded it: the runner and the time per kind of decision."""
+    from tempo import laya_runtime
+    from tempo.laya_decider import cache_dir
+
+    s = engine.settings
+    if s.laya == "off":
+        return Check("Laya", "info", "Off (TEMPO_LAYA=off): the rules make every decision.")
+    backend = "torch" if s.laya_backend == "auto" else s.laya_backend
+    try:
+        laya_runtime.ensure_installed(backend)
+    except ImportError:
+        gpu = shutil.which("nvidia-smi") is not None
+        return Check(
+            "Laya",
+            "info",
+            "Not installed (optional): the rules make every decision. Laya is a learned "
+            f"decision-maker; its checkpoint is {LAYA_DOWNLOAD}.",
+            f"{laya_runtime.install_command(gpu)}, then restart `tempo-server serve`.",
+        )
+    status = laya_runtime.read_status(cache_dir(s))
+    if not status:
+        on_disk = laya_runtime.local_checkpoint(s.laya_checkpoint, s.laya_model) is not None
+        where = (
+            "on disk"
+            if on_disk
+            else f"not downloaded yet ({LAYA_DOWNLOAD}, at the next `tempo-server serve`)"
+        )
+        return Check(
+            "Laya",
+            "info",
+            f"Installed; checkpoint {where}. The runner and its times show here once the "
+            "server has loaded it.",
+        )
+    times = ", ".join(f"{group} {ms:.0f} ms" for group, ms in (status.get("ms") or {}).items())
+    when = status.get("updated", "")
+    if status.get("status") == "ready":
+        return Check(
+            "Laya",
+            "ok",
+            f"Runner {status.get('backend')} ({status.get('runner_note')}); per decision: "
+            f"{times}; time limit {status.get('timeout_ms', 0):.0f} ms (measured {when}).",
+        )
+    return Check(
+        "Laya",
+        "warn",
+        f"Last load ({when}): {status.get('status')}: {status.get('error') or ''}".rstrip(": "),
+        "Check the server log; TEMPO_LAYA=off makes the rules decide everything.",
+    )
+
+
 async def run_checks(engine: Engine, port: int = 8000, offline: bool = False) -> list[Check]:
     checks = [check_python(), check_command(), *check_data_dir(engine), *check_keys(engine)]
     if not offline:
         checks += await check_reachable(engine)
     checks.append(await check_ollama(engine))
     checks.append(check_sandbox(engine))
+    checks.append(check_laya(engine))
     checks.append(check_port(port))
     return checks
 
