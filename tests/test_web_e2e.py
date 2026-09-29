@@ -754,6 +754,13 @@ def test_text_contrast_meets_wcag_aa_in_both_themes(browser, site, scheme):
     page.context.close()
 
 
+def test_every_image_the_docs_pages_show_exists():
+    for page in ("index.html", "WEB_UI.md", "../README.md"):
+        text = (ROOT / "docs" / page).read_text(encoding="utf-8")
+        for name in re.findall(r"screenshots/([\w.-]+\.png)", text):
+            assert (SHOTS / name).exists(), f"{page} shows {name}, which is missing"
+
+
 def test_landing_page_and_demo_share_the_theme_and_work_from_a_file(browser):
     for name, scheme, bg in (
         ("index.html", "light", "rgb(250, 246, 240)"),
@@ -791,9 +798,9 @@ SIZES = {"phone": (390, 844), "tablet": (820, 1180), "desktop": (1440, 900)}
 @pytest.fixture(scope="module")
 def shots_dir(tmp_path_factory):
     if os.environ.get("TEMPO_SCREENSHOTS") == "1":
+        # Overwritten in place: running only some sizes must not delete the others (the
+        # landing page shows phone and tablet shots).
         SHOTS.mkdir(parents=True, exist_ok=True)
-        for old in SHOTS.glob("*.png"):
-            old.unlink()
         return SHOTS
     return tmp_path_factory.mktemp("screenshots")
 
