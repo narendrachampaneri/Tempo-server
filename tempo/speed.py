@@ -23,7 +23,9 @@ if TYPE_CHECKING:
     from tempo.store import Store
 
 WINDOW = 20  # calls kept per model
-PRIOR_SAMPLES = 2.0  # the registry's prior counts like two measured calls
+# The registry's prior counts like one measured call: a model the list calls fast but that
+# took 43 s (step 10 laptop test) must look slow after that one call, not after several.
+PRIOR_SAMPLES = 1.0
 LOAD_DAYS = 14  # how far back the log is read at start-up
 # Extra hidden "thinking" tokens a reasoning model spends before answering.
 REASONING_OVERHEAD_TOKENS = 300
@@ -118,8 +120,11 @@ class SpeedBook:
         ttft = prior_ttft_ms / 1000 * (1 - weight) + ttft * weight
         rates = [s.tps for s in samples if s.tps]
         if rates:
+            # Blend seconds per token, not tokens per second: estimates are times, and 50/50
+            # of 150 and 7 tokens/s (78) would put a 43 s answer at 6 s.
             w = len(rates) / (len(rates) + PRIOR_SAMPLES)
-            tps = prior_tps * (1 - w) + statistics.median(rates) * w
+            per_token = (1 - w) / max(prior_tps, 1.0) + w / statistics.median(rates)
+            tps = 1 / per_token
         else:
             tps = prior_tps
         return Speed(ttft, max(tps, 1.0), n)

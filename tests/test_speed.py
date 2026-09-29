@@ -43,6 +43,18 @@ def test_the_record_is_rolling_and_ignores_one_odd_call():
     assert speed.ttft_s < 0.5 and speed.tps > 400
 
 
+def test_one_slow_call_is_enough_to_look_slow():
+    """nemotron-3-super is fast on paper and took 43 s on the laptop: after that one call its
+    estimate must say so, or the router keeps choosing it."""
+    registry = make_registry()
+    book = SpeedBook(registry)
+    strong = registry.get("alpha/strong")  # prior: 2 s to the first token, 100 tokens/s
+    before = estimate_seconds(strong, 500)
+    book.record(strong, ttft_s=6.0, total_s=43.0, out_tokens=250)  # ~7 tokens/s
+    after = estimate_seconds(strong, 500)
+    assert before < 15 and after > 40
+
+
 def test_short_replies_do_not_count_toward_tokens_per_second():
     registry = make_registry()
     book = SpeedBook(registry)
@@ -152,7 +164,8 @@ async def test_the_plan_shows_its_estimates_and_fits_stages_to_the_budget():
         model.ttft_ms, model.tokens_per_sec = 1000, 100  # ~8 s per 700-token answer
     result = await engine.complete(
         user("Write a Python function that reverses a string"),
-        engine.options(max_stages=10, time_budget_s=20, quota_budget=50),
+        # draft 8 s + check 3 s fit; a fix (8 s with the quickest model) doesn't
+        engine.options(max_stages=10, time_budget_s=15, quota_budget=50),
     )
     plan = events_of(result, "plan")[0]
     assert plan.data["estimates"]["draft"] == pytest.approx(8.0, abs=1.0)
@@ -169,3 +182,17 @@ async def test_a_failing_fast_model_falls_back_and_is_still_timed():
     result = await engine.complete(user("hi"))
     assert result.error is None and backend.called_for("draft")[0] == "beta/mid"
     assert engine.speed.speed(engine.registry.get("beta/mid")).n == 0  # failures aren't timed
+
+
+async def test_best_mode_leaves_out_a_draft_that_would_crowd_out_the_check_and_merge():
+    engine, backend = make_engine(judge_score=9)
+    for model in engine.registry.all():
+        model.ttft_ms, model.tokens_per_sec = 10_000, 100  # ~11 s an answer, 12 s a check
+    engine.registry.get("alpha/strong").ttft_ms = 45_000  # ~49 s: fits 60 s, alone
+    result = await engine.complete(user("hi"), engine.options(mode="best", time_budget_s=60))
+    draft = events_of(result, "stage_start")[0]
+    assert draft.data["job"] == "draft" and "alpha/strong" not in draft.data["models"]
+    assert len(draft.data["models"]) == 3  # three families still draft
+    notes = [e.data["message"] for e in events_of(result, "note")]
+    assert any("left out alpha/strong" in n for n in notes)
+    assert "alpha/strong" not in backend.called_for("draft")

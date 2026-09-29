@@ -479,8 +479,11 @@ class Pipeline:
         )
 
     def _stage_estimates(self) -> dict[str, float]:
-        """Seconds each kind of stage is expected to take with the model the router would pick
-        now: from measured speed, the answer's expected length and the models' output limits."""
+        """Seconds each kind of stage is expected to take, from measured speed, the answer's
+        expected length and the models' output limits. Answer stages count the quickest of the
+        router's top choices, so a slow first choice doesn't make the plan drop stages a quick
+        model could do (each stage still picks a model that can finish in the time left when
+        it starts); a check counts the judge the router would pick."""
         out: dict[str, float] = {}
         for job, tokens in (
             ("draft", self._job_tokens("draft")),
@@ -491,7 +494,8 @@ class Pipeline:
             if job == "check" and not self._want_judge():
                 out[job] = 0.0  # heuristics only
             elif ranked:
-                out[job] = estimate_seconds(ranked[0].model, tokens)
+                choices = ranked[:1] if job == "check" else ranked[:PLAN_CHOICES]
+                out[job] = min(estimate_seconds(c.model, tokens) for c in choices)
         return out
 
     def _stages_that_fit(self, estimates: dict[str, float]) -> int:
@@ -670,6 +674,8 @@ class Pipeline:
                 chosen.why = "requested by caller"
                 ranked = [chosen, *[c for c in ranked if c.model.id != requested.id]]
         ranked = self._local_first(ranked)
+        if count > 1 and not self.answers and not self.o.model:
+            ranked = self._leave_time_to_improve(ranked, count)
         count = self._affordable(count, ranked)
         slots = await self._pick("draft", ranked, count)
         if not slots:
@@ -695,6 +701,28 @@ class Pipeline:
             )
         self.answers.extend(outputs)
         self._maybe_ready(stage, results)
+
+    def _leave_time_to_improve(self, ranked: list[Candidate], count: int) -> list[Candidate]:
+        """Parallel drafts are checked and merged afterwards, and that waits for the slowest
+        draft: leave out a model whose measured speed would use the time those stages need
+        (nemotron took 43 s of 60 s on the laptop), while enough faster families remain.
+        At least half the time left stays open to drafts."""
+        estimates = self._stage_estimates()
+        left = self.time_left()
+        allowed = max(left - estimates.get("check", 0.0) - estimates.get("fix", 0.0), left / 2)
+        quick = [c for c in ranked if c.latency_s <= allowed]
+        families = {c.model.family for c in ranked}
+        if len({c.model.family for c in quick}) < min(count, len(families)):
+            return ranked
+        slow = [c for c in ranked if c.latency_s > allowed]
+        if slow:
+            names = ", ".join(f"{c.model.id} (~{c.latency_s:.0f}s)" for c in slow[:3])
+            self.emit(
+                "note",
+                message=f"Drafting with faster models; left out {names} so the check and merge "
+                f"fit in the {left:.0f}s left.",
+            )
+        return quick
 
     def _note_quota_fallback(self, route: Any) -> None:
         """When every free quota is used up, say so: local models (and the cache, already
@@ -1048,9 +1076,15 @@ class Pipeline:
 
     def best(self) -> Answer | None:
         checked = [a for a in self.answers if a.check is not None]
+        shown = self._shown_answer
+        if shown is not None and (shown.check.passed if shown.check else not checked):
+            # The user is already reading this answer: it stays unless a check finds a real
+            # problem with it (then the fix is shown as a revision).
+            return shown
         if not checked:
             return self.answers[-1] if self.answers else None
-        return max(checked, key=lambda a: (a.score, a.stage))
+        # on a tie the answer on screen stays: swapping it would change nothing but the words
+        return max(checked, key=lambda a: (a.score, a.stage, a is shown))
 
     async def _improve(self) -> None:
         fixes = mixes = 0
@@ -1806,6 +1840,7 @@ class _NoAnswer(Exception):
 
 
 ANSWER_JOBS = frozenset({"draft", "fix", "merge", "polish", "combine"})
+PLAN_CHOICES = 3  # the router's top choices a stage's time estimate may come from
 MAX_CONTINUATIONS = 3  # rounds of "continue where you stopped" after an output-limit stop
 OVERLAP_WINDOW = 200  # characters of a continuation checked for text it repeated
 

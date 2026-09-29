@@ -69,6 +69,21 @@ async def test_a_draft_that_passes_is_ready_and_never_revised():
     assert events_of(result, "answer_ready")[0].data["answer"] == result.text
 
 
+async def test_the_shown_answer_stays_when_the_check_finds_nothing_better():
+    """Best mode drafts with three models and shows the first; the check grades them all the
+    same, so nothing is revised: the answer on screen stays the final one."""
+    scripts = {
+        "*:judge": judge_reply([5]),
+        "alpha/strong": [sleep(0.2), ("answer", "Slower draft from alpha/strong.")],
+    }
+    engine, _ = make_engine(scripts)
+    result = await engine.complete(user("hi"), engine.options(mode="best", max_stages=2))
+    ready = events_of(result, "answer_ready")
+    assert ready and ready[0].data["model"] != "alpha/strong"  # the first slot, finishing last
+    assert not events_of(result, "answer_revised")
+    assert result.model == ready[0].data["model"] and result.text == ready[0].data["answer"]
+
+
 async def test_a_draft_failing_the_quick_checks_is_not_shown_as_ready():
     engine, _ = make_engine({"*:draft": [("answer", "I'm sorry, but I can't help with that.")]})
     result = await engine.complete(user(CODE_Q))
