@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,6 +56,26 @@ def _choice(env: Mapping[str, str], name: str, allowed: tuple[str, ...], default
     if value not in allowed:
         raise ValueError(f"{name} must be one of {', '.join(allowed)}, not {value!r}")
     return value
+
+
+_ORIGIN = re.compile(r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$")
+
+
+def parse_origins(spec: str | None) -> list[str]:
+    """TEMPO_CORS_ORIGINS: websites allowed to call this server from a browser, each written
+    exactly (``https://app.example.com``, ``http://localhost:5173``). No wildcard, no path."""
+    origins = []
+    for item in (spec or "").split(","):
+        origin = item.strip().rstrip("/")
+        if not origin:
+            continue
+        if "*" in origin or not _ORIGIN.match(origin):
+            raise ValueError(
+                f"TEMPO_CORS_ORIGINS: {origin!r} is not an exact website origin like "
+                "https://app.example.com (no wildcard, no path)"
+            )
+        origins.append(origin)
+    return origins
 
 
 def parse_takeover(spec: str) -> dict[str, str]:
@@ -140,6 +161,8 @@ class Settings:
     # first to save free quota. "off" disables it.
     local_first: str = "auto"
     local_first_max_complexity: float = 0.3
+    # Websites whose pages may call the API from a browser (CORS). Empty: none (the default).
+    cors_origins: list[str] = field(default_factory=list)
 
     @property
     def db_path(self) -> Path | None:
@@ -193,4 +216,5 @@ class Settings:
             tool_followup=_choice(env, "TEMPO_TOOL_FOLLOWUP", ("quick", "full", "off"), "quick"),
             local_first=_choice(env, "TEMPO_LOCAL_FIRST", ("auto", "off"), "auto"),
             local_first_max_complexity=float(env.get("TEMPO_LOCAL_FIRST_MAX_COMPLEXITY") or 0.3),
+            cors_origins=parse_origins(env.get("TEMPO_CORS_ORIGINS")),
         )

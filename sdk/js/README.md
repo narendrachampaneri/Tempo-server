@@ -41,8 +41,9 @@ await tempo.deleteMyData();         // delete every question you asked
 Errors reject with `TempoError` (`status`, `code`, `message`, `retryAfter` in seconds when every
 free quota is used up). Pass `signal` (an `AbortSignal`) to stop a question. The API key is your
 **Tempo** key (from `tempo-server users add`), never a provider key; don't ship it in a public web
-page. A server that runs just for you needs none. In a browser on another origin, the page must be
-served by Tempo-server itself or behind a proxy (the server sends no CORS headers).
+page. A server that runs just for you needs none. In a browser, a page on another website can call
+Tempo-server only if the server's owner lists that website in `TEMPO_CORS_ORIGINS` (off by
+default; exact origins, no wildcard).
 
 For the OpenAI-compatible endpoint (`/v1`), use the official `openai` package instead. Apache-2.0.
 

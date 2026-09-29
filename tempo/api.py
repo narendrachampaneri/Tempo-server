@@ -177,6 +177,18 @@ def create_app(engine: Engine | None = None, settings: Settings | None = None) -
 
     app = FastAPI(title="Tempo", version=__version__, lifespan=lifespan)
     app.state.engine = engine
+    if settings.cors_origins:  # only the websites the owner listed (TEMPO_CORS_ORIGINS)
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_methods=["GET", "POST", "PUT", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "Accept"],
+            expose_headers=["Retry-After"],
+            allow_credentials=False,
+            max_age=600,
+        )
 
     @app.exception_handler(APIError)
     async def _api_error(_: Request, exc: APIError) -> JSONResponse:
