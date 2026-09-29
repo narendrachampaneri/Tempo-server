@@ -309,6 +309,26 @@ Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
   project URLs, `twine check --strict` in CI.
 - Tests: 361 pass locally (Linux, Python 3.11 and 3.13), lint clean.
 
+**Owner's decisions on step 6** (2026-09-29): Windows and macOS stay on pull requests and
+releases while the repository is private; once it is public they also run on every push to
+`main` (the workflow checks `github.event.repository.private`, so this switches on by itself).
+The installers keep Python 3.12 for 0.1.0.
+
+**Secret scan of the full git history** (2026-09-29, before the repository goes public): no keys
+or secrets found.
+- gitleaks 8.28.0 over every commit on every branch (`--log-opts=--all`, 57 commits, ~1.4 MB):
+  no leaks.
+- A second pass over every added line in every commit for the key formats of Tempo's providers
+  and common services (Groq `gsk_`, Google `AIza`, OpenRouter `sk-or-v1-`, OpenAI-style `sk-`,
+  NVIDIA `nvapi-`, Cerebras `csk-`, Hugging Face `hf_`, GitHub tokens, Slack, AWS, private-key
+  blocks) and for non-empty `*_API_KEY` / `*_TOKEN` / `*_SECRET_KEY` assignments: nothing.
+- No `.env`, key file, database, `settings.env` or `catalog.json` was ever committed (only
+  `.env.example`, whose values were always empty; one early version had comments after `=`,
+  fixed in step 1).
+- Only example email addresses (`@example.com`, `a@b.com`); every commit is authored by
+  `Claude <noreply@anthropic.com>`; the owner's email appears nowhere.
+- Keep GitHub secret scanning and push protection on once public (PUBLISHING.md §2).
+
 **CI results** (manual run 11, commit `8efeee1`, 2026-09-29; all green):
 
 | System | Tests | Install test |
@@ -440,15 +460,10 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
 
 ## Decisions for the owner
 
-1. **The `main` branch**: the repository has no `main` yet (only this branch), and this session
-   may not create one. Suggested: create `main` at `bd57172` (the last commit before step 1), so
-   the pull request shows steps 1 to 6; or at the first commit `ce66bc5` to review everything.
-2. **Default branch**: make `main` the default once it exists (the installers, the README links
-   and GitHub Pages all point at `main`).
-3. **Windows and macOS CI on every push** while private costs more free minutes (Windows 2×,
-   macOS 10×). Keep them on pull requests and releases only (today), or add a nightly run?
-4. **Installer Python**: the installers pin the tool's Python to 3.12 (uv downloads it if
-   missing) for predictable installs. Keep 3.12, or move to 3.13?
+1. **The `main` branch**: the owner reported creating `main` from `bd57172` and making it the
+   default (2026-09-29), but GitHub still lists only `claude/multi-model-ai-platform-o0fx9v`
+   (checked through the API and `git ls-remote`), so the pull request could not be opened.
+   Please check that `main` exists in `narendrachampaneri/Tempo-server` (Code → Branches).
 
 ## How the checks were run (for the next session)
 

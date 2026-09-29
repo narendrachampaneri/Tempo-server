@@ -63,8 +63,9 @@ Google, NVIDIA and OpenRouter key patterns: nothing found):
 Before going public:
 
 - [ ] Turn on GitHub's secret scanning and push protection (Settings → Code security).
-- [ ] Scan the full history once, not just the current files (for example with `gitleaks
-      detect` or GitHub's secret scanning report), and rotate any key ever committed.
+- [x] Scan the full history once, not just the current files: done 2026-09-29 with gitleaks
+      8.28.0 over all 57 commits and a pattern search for every provider's key format; nothing
+      found (details in STATUS.md). Rotate any key if a later scan ever finds one.
 - [ ] Keep the rule in CONTRIBUTING.md: no real keys in code, tests, issues or logs.
 
 ## 3. The `tempo-server terms` table in the README

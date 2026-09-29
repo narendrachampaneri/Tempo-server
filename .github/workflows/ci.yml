@@ -1,9 +1,12 @@
 # Tests, lint, the package build and install tests. Publishes nothing.
 #
-# To save free CI minutes while the repository is private (owner's decision, step 6):
+# To save free CI minutes while the repository is private (owner's decisions, step 6):
 #   - every push:                Linux, every supported Python version, and a Linux install test
 #   - pull requests and releases: also Windows (every Python version) and macOS (one version),
 #                                 and install tests on all three systems
+#   - pushes to main, once the repository is public (Actions minutes are free then): also
+#     Windows, macOS and the install tests on all three systems. This switches on by itself
+#     when the repository is made public.
 name: CI
 
 on:
@@ -56,7 +59,7 @@ jobs:
       - run: pytest -q
 
   test-windows:
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' || (github.ref == 'refs/heads/main' && !github.event.repository.private)
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
@@ -73,7 +76,7 @@ jobs:
       - run: pytest -q
 
   test-macos:
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' || (github.ref == 'refs/heads/main' && !github.event.repository.private)
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -107,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'push' && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+        os: ${{ fromJSON((github.event_name == 'push' && (github.ref != 'refs/heads/main' || github.event.repository.private)) && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     env:
       TEMPO_EMBEDDINGS: "off"
       TEMPO_SERVER_SETUP_ARGS: "--non-interactive --no-sync"
