@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tempo-server-client"
+version = "0.1.0"
+description = "A thin Python client for Tempo-server's HTTP API: stream the thinking window, ask, models, quota, consent and feedback."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "The Tempo-server authors"}]
+requires-python = ">=3.9"
+dependencies = ["httpx>=0.27"]
+keywords = ["tempo-server", "llm", "client", "sdk"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/narendrachampaneri/Tempo-server"
+Documentation = "https://github.com/narendrachampaneri/Tempo-server/tree/main/sdk/python"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+tempo_server_client = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "PLW1514"]
+preview = true
+explicit-preview-rules = true

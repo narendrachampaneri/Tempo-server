@@ -73,7 +73,9 @@ tempo = ["models.yaml", "web/*", "data/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "sdk/python/tests"]
+# the Python SDK is tested from its source folder (it is a separate package: sdk/python)
+pythonpath = ["sdk/python/src"]
 
 [tool.ruff]
 line-length = 100
