@@ -1,6 +1,6 @@
 # Tempo-server
 
-**Tempo-server is open models plus the system that runs and trains them.** It routes every question to the best free or open model, checks the answer, fixes it when it is weak, shows every step, and trains its own small open models (Tempo-Router, Tempo-Judge, Tempo-Core) from the answers that passed, all on an ordinary CPU ([plan](docs/TEMPO_MODELS.md); nothing trained yet).
+**Tempo-server is open models plus the system that runs and trains them.** It routes every question to the best free or open model, checks the answer, fixes it when it is weak, shows every step, and trains its own small open models (Tempo-Router, Tempo-Judge, Tempo-Core) from the answers that passed, all on an ordinary CPU ([plan](docs/TEMPO_MODELS.md); the training kit and its dry run are ready, no real run yet: [docs/TRAINING.md](docs/TRAINING.md)).
 
 Tempo is a **self-routing AI platform**. You ask a question from the web app, the CLI or the API. Tempo works out what kind of question it is and picks the best free or open-source model that is available. It checks the answer, and when the answer is weak it brings in more models to fix it, merge several drafts, or split the job into parts. A small **thinking window** shows every stage live: its job, the model, the reason, the time taken and the free quota left.
 
@@ -325,6 +325,16 @@ tempo-server laya compare                            # after a few hundred more 
 export TEMPO_LAYA_TAKEOVER="should_stop=auto, next_model=auto"   # Laya takes over where it wins
 ```
 
+The same loop trains Tempo-Core too, with two ready Kaggle notebooks and three commands; [docs/TRAINING.md](docs/TRAINING.md) has every step:
+
+```bash
+tempo-server train dry-run                 # the whole loop on your CPU with tiny models, no keys (needs [train])
+tempo-server train prepare                 # exports, licence and data-mix checks, one zip for Kaggle, upload steps
+tempo-server models import ~/Downloads/output.zip   # after the notebook ran on Kaggle
+tempo-server models compare                # held-out questions, old vs new, the gate per task type
+tempo-server models promote                # the new version takes the task types it won
+```
+
 The labels come from outcomes: how many stages an answer really needed, judge scores, 👍/👎, and whether later stages improved the answer. A row is exported only if every model that answered or judged its question belongs to a provider marked `training_on_outputs: yes`; `--include-unclear` adds `unclear` ones after you have read their terms (`tempo-server terms`), and `no` is never exported.
 
 ## Settings
@@ -377,6 +387,7 @@ same way):
 | `pipx install "tempo-server[embeddings]"` | Embedding task classifier and semantic cache (fastembed, ~65 MB model, CPU) |
 | `pipx install "tempo-server[laya]"` | Laya decision-maker on CPU (PyTorch and ONNX Runtime) |
 | `pipx install "tempo-server[terms]"` | `tempo-server terms --check` for NVIDIA's PDF terms |
+| `pip install "tempo-server[train]"` | Training libraries for `tempo-server train dry-run` (PyTorch, Transformers, PEFT, TRL, Laya); the real training runs on Kaggle ([docs/TRAINING.md](docs/TRAINING.md)) |
 
 ## Development
 
@@ -392,6 +403,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 - [sdk/python](sdk/python/README.md) and [sdk/js](sdk/js/README.md): the Python and JavaScript/TypeScript SDKs.
 - [docs/CONNECT.md](docs/CONNECT.md): connect Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n or LangChain.
 - [docs/demo/](docs/demo/index.html): a recorded session replayed in the browser (static, for GitHub Pages).
+- [docs/TRAINING.md](docs/TRAINING.md): the training path step by step: collect, prepare, Kaggle, import, compare, promote; the dry run.
 - [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.
 - [docs/USE_CASES.md](docs/USE_CASES.md): 20 scenarios Tempo is for, what each still needs, and its roadmap phase.
 - [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).

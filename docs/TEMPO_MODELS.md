@@ -1,6 +1,8 @@
 # Tempo's own models: plan
 
-_Plan and data only (step 3, 2026-09-28). Nothing has been trained yet. Facts entered by hand
+_Plan and data (step 3, 2026-09-28); the training kit, both Kaggle notebooks and the import,
+compare and promote commands exist since step 9 ([TRAINING.md](./TRAINING.md)), proven end to
+end by a CPU dry run with tiny models. Nothing has been trained on real data yet. Facts entered by hand
 carry a source and a date; estimates are marked as estimates and are replaced by measurements
 on the first run._
 
@@ -13,7 +15,7 @@ openly. Tempo uses them first and calls free APIs only when they are not confide
 |---|---|---|---|---|---|
 | **Tempo-Router** | Picks the model for each stage, and decides stop or continue | Laya (`convaiinnovations/laya`, Apache-2.0, 421M parameters) | `tempo-server export-laya`: plan, pick and assess rows | Laya checkpoint, PyTorch fp32 on CPU (ONNX fp32 optional) | started: Laya runs in shadow mode, rows are logged and exported |
 | **Tempo-Judge** | Grades answers (Laya's `score` type), to save judge calls to big models | Laya (Apache-2.0) | graded answers: the judge's grade, heuristics, 👍/👎 | same | data logged (every check); export and training planned |
-| **Tempo-Core** | Writes answers itself, on CPU | a 1–4B Apache-2.0 or MIT model (below) | `tempo-server export-sft`, then `tempo-server export-pairs` | GGUF, 4-bit (Q4_K_M), for llama.cpp or Ollama | data export ready; training planned |
+| **Tempo-Core** | Writes answers itself, on CPU | a 1–4B Apache-2.0 or MIT model (below) | `tempo-server export-sft`, then `tempo-server export-pairs` | GGUF, 4-bit (Q4_K_M), for llama.cpp or Ollama | notebook `training/tempo_core.ipynb` ready; needs real data |
 | **Tempo Tune add-ons** | One small adapter per user scenario | Laya checkpoints (decisions) or LoRA on Tempo-Core (writing) | per scenario (ARCHITECTURE §13) | Laya checkpoint, or GGUF LoRA adapter | Phase 5 |
 
 Base-model licences, from each model's Hugging Face page (checked 2026-09-28):
@@ -74,7 +76,7 @@ notebook's settings panel). Nothing that serves a request depends on the noteboo
 
 | Stage | Method | Data | Estimate on Kaggle 2×T4 (to be measured) |
 |---|---|---|---|
-| 1. SFT | LoRA (QLoRA, 4-bit base, rank 16) with TRL's `SFTTrainer` or Unsloth | `export-sft`, 2–10k rows, plus the public share (§4) | 1.7B: about 1 hour for 5k rows of ~600 tokens, 2 epochs; 4B: about 2–3 hours |
+| 1. SFT | LoRA (rank 16) with TRL's `SFTTrainer` on the full-precision base (step 9: 1.7B fits one T4, so no 4-bit base) | `export-sft`, 2–10k rows, plus the public share (§4) | 1.7B: about 1 hour for 5k rows of ~600 tokens, 2 epochs; 4B: about 2–3 hours |
 | 2. DPO | TRL's `DPOTrainer` on the SFT model, same LoRA | `export-pairs`, 1–5k pairs | 1.7B: about 1 hour for 2k pairs |
 | 3. Rewards from checks (later) | GRPO (TRL's `GRPOTrainer` or Unsloth) with rewards computed by Tempo's own checkers: maths answers compared numerically, code run against its tests in the sandbox (Phase 3's WebAssembly sandbox; in the notebook, the same checker code) | maths and code questions from openly licensed datasets (GSM8K, MIT; MBPP, CC-BY-4.0) | 1.7B: 4–8 hours for about 500 prompts × 4–8 samples; fits one 12-hour session |
 

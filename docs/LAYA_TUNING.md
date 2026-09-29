@@ -62,6 +62,11 @@ must be shared under the same licence if you publish the dataset or the model.
 
 ## 3. Fine-tune on Kaggle's free GPUs (offline, about 10 minutes)
 
+**Easier now:** `tempo-server train prepare` packs this dataset with Tempo's own notebook
+`training/tempo_router_judge.ipynb` (based on Laya's, plus resume, reports and held-out scores),
+and `tempo-server models import / compare / promote` bring the result back
+([TRAINING.md](./TRAINING.md)). The manual route with Laya's own notebook still works:
+
 1. Open Laya's notebook
    [`notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`](https://github.com/NandhaKishorM/laya/blob/main/notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb)
    in Kaggle (File → Import notebook), and set **Accelerator: GPU T4 x2** and **Internet: on**.
