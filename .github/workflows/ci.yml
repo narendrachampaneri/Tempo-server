@@ -200,3 +200,48 @@ jobs:
           [ "$RUNNER_OS" = Windows ] && bin_dir="$(cygpath -u "$bin_dir")"
           bash "$RUNNER_TEMP/smoke.sh" "$bin_dir/tempo-server"
           uv tool uninstall tempo-server
+
+  sdk:
+    # Both SDKs against a real demo-mode Tempo-server (each test suite starts one with a user
+    # key), on the same systems and schedule as the install tests. Builds both packages and
+    # checks them; publishes nothing.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name == 'push' && (github.ref != 'refs/heads/main' || github.event.repository.private)) && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+        node: ["22"]
+        include:
+          - os: ubuntu-latest
+            node: "20"
+    defaults:
+      run:
+        shell: bash
+    env:
+      TEMPO_PYTHON: python
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: sdk/js/package-lock.json
+      - name: Install Tempo-server and the Python SDK as users get them
+        run: pip install . ./sdk/python pytest build twine
+      - name: Python SDK tests
+        working-directory: sdk/python
+        run: python -m pytest -q tests -p no:cacheprovider
+      - name: Python SDK package
+        working-directory: sdk/python
+        run: python -m build --outdir "$RUNNER_TEMP/sdk-dist" && twine check --strict "$RUNNER_TEMP"/sdk-dist/*
+      - name: JavaScript SDK tests (build with tsc, then node --test)
+        working-directory: sdk/js
+        run: npm ci && npm test
+      - name: JavaScript SDK package
+        working-directory: sdk/js
+        run: npm pack --dry-run

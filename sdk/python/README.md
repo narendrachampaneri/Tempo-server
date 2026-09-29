@@ -11,10 +11,12 @@ pip install tempo-server-client      # not published yet: pip install ./sdk/pyth
 ```python
 from tempo_server_client import TempoClient
 
-tempo = TempoClient("http://127.0.0.1:8000", api_key="your-tempo-key")  # or $TEMPO_URL / $TEMPO_API_KEY
+tempo = TempoClient(
+    "http://127.0.0.1:8000", api_key="your-tempo-key"
+)  # or $TEMPO_URL / $TEMPO_API_KEY
 
 for event in tempo.stream("Explain TCP vs UDP", mode="best"):
-    if event.text:                      # one line per step: stages, models, checks, fallbacks
+    if event.text:  # one line per step: stages, models, checks, fallbacks
         print("▸", event.text)
     elif event.type == "answer_delta":  # the answer as it is written
         print(event["delta"], end="")
@@ -23,10 +25,10 @@ answer = tempo.ask("What is 17% of 2,340?", privacy="no_logging")
 print(answer.text, answer.model, answer.stop_reason)
 tempo.feedback(answer.question_id, "up")
 
-print(tempo.quota())      # free requests left today, per provider
-print(tempo.models())     # providers and models, ready or not and why
-tempo.set_consent(True)   # let your questions be used as training data (off by default)
-tempo.delete_my_data()    # delete every question you asked
+print(tempo.quota())  # free requests left today, per provider
+print(tempo.models())  # providers and models, ready or not and why
+tempo.set_consent(True)  # let your questions be used as training data (off by default)
+tempo.delete_my_data()  # delete every question you asked
 ```
 
 `AsyncTempoClient` has the same methods for asyncio (`async for event in tempo.stream(...)`).

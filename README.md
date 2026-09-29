@@ -166,6 +166,52 @@ From `tempo-server terms` (quotes re-checked on the providers' pages with `tempo
 | OpenCode Zen | no | per model | off; users' own keys, answering only |
 | Cerebras (trial) | unclear | unknown | off; never eval or collect |
 
+## Use it from any AI assistant
+
+Tempo-server is also an **MCP server**, so Claude Desktop, Claude Code, Cursor, VS Code and any
+other MCP client can call it. It gives them five tools: `ask` (a checked answer), `second_opinion`
+(two model families, where they agree and differ), `verify` (a judge from another family checks an
+answer), `models` (the free models and their health) and `quota` (free requests left today).
+
+```json
+{
+  "mcpServers": {
+    "tempo-server": { "command": "tempo-server", "args": ["mcp"] }
+  }
+}
+```
+
+That is the Claude Desktop and Cursor format; Claude Code is one command:
+`claude mcp add --scope user tempo-server -- tempo-server mcp`. Exact snippets for each app on
+Windows, macOS and Linux, and the HTTP option (`tempo-server mcp --http`, which needs your Tempo
+key): [docs/MCP.md](docs/MCP.md).
+
+**SDKs** (thin clients over the HTTP API; not published yet, install from `sdk/`):
+
+```python
+from tempo_server_client import TempoClient          # pip install ./sdk/python
+
+tempo = TempoClient()                                # $TEMPO_URL, $TEMPO_API_KEY
+for event in tempo.stream("Explain TCP vs UDP"):
+    if event.text:
+        print("▸", event.text)                       # the thinking window, live
+print(tempo.ask("What is 17% of 2,340?").text)
+```
+
+```ts
+import { TempoClient } from "tempo-server-client";  // npm install ./sdk/js
+
+const tempo = new TempoClient();
+for await (const event of tempo.stream("Explain TCP vs UDP")) {
+  if (event.text) console.log("▸", event.text);
+}
+console.log((await tempo.ask("What is 17% of 2,340?")).text);
+```
+
+Both cover the thinking-window stream, `ask`, models, quota, consent and feedback
+([sdk/python](sdk/python/README.md), [sdk/js](sdk/js/README.md)). Any OpenAI client works too:
+[docs/CONNECT.md](docs/CONNECT.md).
+
 ## Using Tempo
 
 ### Command line
@@ -188,6 +234,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `tempo-server setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
+| `tempo-server mcp [--http --port 8001]` | Run as an MCP server for AI assistants: stdio for desktop apps, or HTTP with a Tempo key ([docs/MCP.md](docs/MCP.md)) |
 | `tempo-server doctor [--port N] [--offline]` | Checks Python, the data folder, keys, which providers are reachable, Ollama and the port, with a fix for each problem |
 | `tempo-server quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
 | `tempo-server record-demo [--out FILE] [-q QUESTION]` | Record questions for the static demo page ([docs/demo/](docs/demo/index.html)) |
@@ -333,6 +380,8 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/MCP.md](docs/MCP.md): Tempo-server as an MCP server for Claude Desktop, Claude Code, Cursor and VS Code; the tools.
+- [sdk/python](sdk/python/README.md) and [sdk/js](sdk/js/README.md): the Python and JavaScript/TypeScript SDKs.
 - [docs/CONNECT.md](docs/CONNECT.md): connect Open WebUI, LibreChat, Continue, Aider, OpenCode, n8n or LangChain.
 - [docs/demo/](docs/demo/index.html): a recorded session replayed in the browser (static, for GitHub Pages).
 - [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.

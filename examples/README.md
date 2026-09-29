@@ -15,5 +15,8 @@ pip install openai                   # for the Python examples
 | `tools_and_json.py` | Tool calls (with the tool result sent back), strict JSON schema, and an image |
 | `privacy.py` | `local_only` and `no_logging` privacy options |
 | `curl.sh` | The API with curl: a question and the model list |
+| `mcp_config.json` | Tempo-server as an MCP server for Claude Desktop, Cursor and others ([docs/MCP.md](../docs/MCP.md)) |
+| `sdk_python.py` | The Python SDK (`sdk/python`): the thinking window, an answer, feedback, the quota |
+| `sdk_js.mjs` | The JavaScript SDK (`sdk/js`): the same in Node |
 
 With real keys (see `.env.example`), the same examples use free models instead of the demo ones.

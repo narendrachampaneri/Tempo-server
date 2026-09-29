@@ -28,6 +28,12 @@ def _settings(base_url: str | None, api_key: str | None) -> tuple:
     return url, headers
 
 
+def _local(url: str) -> bool:
+    """A server on this computer: never send its traffic through a proxy."""
+    host = httpx.URL(url).host
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
 class TempoClient:
     """Tempo-server's HTTP API. ``base_url`` defaults to $TEMPO_URL or http://127.0.0.1:8000;
     ``api_key`` (your Tempo key, not a provider key) to $TEMPO_API_KEY; none is needed for a
@@ -42,7 +48,9 @@ class TempoClient:
         http_client: httpx.Client | None = None,
     ) -> None:
         self.base_url, headers = _settings(base_url, api_key)
-        self._http = http_client or httpx.Client(timeout=timeout)
+        self._http = http_client or httpx.Client(
+            timeout=timeout, trust_env=not _local(self.base_url)
+        )
         self._http.headers.update(headers)
 
     def __enter__(self) -> TempoClient:
@@ -142,7 +150,9 @@ class AsyncTempoClient:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.base_url, headers = _settings(base_url, api_key)
-        self._http = http_client or httpx.AsyncClient(timeout=timeout)
+        self._http = http_client or httpx.AsyncClient(
+            timeout=timeout, trust_env=not _local(self.base_url)
+        )
         self._http.headers.update(headers)
 
     async def __aenter__(self) -> AsyncTempoClient:
