@@ -207,22 +207,35 @@ class Pipeline:
         When the time budget ends: finished answers are kept; calls whose answer text is
         already arriving are finished (``finish_started``, for answers; at most
         TEMPO_FINISH_GRACE seconds more); calls that have not started are cancelled. No new
-        stage starts afterwards (``_need_stage``).
+        stage starts afterwards (``_need_stage``). Parallel drafts still arriving when an
+        answer is already on screen are stopped too: with no stage left to check or merge
+        them, they couldn't change the answer.
         """
         tasks = [asyncio.ensure_future(call) for call in calls]
         results: list[Answer | None] = [None] * len(tasks)
+        unused: set[int] = set()
         try:
             _, pending = await asyncio.wait(tasks, timeout=self.time_left() or 0.001)
             if pending:
                 self._time_up = True
                 keep = []
+                shown = job == "draft" and self._shown_answer is not None
                 for slot, task in enumerate(tasks):
                     if task.done():
                         continue
-                    if finish_started and (stage, slot) in self._started:
+                    if finish_started and (stage, slot) in self._started and not shown:
                         keep.append(task)
                     else:
                         task.cancel()
+                        if shown:
+                            unused.add(slot)
+                if unused:
+                    self.emit(
+                        "note",
+                        message="Time budget reached: the answer shown stays; stopped "
+                        f"{len(unused)} slower draft{'s' if len(unused) > 1 else ''} that "
+                        "couldn't change it now.",
+                    )
                 if keep:
                     self.emit(
                         "note",
@@ -237,7 +250,7 @@ class Pipeline:
             await asyncio.gather(*tasks, return_exceptions=True)
         for slot, task in enumerate(tasks):
             if task.cancelled():
-                results[slot] = self._salvage(stage, job, slot)
+                results[slot] = None if slot in unused else self._salvage(stage, job, slot)
                 continue
             error = task.exception()
             if error is not None:
@@ -1391,6 +1404,17 @@ class Pipeline:
                     # schema): not a provider failure, so no cool-down; the next model is tried.
                     raise ProviderError("invalid", "; ".join(outcome.issues[:3]))
                 text = outcome.text
+            except asyncio.CancelledError:
+                # Stopped (time limit, or the user): what was measured still counts, or a model
+                # that always runs past the limit would never be seen as slow.
+                elapsed = self.clock() - started
+                e.speed.record(
+                    model,
+                    (first - started) if first is not None else elapsed,
+                    elapsed,
+                    (len(text) + len(reasoning)) // 4,
+                )
+                raise
             except ProviderError as err:
                 if err.kind == "invalid":
                     self._last_invalid = err.message

@@ -196,3 +196,18 @@ async def test_best_mode_leaves_out_a_draft_that_would_crowd_out_the_check_and_m
     notes = [e.data["message"] for e in events_of(result, "note")]
     assert any("left out alpha/strong" in n for n in notes)
     assert "alpha/strong" not in backend.called_for("draft")
+
+
+async def test_a_call_stopped_at_the_time_limit_still_counts_as_slow():
+    """A model that always runs past the limit is stopped every time: its first token and
+    streaming rate so far are recorded, or it would be chosen again and again."""
+    slow = [("answer", "word " * 40), sleep(3), ("answer", "the rest")]
+    scripts = {"alpha/strong": slow, "*:judge": judge_reply([9])}
+    engine, _ = make_engine(scripts, finish_grace_s=0.5)  # stopped 1.5 s in, still writing
+    strong = engine.registry.get("alpha/strong")
+    strong.ttft_ms, strong.tokens_per_sec = 100, 5000  # fast on paper
+    before = estimate_seconds(strong, 500)
+    options = engine.options(model="alpha/strong", time_budget_s=1, max_stages=1)
+    await engine.complete(user("hi"), options)
+    assert engine.speed.speed(strong).n == 1
+    assert estimate_seconds(strong, 500) > 5 * before

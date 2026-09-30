@@ -133,6 +133,23 @@ async def test_mixture_shows_the_fast_draft_as_ready_without_waiting_for_the_slo
     assert len(events_of(result, "call_end")) >= 3  # the slow drafts still finish
 
 
+async def test_at_the_time_limit_slower_drafts_stop_once_an_answer_is_shown():
+    """Laptop test, 30 s budget: the old code lost every draft and said "No answer was
+    produced". Now the first answer is shown at once, and at the limit the slower parallel
+    drafts (already writing) are stopped: no stage is left to check or merge them."""
+    slow = [sleep(0.05), ("answer", "A slow start"), sleep(3), ("answer", " and the rest.")]
+    scripts = {"alpha/strong": slow, "local/tiny": slow, "beta/mid": [("answer", "Quick.")]}
+    engine, _ = make_engine(scripts, judge_score=9)
+    looks_fast(engine)  # fast on paper, like nemotron was
+    result = await engine.complete(user("hi"), engine.options(mode="best", time_budget_s=1))
+    assert result.error is None and result.text == "Quick." and result.model == "beta/mid"
+    assert events_of(result, "done")[0].t < 2  # not the slow drafts' 3 s
+    notes = [e.data["message"] for e in events_of(result, "note")]
+    assert any("stopped 2 slower drafts" in n for n in notes)
+    assert not any("grace period" in n for n in notes)
+    assert not events_of(result, "answer_revised")
+
+
 async def test_mixture_that_fails_its_check_is_merged():
     scores = lambda cands: [9 if c.startswith("Merge") else 5 for c in cands]  # noqa: E731
     engine, backend = make_engine({"*:judge": judge_reply(scores)})
