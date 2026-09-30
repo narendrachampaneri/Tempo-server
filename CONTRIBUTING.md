@@ -73,6 +73,8 @@ macOS (3.13) for pull requests and releases, plus an install test with `install.
 
 ## Making a change
 
+- One change, one branch, one pull request into `main`; nobody pushes to `main` directly. A pull
+  request merges once CI is green on Linux, Windows and macOS, and its branch is then deleted.
 - Small commits, each with tests; tests and lint green before you push.
 - Update the docs in the same change (README, docs/ARCHITECTURE.md, docs/STATUS.md where it
   applies).

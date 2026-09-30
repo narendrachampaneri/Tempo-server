@@ -1,9 +1,11 @@
 # Status
 
-_Last updated 2026-09-30. Steps 10 (pull request #2) and 11 (pull request #1) are both on
-`main`, followed by the pre-public check (below step 11). The other branches are fully contained
-in `main` and wait for the owner to delete them. GitHub Actions still starts no jobs (see "Blocked: needs the owner"), so step
-10 was validated locally before it went to `main` ("Merged to `main`" below step 11)._
+_Last updated 2026-09-30. Everything is on `main` (steps 10 and 11, the pre-public check, and
+the repo tidy below step 11). One workflow from now on: one step = one branch = one pull request
+into `main`, merged when CI is green on Linux, Windows and macOS (CLAUDE.md rules 11–14). The
+other branches hold nothing that isn't on `main` and wait for the owner to delete them. GitHub
+Actions starts no jobs until the Actions minutes reset on 1 October; then the full CI runs on
+`main` ("Next")._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -745,8 +747,8 @@ visibility, so this is the check before the owner switches it (PUBLISHING.md §2
    uses the `noreply` address before switching. A rewrite changes every later commit id and
    needs a force push to `main`, so it wasn't done. Either way, turn on "Keep my email
    addresses private" (GitHub → Settings → Emails).
-2. **Branches**: everything is on `main`. The other three branches are safe to delete, and the
-   owner deletes them (a session can't; "Merged to `main`" below).
+2. ~~**Branches**~~: settled; everything is on `main`, and the owner deletes the other branches
+   ("Repo tidy and one workflow" below).
 
 ### Merged to `main` (2026-09-30)
 
@@ -775,6 +777,42 @@ The owner asked to keep everything on `main`, validate it, and delete the other 
   commit was re-applied as `dc6a047`). GitHub shows pull request #2 as merged. The session's
   `git push --delete` was refused (HTTP 403, the environment's policy), so delete them at
   github.com/narendrachampaneri/Tempo-server/branches.
+
+### Repo tidy and one workflow (2026-09-30)
+
+The owner asked for `main` as the only branch, one clear workflow, and a check of the folders.
+
+- **The extra commit on `claude/happy-wozniak-ibsb6c`** (`beab691`, "Pre-public check: history
+  scan of every branch, owner steps to switch") is the first copy of `main`'s `dc6a047`: same
+  message and time, made on the older `main` (`ec764cc`) before step 10 went in. Its
+  PUBLISHING.md section is on `main` unchanged, and every line it adds to STATUS.md is on `main`
+  except one sentence `main` has since replaced ("`claude/friendly-dirac-uzfo1y` has 17 unmerged
+  commits", out of date once step 10 was merged). Nothing to bring in, so no pull request for it.
+- **The other branches**: `claude/friendly-dirac-uzfo1y` (steps 10 and 11, pull requests #1
+  and #2) ends at `ec76259` and `claude/great-cerf-73arjx` ends at step 9 (`9ef6cc1`, "STATUS:
+  step 9 CI results per system"). Both are ancestors of `main`: no commit to lose. All three
+  are safe to delete. The session's delete was refused again (HTTP 403), so the owner deletes
+  them ("Blocked: needs the owner").
+- **Workflow**: CLAUDE.md rules 11–14 (one step = one branch = one pull request into `main`;
+  never push to `main`; merge only when CI is green on Linux, Windows and macOS, with a merge
+  commit; then delete the branch). CONTRIBUTING.md says the same for contributors. The full CI on
+  `main` is a manual run (Actions → CI → Run workflow), because a push to `main` runs the Linux
+  jobs only while the repository is private.
+- **Folders**: ARCHITECTURE.md §10 described only a proposed layout (`tempo/api/`, `brain/`,
+  `cli/`, a Next.js `web/`, `evals/`). The code is still the flat `tempo/` package that section
+  names for Phases 1 and 2, so nothing moves. §10.1 is now a folder map of what is on `main`, the
+  proposed tree is §10.2 with today's nearest equivalents, and §9 says what was built instead of
+  Redis, Postgres and Next.js (SQLite; plain HTML, CSS and JavaScript).
+- **Removed**: `docs/PR_STEPS_1-6.md`, the pull request text for steps 1–6 from a branch that is
+  gone (`claude/multi-model-ai-platform-o0fx9v`). Nothing linked to it, and every point in it is
+  in this file in more detail. Checked and kept: `docs/assets/` (the GitHub Pages copy of the web
+  app's theme and fonts; a test keeps them identical), the LICENSE copies in `sdk/python/` and
+  `sdk/js/` (each package ships its own), `docs/upstream/` (a draft issue the owner hasn't
+  decided on) and `docs/examples/collect-workflow.yml` (a workflow to copy, deliberately
+  inactive). No untracked or scratch files are in the repository.
+- **Merged without CI** (text files only, as the owner allowed for today), pull request #3:
+  CLAUDE.md, CONTRIBUTING.md, ARCHITECTURE.md, this file, and the removed PR text. Tests and lint pass
+  locally. Code changes wait for CI.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -806,13 +844,16 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Everything is on `main`; CI still has to run there once GitHub Actions has runners
-again.
+Nothing. Everything is on `main`; the full CI run on `main` waits for 1 October ("Next").
 
 ## Blocked: needs the owner
 
-- **Delete the three merged branches** (the owner's request, 2026-09-30): the session can't
-  delete branches; see "Merged to `main`".
+- **Delete the branches other than `main`** (the owner's request, 2026-09-30); the session's
+  delete is refused (HTTP 403). None holds anything that isn't on `main` ("Repo tidy and one
+  workflow"): `claude/friendly-dirac-uzfo1y`, `claude/great-cerf-73arjx`,
+  `claude/happy-wozniak-ibsb6c`, and `claude/zealous-heisenberg-g1cf37` once pull request #3 is
+  merged. Delete them at github.com/narendrachampaneri/Tempo-server/branches. To make this
+  automatic: Settings → General → "Automatically delete head branches".
 - **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
   above). The owner decides about the email in `ec764cc`, turns on secret scanning, push
   protection and private vulnerability reporting, then switches the repository to public
@@ -933,7 +974,10 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
 
 ## Next
 
-- Once CI has runners: pull request #2 green on every system, then merge it (step 10).
+- **1 October (the Actions minutes reset)**: the full CI on `main` (Actions → CI → Run workflow
+  on `main`: every job on Linux, Windows and macOS). Step 10 has never run on GitHub (it was
+  checked locally, on Linux only; "Merged to `main`"). Fix anything that fails, each fix in its
+  own branch and pull request, merged once its CI is green on all three systems.
 - Step 10 follow-ups (noted, not started): switch the shown stream to a parallel draft that
   finishes first when the streaming model is slow (today the first model to send a token keeps
   the stream); per-provider rate-limit waits in the time estimates; `bench` results in the

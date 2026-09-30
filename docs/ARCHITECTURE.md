@@ -602,11 +602,36 @@ Built with Typer + Rich (Python): a `Live` panel for the trace above the streame
 | CLI | Typer + Rich | Nice terminal UX with live panels |
 | Deploy | One `tempo-server serve` process on any CPU machine or free CPU host; containers optional, never required | Start small, software only |
 
+**As built:** state, logs, users and quota totals are in SQLite in the data folder (`tempo/store.py`; no Redis or Postgres yet), and the web app is plain HTML, CSS and JavaScript in `tempo/web/` with no build step (not Next.js).
+
 ---
 
-## 10. Proposed repository layout
+## 10. Repository layout
 
-Phases 1 and 2 keep a flat `tempo/` package with one module per component (see the README): `pipeline.py` (staged engine), `checks.py`, `prompts.py`, `quota.py`, `laya_decider.py`, `embeddings.py`, `evals.py`, `sync.py`, `accounts.py`, `store.py` and `tuning.py` were added in Phase 2. The package will grow into this layout as the later phases land.
+### 10.1 Folder map (what is on `main`, checked 2026-09-30)
+
+Phases 1 and 2 keep a flat `tempo/` package with one module per component (see the README): `pipeline.py` (staged engine), `checks.py`, `prompts.py`, `quota.py`, `laya_decider.py`, `embeddings.py`, `evals.py`, `sync.py`, `accounts.py`, `store.py` and `tuning.py` were added in Phase 2. Nothing has moved into the proposed layout (§10.2) yet.
+
+| Folder | What it is for |
+|---|---|
+| `tempo/` | The server package: one module per component (`api.py`, `cli.py`, `pipeline.py`, `router.py`, `checks.py`, `providers.py`, `mcp_server.py`, …) and `models.yaml`, the seed model list |
+| `tempo/data/` | Question sets shipped in the package: `evalset.yaml` (the probe evals) and `task_examples.yaml` (the embedding classifier's examples) |
+| `tempo/web/` | The web app that `tempo-server serve` hosts: HTML, CSS and JavaScript with no build step; `vendor/` holds KaTeX and Mermaid, `fonts/` the bundled fonts (licences in `LICENSES.md`) |
+| `tests/` | The pytest suite, offline; `test_web_e2e.py` drives the web app in Chromium |
+| `sdk/python/`, `sdk/js/` | The two client SDKs, each a separate package with its own tests |
+| `examples/` | Short scripts that call a running server: curl, the OpenAI client, both SDKs, an MCP config |
+| `training/` | The two Kaggle notebooks for Tempo's own models ([TRAINING.md](./TRAINING.md)) |
+| `scripts/` | Developer scripts outside the package: `speed_compare.py` ([SPEED.md](./SPEED.md)) |
+| `docs/` | The documentation, and the GitHub Pages site: `index.html`, `demo/`, and `assets/` (copies of the web app's theme and fonts, kept identical by a test) |
+| `docs/screenshots/` | The web app's screenshots, written by the browser tests (`TEMPO_SCREENSHOTS=1`) |
+| `docs/examples/` | A scheduled collect workflow to copy, not active ([COLLECT_ANYWHERE.md](./COLLECT_ANYWHERE.md)) |
+| `docs/upstream/` | Drafts for other projects, not sent ([LAYA_CPU.md](./LAYA_CPU.md)) |
+| `.github/workflows/` | `ci.yml` (tests, lint, package, install and SDK tests) and the publishing workflows, which run only on a release or a manual run |
+| top level | `pyproject.toml`, the installers (`install.sh`, `install.ps1`), `Dockerfile`, `.env.example`, README, CONTRIBUTING, SECURITY, LICENSE, NOTICE and CLAUDE.md (the rules for every session) |
+
+### 10.2 Proposed layout (later phases)
+
+The package will grow into this layout as the later phases land. Today's nearest equivalents: `api/` is `tempo/api.py`, `brain/` is `analyzer.py`, `router.py`, `pipeline.py` and `checks.py`, `cli/` is `tempo/cli.py`, `web/` is `tempo/web/`, and `evals/` is `tempo/data/evalset.yaml`.
 
 ```
 tempo-server/

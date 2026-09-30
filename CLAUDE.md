@@ -28,6 +28,22 @@ to see what is done, in progress, blocked and next.
     Public data needs no key (OpenRouter's model and status lists, NVIDIA's model list), so use
     it for real.
 
+## Branches and pull requests (the owner's workflow, 2026-09-30)
+
+11. **One step = one branch = one pull request into `main`.** Start the branch from the latest
+    `main`. A fix found later is its own step, with its own branch and pull request.
+12. **Never push to `main` directly.** Every change reaches `main` through a pull request.
+13. **Merge only when CI is green on Linux, Windows and macOS** for the pull request's latest
+    commit. The branch push runs the Linux jobs; the pull request adds Windows, macOS, and the
+    install and SDK tests on all three, so both runs must be green. Merge with a merge commit (the
+    step's small commits stay as they are).
+14. **Then delete the branch. `main` is the only branch that stays.** If the session can't delete
+    it (the environment has refused with HTTP 403 so far), list it in `docs/STATUS.md` under
+    "Blocked: needs the owner" for the owner to delete on GitHub.
+
+The full CI on `main` (every job on all three systems) is a manual run: Actions → CI → Run
+workflow on `main`. A push to `main` runs the Linux jobs only while the repository is private.
+
 ## Working in this repo
 
 ```bash
