@@ -627,7 +627,9 @@ pass here too.
 **Decisions for the owner (step 10)**
 
 1. **CI has no runners** (blocked, below): check the Actions minutes and spending limit, and
-   decide whether to merge pull request #2 before its CI can run. Nothing is merged until then.
+   decide whether to merge pull request #2 before its CI can run. Decided 2026-09-30: the owner
+   asked to put everything on `main`; it was merged after a full local run of the Linux CI jobs
+   ("Merged to `main`" below step 11).
 2. **The shown answer stays** unless a check fails it: a draft the judge scores equal or only
    slightly higher does not replace it, even in Best mode. (Merging parallel drafts still
    happens when the check fails.) Keep, or let a clearly higher score replace a passing answer?
@@ -743,8 +745,33 @@ visibility, so this is the check before the owner switches it (PUBLISHING.md §2
    uses the `noreply` address before switching. A rewrite changes every later commit id and
    needs a force push to `main`, so it wasn't done. Either way, turn on "Keep my email
    addresses private" (GitHub → Settings → Emails).
-2. **Branches**: every branch becomes public too. `claude/great-cerf-73arjx` is fully merged
-   into `main` and can be deleted; `claude/friendly-dirac-uzfo1y` has 17 unmerged commits.
+2. **Branches**: done. Everything is on `main` and the other branches were deleted at the
+   owner's request ("Merged to `main`" below).
+
+### Merged to `main` (2026-09-30)
+
+The owner asked to keep everything on `main`, validate it, and delete the other branches.
+
+- `main` was fast-forwarded to `claude/friendly-dirac-uzfo1y` (step 10, pull request #2: 17
+  commits, already based on `main`), and the pre-public check commit went on top. No merge
+  commit was made on GitHub's page, so no new commit carries a personal email.
+- **Validation** (GitHub Actions starts no jobs, so the Linux CI jobs were run here, on the
+  code that was pushed, `dc6a047`; the commit after it only changes this file; Python 3.11):
+  - lint and format: clean;
+  - full suite with the sandbox installed and required (`TEMPO_SANDBOX_REQUIRED=1`) and the
+    browser tests required (`TEMPO_REQUIRE_E2E=1`): 566 passed, none skipped;
+  - package: `python -m build` and `twine check --strict` pass;
+  - SDKs against a demo-mode server: Python 6 passed (build and `twine check` pass), JS 6
+    passed (`npm pack --dry-run` fine);
+  - training dry run (`tempo-server train dry-run`, PyTorch CPU build): every stage passed in
+    412 s (both notebooks, import, compare, promote; Laya promoted, the tiny Tempo-Core held
+    back by the gate, as expected).
+  - Not run here: the Windows and macOS jobs and the install scripts on those systems (step 10
+    didn't change `install.sh`, `install.ps1`, the SDKs or the sandbox).
+  - Playwright was pinned to 1.56.0 in the local venv only, to match this machine's Chromium
+    (build 1194); the project's `playwright>=1.50` is unchanged.
+- Deleted branches: `claude/friendly-dirac-uzfo1y`, `claude/great-cerf-73arjx`,
+  `claude/happy-wozniak-ibsb6c` (each checked to be contained in `main` first).
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -776,8 +803,8 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-- **Pull request #2 (step 10)**: all work is pushed; waiting for CI runners, then CI green on
-  every system, then merge. Nothing else is in progress.
+Nothing. Everything is on `main`; CI still has to run there once GitHub Actions has runners
+again.
 
 ## Blocked: needs the owner
 
@@ -793,7 +820,12 @@ Sante (OpenRouter, health).
     up. This repository ran about 70 CI runs in two days, and macOS minutes count 10×, Windows
     2×. Check github.com → Settings → Billing and plans (Actions usage, spending limit), and the
     repository's Settings → Actions.
-  - Pull request #2 waits on it; nothing is merged without green CI.
+  - Pull request #2 was merged on 2026-09-30 at the owner's request after a local run of the
+    Linux CI jobs ("Merged to `main`"); the first CI run on `main` is still owed.
+  - Making the repository public should end this: "GitHub Actions usage is free for
+    self-hosted runners and for public repositories that use standard GitHub-hosted runners"
+    (docs.github.com/en/billing/concepts/product-billing/github-actions, checked 2026-09-30).
+    Private repositories on GitHub Free get 2,000 minutes a month.
   - Ways to use fewer minutes, the owner's choice: macOS and Windows jobs only on `main` and
     pull requests (not every branch push), or the training dry run only on pull requests
     (decision 5 of step 9).
