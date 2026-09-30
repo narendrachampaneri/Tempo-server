@@ -19,13 +19,16 @@ More screenshots (phone, tablet and desktop, light and dark) are in
 | **Thinking timeline** | Each step of a question is a node that lights up while it runs, with the models shown as chips the moment they are called (spinner, then a tick, or a cross with the reason). Open **Full log** for the plain event list. A saved chat replays the same timeline. |
 | **History** | Chats grouped Today, Yesterday, Last 7 days and Older (pinned first). Search finds words inside chats. Rename, pin, delete, export as Markdown or JSON. Opening an old chat shows it exactly as it was and you can continue it. |
 | **Answers** | Streaming with **Stop** (or `Esc`), regenerate, edit and resend a question, copy an answer, copy a code block. Markdown with tables, lists, quotes, maths (KaTeX) and syntax highlighting. |
+| **Ready at once** | The first good answer is complete and usable (copy, preview) as soon as its model finishes, with a "Checking in the background…" chip while the checks go on. It stays unless a check finds a real problem; then the fix replaces it, and a **Revised after the check** box shows what the check found and a line-by-line difference. When a budget ended the work, a plain note under the answer says so ("this is the best answer so far"). |
 | **Previews** | Code blocks in `html`, `svg` or `mermaid` get a **Preview** button: a sandboxed frame, a **Download** button and an **Expand** view (see "Previews are sandboxed"). |
 | **Attach** | Text and code files (up to 200 KB, five per message) and images (four, shrunk to 1280 px), by button, drag and drop or paste. Images are offered only when a vision model is ready, and only vision models ever receive them. PDFs are not read yet (the app says so). |
 | **Voice** | A microphone (speech to text) and a speaker (read aloud) appear only when a speech model is ready for you: today that means a Groq key (`whisper-large-v3` and Orpheus are on Groq's free plan). Without a key they are hidden. |
 | **Modes** | Auto, Fast, Best, Private. The ⚙ panel has a model picker (advanced: the model that writes the first draft), the most stages, the time budget and the free-request budget. |
-| **Pages** | Models, Usage, Keys and Developers, in the same style. The status badge (top right) shows how many models are ready right now and opens the Models page. |
+| **Pages** | Models, Usage, Keys and Developers, in the same style. The status badge (top right) shows how many models are ready for you right now (counting the keys `tempo-server setup` stored, from `GET /api/status`) and opens the Models page. With none, it says "No model yet", and the empty chat shows one line: run `tempo-server setup` to add a free key, or start Ollama. |
 | **Shortcuts** | `Ctrl/⌘ + Shift + O` new chat, `Ctrl/⌘ + K` search chats, `/` focus the message box, `Esc` stop, `Enter` send, `Shift + Enter` new line, `?` the shortcut panel. |
 | **Errors** | Every failure says what happened and what to do next, with a button where one helps (add a key, see models, try again, enter an API key). |
+
+![An answer revised after the check, with what changed](screenshots/14-revision-desktop-light.png)
 
 ## Where your chats live, and what "private" means
 
@@ -64,8 +67,12 @@ and text that meets WCAG AA contrast in both themes (a browser test measures it)
 ## For developers
 
 - Server side: `tempo/history.py` and `/api/chats*`, `tempo/speech.py` and `/api/speech/*`,
-  `/api/capabilities`, `/api/ask` with `save: false`, and `/static` (fonts and libraries are
-  cached; code is revalidated).
+  `/api/capabilities`, `/api/status`, `/api/ask` with `save: false`, and `/static` (fonts and
+  libraries are cached; code is revalidated).
+- Events the page uses beyond streaming: `answer_ready` (the shown answer is complete;
+  `checking` says whether checks go on), `answer_revised` (a fix replaced it: `issues`,
+  `previous_model`), `answer_final` with `note`, and `continue` (a long answer is being
+  continued). [SPEED.md](./SPEED.md) explains when each happens.
 - Browser tests: `pip install -e ".[dev,e2e]" && playwright install chromium`, then
   `pytest tests/test_web_e2e.py`. They start a real server with scripted models. Without
   Playwright they are skipped; CI sets `TEMPO_REQUIRE_E2E=1`.

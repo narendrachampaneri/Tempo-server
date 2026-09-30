@@ -1,7 +1,9 @@
 # Status
 
-_Last updated 2026-09-29, at the end of step 11 (the new web UI). Branch: `claude/friendly-dirac-uzfo1y`
-(this session's designated branch; `main` was not touched, see decision 1 of step 11)._
+_Last updated 2026-09-30, at the end of step 10 (faster answers, never cut an answer, the laptop
+test's fixes). Step 11 (the web UI) is merged into `main` (pull request #1, `ec764cc`). Step 10
+is on `claude/friendly-dirac-uzfo1y`, in pull request #2, **not merged yet**: its CI jobs get
+no runner (see "Blocked: needs the owner")._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -531,6 +533,118 @@ sandbox installed and required on every system):
 
 Lint and the package build pass. The push runs of each step-9 commit (Linux) were green too.
 
+### Step 10: faster answers, never cut an answer, the laptop test's fixes
+
+Full description and measurements: **[SPEED.md](./SPEED.md)**. The owner's laptop test (Groq,
+NVIDIA and Google keys, 60 s budget) found: Best mode waiting for the slowest model;
+nemotron-3-super taking 43 s of the 60; "using the best answer so far" followed by "No answer was
+produced within the budget"; "No providers configured" while three providers answered; a
+Gemini 2.5 model "not found"; a count of 99 unconfigured providers; an 846 MB Laya download it
+hadn't asked for; and a temperature warning from Laya.
+
+1. **Faster answers**
+   - The first good answer is shown as soon as its own model finishes (`answer_ready`), even
+     while parallel drafts are still writing. Checks go on in the background. The answer stays
+     unless a check finds a real problem; then the fix replaces it and the page shows what
+     changed (`answer_revised`, a line diff). CLI and web both show it.
+   - Models are picked by **measured speed** (`tempo/speed.py`): a rolling record (last 20
+     calls) of time to first token and tokens a second per model, loaded from the log at
+     start-up. It is blended in seconds per token with the registry's figures (worth one call),
+     so one slow call is enough. Calls stopped at the time limit count too. Fast mode weighs
+     speed most; Auto weighs it by how hard the question is.
+   - Warm-up at server start: Ollama loads the local model that would answer first; Laya runs
+     its first predictions while loading and uses a checkpoint on disk with no network check.
+   - Laya: `TEMPO_LAYA_BACKEND=auto` (new default) times PyTorch and ONNX Runtime fp32 once per
+     checkpoint and machine and keeps the faster. It isn't asked when the rules are sure
+     (logged as "sure"). `doctor` shows the runner, why, and the time per kind of decision.
+   - `tempo-server bench`: seconds to the first token, to the answer being ready, and to every
+     stage done, per mode.
+2. **Know the limits; never cut an answer**
+   - The expected answer length comes from the question. Stages are planned to fit the time
+     budget from measured speed, counting reasoning and continuations (the `plan` event shows
+     the estimates).
+   - A stage starts only with a model that can finish in the time left ("can't finish in the
+     time left"). In Best mode, a draft that would crowd out the check and merge is left out.
+   - When the time is up no new stage starts. An answer already arriving is finished, up to
+     `TEMPO_FINISH_GRACE` (120 s). Parallel drafts that can't change the shown answer are
+     stopped.
+   - With an answer in hand, it is returned with a plain note instead of an error.
+   - `finish_reason` "length": the same model, or the next one, continues it (up to 3 times),
+     and the thinking window says so.
+3. **Header**: `GET /api/status` counts the models ready for the caller, including keys
+   `tempo-server setup` stored in the vault (before, only environment keys counted), and only
+   chat-capable models. The web header, empty chat and CLI use it.
+4. **Models the provider no longer offers**: before routing, each usable provider's model list
+   is read if it wasn't in the last 24 hours (once per run; the question waits at most 6 s, and
+   a list that can't be read never stops the answer). Seeds it lacks are skipped with a note. "Model not found" marks a model as not offered, so no
+   attempt is wasted on it again. Both are saved in `catalog.json`.
+5. **No model yet**: one line everywhere ("No model yet: run `tempo-server setup` to add a free
+   key, or start Ollama.") instead of the list of 99.
+6. **Laya download**:
+   - Nothing is downloaded unless the `laya` extra is installed. Without it, the exact install
+     command is shown (on Linux without a GPU, CPU PyTorch first).
+   - A first download says what and how big (about 846 MB) before it starts, and `doctor` has a
+     Laya line.
+   - The "invalid temperatures ... choice:11+=0.10 -> 0.5" warning is **Laya's**: the stock
+     checkpoint ships a value below Laya's own 0.5 minimum, for a bucket Tempo never uses. Tempo
+     now logs one plain line for that case.
+   - Tempo's own fine-tunes had the same potential bug (fitted 0.1–10): they now fit within
+     0.5–5.
+   - Upstream issue drafted, **not posted**: [upstream/laya-choice-11-temperature.md](./upstream/laya-choice-11-temperature.md).
+7. **Faster CI** (`.github/workflows/ci.yml`): the Playwright browser is cached (keyed on its
+   version; only system libraries are installed on a hit), uv's and pip's downloads are cached
+   in the install job, and every pip cache keys on `pyproject.toml`. A newer push cancels the
+   stale run on branches and pull requests; runs on `main` are kept. **Not yet seen running in
+   CI** (no runner, below).
+
+Also fixed on the way:
+- A history browser test failed in the first 4.8 hours after midnight (it set "yesterday" as
+  now minus 1.2 days).
+- The screenshot fixture no longer deletes other screen sizes.
+- The test suite now fails any HTTP request to a host other than this computer. That caught a
+  browser test reading Groq's real model list with a placeholder key.
+
+**Speed before and after, fake providers** (`scripts/speed_compare.py`: the laptop's timings;
+nemotron 6 s to the first token and 43 s in all, Groq 0.3/1.5 s, Gemini 2.5 "not found"; median
+seconds over 9 questions per mode, on a virtual clock):
+
+| | Complete answer on screen, before → after | Done, before → after | "Not found" attempts |
+|---|---|---|---|
+| Fast | 6.0 → **1.5** | 6.0 → **2.3** | 1 → **0** |
+| Auto | 45.2 → **2.5** | 45.2 → **3.0** | 1 → **0** |
+| Best | 60.0 → **1.5** | 60.0 → **18.5** | 2 → **0** |
+| Best, 30 s budget | **no answer 9 of 9** → 1.5 (9 of 9 answered) | 30.0 → 18.5 | 2 → **0** |
+
+No run went past its budget. The slowest first question in Fast and Auto is still 43 s: nemotron
+looks fast on paper until it has been measured once.
+
+**CI, step 10**: not run. Since 2026-09-29 16:47 UTC every job of every run (pushes and pull
+request #2) ends within seconds without a runner (`runner_id` 0, no steps, no logs); see
+"Blocked: needs the owner". Local results instead: 510 tests pass on Linux (Python 3.11;
+the 50 sandbox tests skip here, as before), lint and format clean. The browser tests (28)
+pass here too.
+
+**Decisions for the owner (step 10)**
+
+1. **CI has no runners** (blocked, below): check the Actions minutes and spending limit, and
+   decide whether to merge pull request #2 before its CI can run. Nothing is merged until then.
+2. **The shown answer stays** unless a check fails it: a draft the judge scores equal or only
+   slightly higher does not replace it, even in Best mode. (Merging parallel drafts still
+   happens when the check fails.) Keep, or let a clearly higher score replace a passing answer?
+3. **`TEMPO_FINISH_GRACE` 120 s**: how long an arriving answer may run past the budget. Lower
+   it if the time budget should be closer to a hard wall.
+4. **Laya `auto` backend**: compares the two fp32 runners only with 12 GB of memory or more
+   (both loaded once). Lower the threshold, or always stay on PyTorch?
+5. **Skip Laya when the rules are sure** (on by default): less shadow data for the cases the
+   rules find easy. Turn off (`TEMPO_LAYA_SKIP_SURE=0`) while collecting Laya training data?
+6. **Model lists** are re-read once a day per provider, before the first question of the day
+   is routed (that question waits up to 6 s for them). Shorter or longer, or read them in the
+   background at server start instead?
+7. **Measured speed**: the registry's figures count as one measured call, and the last 20 calls
+   are kept. A model that was slow once is avoided until measured again (by bench, or when
+   nothing faster fits). Fine, or should an old slow call expire sooner?
+8. **Post the Laya issue?** The draft is ready; nothing was posted.
+
 ### Step 11: the new web UI
 
 Full description: **[WEB_UI.md](./WEB_UI.md)**. Screenshots (phone 390, tablet 820, desktop 1440; light
@@ -574,13 +688,13 @@ Developers, shortcuts, landing page, demo): [`docs/screenshots/`](./screenshots)
   demo replays recordings with the same timeline and still works from a file. `docs/assets/`
   holds copies of the theme and fonts (a test fails when they drift).
 - Tests: 453 pass locally (Linux, Python 3.11; 50 sandbox tests skip here), lint clean.
-  **CI for this step has not been run yet** (no GitHub access from this session at the end).
+  CI on pull request #1 was green on every system (Linux, Windows, macOS; server tests, SDKs,
+  install, browser tests, training dry run) after one Windows fix (a cache rule for font paths
+  with backslashes), and it was merged into `main` (`ec764cc`, 2026-09-29).
 
 **Decisions for the owner (step 11)**
 
-1. **Branch**: the session was told to use `claude/friendly-dirac-uzfo1y`, the task said "work on
-   main". Everything is pushed to the branch; `main` was not touched. Fast-forward `main` to it
-   when you agree (`git push origin claude/friendly-dirac-uzfo1y:main`).
+1. ~~**Branch**~~: settled; step 11 was merged into `main` through pull request #1.
 2. **Mermaid ships EPL code**: Mermaid's single-file build bundles elkjs (EPL-2.0), unmodified.
    It adds 5.5 MB to the package (2.6 MB wheel in total) and loads only when you press Preview
    on a diagram. Keep it, or drop `vendor/mermaid/` and its branch in `js/preview.js`
@@ -623,9 +737,23 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Step 11 is finished (waiting for its CI run and the owner's decisions above).
+- **Pull request #2 (step 10)**: all work is pushed; waiting for CI runners, then CI green on
+  every system, then merge. Nothing else is in progress.
 
 ## Blocked: needs the owner
+
+- **GitHub Actions starts no jobs** (since 2026-09-29 16:47 UTC, still on 2026-09-30 01:19
+  UTC). Every job ends in 3–10 seconds with no runner assigned (`runner_id` 0, no steps, no
+  logs), on Linux, Windows and macOS, for pushes and pull requests, including runs of commits
+  that only changed Python. So it is not the code or the workflow file.
+  - The usual cause is the account's included Actions minutes or its spending limit being used
+    up. This repository ran about 70 CI runs in two days, and macOS minutes count 10×, Windows
+    2×. Check github.com → Settings → Billing and plans (Actions usage, spending limit), and the
+    repository's Settings → Actions.
+  - Pull request #2 waits on it; nothing is merged without green CI.
+  - Ways to use fewer minutes, the owner's choice: macOS and Windows jobs only on `main` and
+    pull requests (not every branch push), or the training dry run only on pull requests
+    (decision 5 of step 9).
 
 - **Publishing**: PyPI (Trusted Publishing to configure on pypi.org), the Docker image (a GitHub
   release), GitHub Pages (Settings → Pages) and the two SDK packages (PyPI and npm) wait for the
@@ -665,6 +793,12 @@ server:
 | Local first and the used-up fallback with a real Ollama | Ollama running | scripted local model |
 | Demo re-recorded with real models | keys | recorded in demo mode |
 | `models compare` judged by real models | any key, or a local judge model | the demo judge (dry run) |
+| `tempo-server bench` with real providers (real speed, not fakes) | keys | fast, slow and failing fake providers; `scripts/speed_compare.py` |
+| Model-list check before routing, and "model not found" marking, on real Groq/Google lists | `GROQ_API_KEY`, `GEMINI_API_KEY` | fake lists (`tests/test_model_lists.py`) |
+| Continuing an answer cut at a real model's output limit | keys | scripted `finish_reason` "length" |
+| Header and `/api/status` with vault keys on a real server | keys stored by `tempo-server setup` | a fake vault key |
+| Ollama warm-up at server start | Ollama running | mocked `/api/generate` |
+| Laya `auto` runner choice on a real machine | the `laya` extra and 12 GB+ memory | fake runners (`tests/test_laya_speed.py`) |
 
 Also blocked, on the owner rather than keys: publishing the Docker image, the PyPI package and
 the GitHub Pages demo (the owner said not to publish yet).
@@ -691,6 +825,9 @@ tempo-server collect --estimate --yes-only && tempo-server collect --yes-only --
 tempo-server export-sft --out sft && tempo-server export-pairs --out pairs && tempo-server export-laya --out laya
 tempo-server serve & python examples/tools_and_json.py   # tools, strict JSON and an image on real models
 tempo-server quota                        # real limits after a few calls
+tempo-server bench                        # real speed per mode: first token, answer ready, done
+tempo-server bench --modes best --time-budget 30   # the laptop case: an answer within 30 s
+tempo-server doctor                       # the Laya line: runner, why, and time per decision
 tempo-server record-demo                  # re-record the public demo with real models, then commit docs/demo/recording.js
 ```
 
@@ -715,6 +852,12 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
 5. Send back both `REPORT.md` files and the compare output: they replace the time estimates.
 
 ## Next
+
+- Once CI has runners: pull request #2 green on every system, then merge it (step 10).
+- Step 10 follow-ups (noted, not started): switch the shown stream to a parallel draft that
+  finishes first when the streaming model is slow (today the first model to send a token keeps
+  the stream); per-provider rate-limit waits in the time estimates; `bench` results in the
+  Usage page.
 
 - The owner's plan: `tempo-server collect --yes-only` on their computer with a local Apache-2.0
   model, then the first exports.
@@ -742,6 +885,8 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
     the runtimes pre-installed.
 
 ## Decisions for the owner
+
+Step 10: see the list at the end of the step 10 section above (CI runners first).
 
 Step 9:
 

@@ -302,7 +302,9 @@ def check_sandbox(engine: Engine) -> Check:
     return Check("Sandbox", "ok", f"Python and JavaScript ready in {box.home}.")
 
 
-LAYA_DOWNLOAD = "about 846 MB, once"  # the stock English checkpoint (tempo/laya_runtime.py)
+# The stock English checkpoint's files (tempo/laya_runtime.py): 846.2 MB by the Hub's file list,
+# https://huggingface.co/api/models/convaiinnovations/laya?blobs=true (checked 2026-09-30).
+LAYA_DOWNLOAD = "about 846 MB, once"
 
 
 def check_laya(engine: Engine) -> Check:

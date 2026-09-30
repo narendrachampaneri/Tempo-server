@@ -74,9 +74,28 @@ records what was measured on 2026-09-28 and why the defaults are what they are.
 5. **Shadow predictions wait for idle time while Laya decides something.** A prediction that
    has started cannot be interrupted, so while a question with taken-over decisions is running,
    background predictions are held and run between questions.
-6. **Backend: PyTorch fp32** (`TEMPO_LAYA_BACKEND=torch`, the default), because INT8 changes
-   answers, including on a fine-tuned checkpoint (next section). ONNX fp32 gives identical
-   answers but is not faster and needs more memory; both ONNX backends remain available.
+6. **Backend: the faster fp32 runner on this machine** (`TEMPO_LAYA_BACKEND=auto`, the default
+   since step 10). PyTorch fp32 serves at once. When ONNX Runtime is installed (the `laya`
+   extra installs it) and the machine has room for both (12 GB of memory or more), the two
+   fp32 runners are timed once between questions, and the faster is kept. The choice is saved
+   per checkpoint and machine in `laya/runner.json` in the data folder, so it is made once.
+   Both give identical answers. On the machine above ONNX fp32 was not faster, so auto keeps
+   PyTorch there; on others it may win. INT8 stays opt-in (`onnx-int8`) because it changes
+   answers, including on a fine-tuned checkpoint (next section). `torch` and `onnx` fix the
+   runner by hand.
+7. **Not asked when the rules are sure** (`TEMPO_LAYA_SKIP_SURE=1`, the default): a clear task
+   type and difficulty, a check score far from the pass mark, or a first-choice model well ahead
+   of the second. Those decisions are logged as "sure", with no Laya call. `0` asks Laya every
+   time (more shadow data, more CPU).
+8. **Warm-up.** The first predictions run while Laya loads, even with a fixed time limit, so the
+   first question doesn't pay for them.
+9. **No surprise download.** The `laya` extra's packages are checked before anything is fetched.
+   Without them, the exact install command is shown instead: on Linux without a GPU, PyTorch's
+   CPU build first, since the default wheel from PyPI brings about 2.5 GB of GPU libraries. A checkpoint
+   already on disk is used with no network check. A first download says what it is and how big
+   (about 846 MB for the English checkpoint) before it starts. `tempo-server doctor` has a Laya
+   line: off, not installed (with the command), not downloaded yet, or the runner in use, why,
+   and the time per kind of decision from the last load (`laya/status.json`).
 
 ## Fine-tuned checkpoint: does INT8 hold up once Laya is trained?
 
@@ -115,6 +134,20 @@ So on an ordinary 4-core CPU:
 
 A faster CPU gets a lower limit automatically. `tempo-server laya status` shows the runtime and threads,
 and the plan line in the thinking window shows the measured limit.
+
+## "invalid temperatures ... choice:11+=0.10 -> 0.5"
+
+Laya's, not Tempo's. The stock English checkpoint's `rl_agent_config.json` ships
+`temperature_by_options["choice:11+"] = 0.1006`, below the 0.5 minimum Laya itself enforces
+(`TEMP_MIN` in [`laya/common.py`](https://github.com/NandhaKishorM/laya/blob/main/laya/common.py),
+checked 2026-09-29; the value is in the checkpoint's
+[`rl_agent_config.json`](https://huggingface.co/convaiinnovations/laya/blob/main/rl_agent_config.json),
+checked 2026-09-30), so Laya warns on every load. The bucket
+is used only for choices with 11 or more options, and Tempo never asks one (its model shortlist
+is capped at 10, and the task-type question has 8). So Tempo logs one plain line instead of the
+warning; any other rejected entry still shows as a warning. Tempo's own fine-tunes now fit
+temperatures within Laya's range `[0.5, 5]` (they allowed 0.1–10 before). A draft upstream
+issue, not posted, is in [upstream/laya-choice-11-temperature.md](./upstream/laya-choice-11-temperature.md).
 
 ## Options not taken, and when to revisit
 

@@ -238,7 +238,8 @@ Other commands:
 | `tempo-server setup [--only groq,gemini]` | The setup wizard: each free provider's key link, limits and terms; checks and stores your keys; shows your free requests a day |
 | `tempo-server sandbox install` / `status` / `run FILE` | The WebAssembly sandbox that runs code answers with their tests and computes maths answers (about 16 MB, once; [docs/SANDBOX.md](docs/SANDBOX.md)) |
 | `tempo-server mcp [--http --port 8001]` | Run as an MCP server for AI assistants: stdio for desktop apps, or HTTP with a Tempo key ([docs/MCP.md](docs/MCP.md)) |
-| `tempo-server doctor [--port N] [--offline]` | Checks Python, the data folder, keys, which providers are reachable, Ollama and the port, with a fix for each problem |
+| `tempo-server doctor [--port N] [--offline]` | Checks Python, the data folder, keys, which providers are reachable, Ollama, Laya (its runner and time per decision, or the exact install command) and the port, with a fix for each problem |
+| `tempo-server bench [--modes auto,fast,best] [-n 3] [--repeat 1] [--json]` | Time a few standard questions per mode: seconds to the first token, to the answer being ready, and to every stage done ([docs/SPEED.md](docs/SPEED.md)) |
 | `tempo-server quota [--json]` | Free requests left today per provider, and when they reset (also on the web page and `GET /api/quota`) |
 | `tempo-server record-demo [--out FILE] [-q QUESTION]` | Record questions for the static demo page ([docs/demo/](docs/demo/index.html)) |
 | `tempo-server models` | Which models are ready, and why the others aren't (no key, quota used up, no longer offered, …) |
@@ -259,7 +260,7 @@ Other commands:
 
 `tempo-server serve`, then open http://127.0.0.1:8000.
 
-- **Ask:** a warm white-and-brown chat (and a dark brown theme that follows your system) with an animated **thinking timeline**: each stage lights up as it runs and every model appears as it is called. Streaming answers with Stop, regenerate, edit and resend, copy, Markdown with tables, maths and highlighted code, sandboxed HTML/SVG/Mermaid previews with download, file and image attachments (drag, drop, paste), voice input and read-aloud when a Groq key allows it, modes (Auto, Fast, Best, Private), a model picker and stage/time settings, keyboard shortcuts (`?` shows them) and friendly errors with the next step. A 👍/👎 under each answer is saved for tuning, and a strip shows the free requests left today per provider.
+- **Ask:** the first good answer is shown as soon as its model finishes, and checking goes on in the background; if a check finds a real problem, the fix replaces it and the page shows what changed. A warm white-and-brown chat (and a dark brown theme that follows your system) with an animated **thinking timeline**: each stage lights up as it runs and every model appears as it is called. Streaming answers with Stop, regenerate, edit and resend, copy, Markdown with tables, maths and highlighted code, sandboxed HTML/SVG/Mermaid previews with download, file and image attachments (drag, drop, paste), voice input and read-aloud when a Groq key allows it, modes (Auto, Fast, Best, Private), a model picker and stage/time settings, keyboard shortcuts (`?` shows them) and friendly errors with the next step. A 👍/👎 under each answer is saved for tuning, and a strip shows the free requests left today per provider.
 - **History:** past chats in the sidebar (Today, Yesterday, Last 7 days, Older), with search, rename, pin, delete and export as Markdown or JSON. Opening one shows it exactly as it was, thinking timeline included, and you can continue it. Chats stay on your computer, in the data folder, and saving them is not consent to train. **Private** mode uses local models only and saves nothing.
 - **Models:** providers and models, ready or not and why, with measured skill scores and health.
 - **Usage:** questions, pass rate, median and p95 time, average stages, free requests used, feedback, the models used, why questions stopped, free quota left today, and how often Laya agrees with the rules. Users see only their own questions.
@@ -307,8 +308,8 @@ question ─▶ understand ─▶ plan ─▶ draft ─▶ check ─┬─ passe
 ```
 
 1. **Understand** ([`analyzer.py`](tempo/analyzer.py), [`embeddings.py`](tempo/embeddings.py)): task, complexity, script, needs and token estimates. Keyword rules come first; an embedding kNN vote overrides them only when the rules aren't sure. Near-identical recent questions are answered from the semantic cache.
-2. **Plan and rank** ([`router.py`](tempo/router.py), [`quota.py`](tempo/quota.py), [`evals.py`](tempo/evals.py)): drop models that can't take the request (no key, not installed, cooling down, free quota used up, no longer offered, context too small, not local in private mode). Score the rest by predicted quality (priors blended with measured and live judge scores), quota scarcity and latency, weighted by mode. Pick a strategy: single, cascade, mixture or decompose.
-3. **Run stages** ([`pipeline.py`](tempo/pipeline.py)): draft, check ([`checks.py`](tempo/checks.py): heuristics, plus a judge from a different model family), then fix, merge or polish until the answer passes. Stop at the first pass, or when the stage, time or free-quota budget runs out. Calls go through [LiteLLM](https://github.com/BerriAI/litellm) with automatic fallback; a rate limit or error cools that model down and moves to the next one.
+2. **Plan and rank** ([`router.py`](tempo/router.py), [`quota.py`](tempo/quota.py), [`evals.py`](tempo/evals.py)): drop models that can't take the request (no key, not installed, cooling down, free quota used up, no longer offered, context too small, not local in private mode). Score the rest by predicted quality (priors blended with measured and live judge scores), quota scarcity and measured speed ([`speed.py`](tempo/speed.py): time to first token and tokens a second, a rolling record per model), weighted by mode. Plan the stages that fit the time budget, and skip any model that can't finish in the time left. Pick a strategy: single, cascade, mixture or decompose.
+3. **Run stages** ([`pipeline.py`](tempo/pipeline.py)): draft, check ([`checks.py`](tempo/checks.py): heuristics, plus a judge from a different model family), then fix, merge or polish until the answer passes. The first good answer is shown as soon as its model finishes; the checks go on in the background and replace it only when they find a real problem. Stop at the first pass, or when the stage, time or free-quota budget runs out: a budget stops new stages, never an answer that is arriving, and an answer cut at a model's output limit is continued. Calls go through [LiteLLM](https://github.com/BerriAI/litellm) with automatic fallback; a rate limit or error cools that model down and moves to the next one.
 4. **Decide fast with Laya** ([`laya_decider.py`](tempo/laya_decider.py)): before stage 1, Laya predicts the task type, difficulty, strategy and stage budget. After each check it scores the answer and says stop or continue, and before each stage it picks a model from a shortlist of at most 10. It starts in **shadow mode**: Laya predicts, the rules decide, and both are logged. If Laya is missing, errors, or takes longer than 200 ms, the rules decide.
 5. **Show and log everything** ([`events.py`](tempo/events.py), [`store.py`](tempo/store.py)): every step is an event with a one-line summary, rendered the same way by the web app, CLI and API. Every question is logged to SQLite (`tempo.db in the data folder`): decisions with Laya's predictions and probabilities, stages, calls, check results, times, quota used, the final answer and feedback.
 
@@ -353,7 +354,8 @@ needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PRO
 | `TEMPO_DATA_DIR` | the system's app-data folder | Where the SQLite log, quota counters, users and the key-vault secret live: `%LOCALAPPDATA%\tempo-server`, `~/Library/Application Support/tempo-server` or `~/.local/share/tempo-server` (`memory` keeps nothing) |
 | `TEMPO_LOG` | `1` | Log every question for tuning |
 | `TEMPO_MAX_STAGES` | `5` | Most stages per question (up to 50) |
-| `TEMPO_TIME_BUDGET` | `60` | Seconds per question |
+| `TEMPO_TIME_BUDGET` | `60` | Seconds per question: no new stage starts after it, and stages are planned to fit it ([docs/SPEED.md](docs/SPEED.md)) |
+| `TEMPO_FINISH_GRACE` | `120` | Extra seconds an answer already arriving may take to finish after the time budget (answers are never cut short) |
 | `TEMPO_QUOTA_BUDGET` | `12` | Free provider requests per question (local models are free) |
 | `TEMPO_MAX_PARALLEL` | `3` | Models per parallel stage |
 | `TEMPO_JUDGE` | `1` | Use a judge model in the check stage |
@@ -362,7 +364,8 @@ needs (for example `CLOUDFLARE_ACCOUNT_ID`, `OLLAMA_API_BASE`, `TEMPO_ENABLE_PRO
 | `TEMPO_LAYA_TAKEOVER` | all `shadow` | Per decision: `shadow`, `laya` or `auto`, e.g. `should_stop=auto, task_type=laya` or `all=auto` |
 | `TEMPO_LAYA_TIMEOUT_MS` | `auto` | How long an answer waits for a taken-over decision; `auto` measures it on this machine at load |
 | `TEMPO_LAYA_MIN_CONFIDENCE` | `0.6` | Below this, the rules decide even after a takeover |
-| `TEMPO_LAYA_BACKEND` | `torch` | `torch` (fp32), `onnx` (fp32, same answers) or `onnx-int8` (faster, but changes answers) |
+| `TEMPO_LAYA_BACKEND` | `auto` | `auto` (times PyTorch and ONNX Runtime fp32 once on this machine and keeps the faster; same answers), `torch`, `onnx`, or `onnx-int8` (faster, but changes answers) |
+| `TEMPO_LAYA_SKIP_SURE` | `1` | Don't ask Laya when the rules are sure (`0` asks it every time) |
 | `TEMPO_LAYA_CHECKPOINT` | `english` | Stock checkpoint: `english` or `multilingual` (2.6× faster, a different model) |
 | `TEMPO_LAYA_THREADS` | up to 4 | CPU threads for Laya |
 | `TEMPO_EMBEDDINGS` | `auto` | `off` uses keyword rules only (and turns off the semantic cache) |
@@ -403,6 +406,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - [CLAUDE.md](CLAUDE.md): the owner's rules every working session follows (software only, free only, live model lists, keys, provider terms, training data).
 - [docs/STATUS.md](docs/STATUS.md): what is done, in progress, blocked and next, and what to run once provider keys exist.
+- [docs/SPEED.md](docs/SPEED.md): fast answers within the time budget: measured speed, planning, never cutting an answer, `tempo-server bench`, and before/after numbers with fake providers.
 - [docs/SANDBOX.md](docs/SANDBOX.md): how code and maths answers are checked by running them in WebAssembly, and the sandbox's limits.
 - [docs/MCP.md](docs/MCP.md): Tempo-server as an MCP server for Claude Desktop, Claude Code, Cursor and VS Code; the tools.
 - [sdk/python](sdk/python/README.md) and [sdk/js](sdk/js/README.md): the Python and JavaScript/TypeScript SDKs.
