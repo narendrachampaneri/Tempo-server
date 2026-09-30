@@ -8,6 +8,7 @@ docs/screenshots when TEMPO_SCREENSHOTS=1, else to a temporary folder.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
@@ -424,18 +425,21 @@ def test_history_group_search_rename_pin_export_delete_and_continue(page, site):
     page.click("#new-chat")
     ask(page, "Plan a trip to Jaipur")
     expect(page.locator("#history .chat-item")).to_have_count(2)
-    # move one chat back in time: groups are Today, Yesterday, Last 7 days and Older
+    # move one chat back in time: groups are Today, Yesterday, Last 7 days and Older, by the
+    # local calendar day (so the times are set from local midnight, not from now: "now - 1.2
+    # days" is the day before yesterday shortly after midnight)
     now = time.time()
+    midnight = dt.datetime.combine(dt.date.today(), dt.time.min).timestamp()
     rows = site.engine.store.query("SELECT id, title FROM chats ORDER BY title")
     site.engine.store.execute(
-        "UPDATE chats SET updated_at=? WHERE id=?", (now - 86400 * 1.2, rows[0]["id"])
+        "UPDATE chats SET updated_at=? WHERE id=?", (midnight - 12 * 3600, rows[0]["id"])
     )
     page.reload()
     expect(page.locator("#history .group-title")).to_have_count(2)
     titles = page.locator("#history .group-title").all_inner_texts()
     assert [t.lower() for t in titles] == ["today", "yesterday"]
     site.engine.store.execute(
-        "UPDATE chats SET updated_at=? WHERE id=?", (now - 86400 * 3, rows[0]["id"])
+        "UPDATE chats SET updated_at=? WHERE id=?", (midnight - 86400 * 2.5, rows[0]["id"])
     )
     page.reload()
     expect(page.locator("#history .group-title")).to_have_count(2)
