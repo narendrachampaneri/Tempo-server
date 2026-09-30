@@ -66,6 +66,16 @@ Before going public:
 - [x] Scan the full history once, not just the current files: done 2026-09-29 with gitleaks
       8.28.0 over all 57 commits and a pattern search for every provider's key format; nothing
       found (details in STATUS.md). Rotate any key if a later scan ever finds one.
+- [x] Scan again just before switching to public: done 2026-09-30 over every commit on every
+      branch (106 after step 11); no keys (details in STATUS.md, "Pre-public check").
+- [ ] **owner**: the merge commit of pull request #1 (`ec764cc`, on `main`) was made in GitHub's
+      web page and carries the owner's personal email as its author. Once public, anyone can
+      read it. Either accept that, or rewrite `main` before switching (changes every later
+      commit id). Either way, turn on GitHub → Settings → Emails → "Keep my email addresses
+      private" so later web merges use the `noreply` address.
+- [ ] Turn on private vulnerability reporting (Settings → Code security): SECURITY.md sends
+      reporters to that button.
+- [ ] Switch: Settings → General → Danger Zone → Change visibility → Make public.
 - [ ] Keep the rule in CONTRIBUTING.md: no real keys in code, tests, issues or logs.
 
 ## 3. The `tempo-server terms` table in the README

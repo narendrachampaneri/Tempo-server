@@ -1,9 +1,9 @@
 # Status
 
-_Last updated 2026-09-30, at the end of step 10 (faster answers, never cut an answer, the laptop
-test's fixes). Step 11 (the web UI) is merged into `main` (pull request #1, `ec764cc`). Step 10
-is on `claude/friendly-dirac-uzfo1y`, in pull request #2, **not merged yet**: its CI jobs get
-no runner (see "Blocked: needs the owner")._
+_Last updated 2026-09-30. Steps 10 (pull request #2) and 11 (pull request #1) are both on
+`main`, followed by the pre-public check (below step 11); every other branch was deleted at the
+owner's request. GitHub Actions still starts no jobs (see "Blocked: needs the owner"), so step
+10 was validated locally before it went to `main` ("Merged to `main`" below step 11)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -707,6 +707,45 @@ Developers, shortcuts, landing page, demo): [`docs/screenshots/`](./screenshots)
 5. **PDF attachments** are refused with a clear message (no PDF reader bundled yet).
 6. **Chat size**: a saved chat is limited to 12 MB (images are shrunk to 1280 px first).
 
+### Pre-public check (2026-09-30)
+
+The owner asked to make the repository public. A session can't change a repository's
+visibility, so this is the check before the owner switches it (PUBLISHING.md §2 has the steps).
+
+- **No keys or secrets** in any commit on any branch (`main`, `claude/friendly-dirac-uzfo1y`,
+  `claude/great-cerf-73arjx`; 106 commits, full clone):
+  - gitleaks 8.28.0 (`git --log-opts=--all`, 105 commits with changes, ~8.2 MB) and `dir` on the
+    working tree: one finding, a false positive (`generic-api-key` on `g.keyCount` in the
+    vendored `tempo/web/vendor/mermaid/mermaid.min.js`).
+  - The provider key-format pass from 2026-09-29, over every added line in every commit, plus
+    Anthropic, JWT and Kaggle formats: nothing. Non-empty `*_API_KEY` / `*_TOKEN` /
+    `*_ACCOUNT_ID` assignments: only test values (`OPENAI_API_KEY=local`, a six-character test
+    account id).
+  - No `.env`, key file, database or credentials file was ever committed (only `.env.example`).
+- **One personal email**: every commit is by `Claude <noreply@anthropic.com>` except the merge
+  commit of pull request #1 (`ec764cc`, on `main`), made in GitHub's web page, whose author is
+  the owner's personal email address. The 2026-09-29 line "the owner's email appears nowhere" was
+  true before that merge. Decision for the owner below.
+- **Screenshots** (`docs/screenshots/`) show demo mode only (providers "Alpha" and "Beta", no
+  fingerprints). `tempo/data/*.yaml` are hand-written probe and example questions, not
+  training rows. No training data is committed.
+- **Workflows are safe for forks**: no `pull_request_target` or `workflow_run`, `contents: read`
+  by default, publishing only on releases and manual runs. Once public, Windows and macOS CI
+  also run on every push to `main` (step 6 decision; switches on by itself).
+- Licence (Apache-2.0), NOTICE, `tempo/web/LICENSES.md`, CONTRIBUTING.md and SECURITY.md are in
+  place.
+- Tests and lint on `main` (`ec764cc`, fresh venv, Python 3.11): 423 passed, 51 skipped; ruff
+  check and format clean.
+
+**Decisions for the owner (pre-public)**
+
+1. **The email in `ec764cc`**: accept it (it becomes public), or rewrite `main` so that commit
+   uses the `noreply` address before switching. A rewrite changes every later commit id and
+   needs a force push to `main`, so it wasn't done. Either way, turn on "Keep my email
+   addresses private" (GitHub → Settings → Emails).
+2. **Branches**: every branch becomes public too. `claude/great-cerf-73arjx` is fully merged
+   into `main` and can be deleted; `claude/friendly-dirac-uzfo1y` has 17 unmerged commits.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -742,6 +781,10 @@ Sante (OpenRouter, health).
 
 ## Blocked: needs the owner
 
+- **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
+  above). The owner decides about the email in `ec764cc`, turns on secret scanning, push
+  protection and private vulnerability reporting, then switches the repository to public
+  (PUBLISHING.md §2).
 - **GitHub Actions starts no jobs** (since 2026-09-29 16:47 UTC, still on 2026-09-30 01:19
   UTC). Every job ends in 3–10 seconds with no runner assigned (`runner_id` 0, no steps, no
   logs), on Linux, Windows and macOS, for pushes and pull requests, including runs of commits
