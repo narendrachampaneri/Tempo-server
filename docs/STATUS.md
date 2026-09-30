@@ -810,8 +810,8 @@ The owner asked for `main` as the only branch, one clear workflow, and a check o
   `sdk/js/` (each package ships its own), `docs/upstream/` (a draft issue the owner hasn't
   decided on) and `docs/examples/collect-workflow.yml` (a workflow to copy, deliberately
   inactive). No untracked or scratch files are in the repository.
-- **Merged without CI** (text files only, as the owner allowed for today): CLAUDE.md,
-  CONTRIBUTING.md, ARCHITECTURE.md, this file, and the removed PR text. Tests and lint pass
+- **Merged without CI** (text files only, as the owner allowed for today), pull request #3:
+  CLAUDE.md, CONTRIBUTING.md, ARCHITECTURE.md, this file, and the removed PR text. Tests and lint pass
   locally. Code changes wait for CI.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
@@ -851,7 +851,7 @@ Nothing. Everything is on `main`; the full CI run on `main` waits for 1 October 
 - **Delete the branches other than `main`** (the owner's request, 2026-09-30); the session's
   delete is refused (HTTP 403). None holds anything that isn't on `main` ("Repo tidy and one
   workflow"): `claude/friendly-dirac-uzfo1y`, `claude/great-cerf-73arjx`,
-  `claude/happy-wozniak-ibsb6c`, and `claude/zealous-heisenberg-g1cf37` once its pull request is
+  `claude/happy-wozniak-ibsb6c`, and `claude/zealous-heisenberg-g1cf37` once pull request #3 is
   merged. Delete them at github.com/narendrachampaneri/Tempo-server/branches. To make this
   automatic: Settings → General → "Automatically delete head branches".
 - **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
