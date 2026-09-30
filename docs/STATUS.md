@@ -1,8 +1,8 @@
 # Status
 
 _Last updated 2026-09-30. Steps 10 (pull request #2) and 11 (pull request #1) are both on
-`main`, followed by the pre-public check (below step 11); every other branch was deleted at the
-owner's request. GitHub Actions still starts no jobs (see "Blocked: needs the owner"), so step
+`main`, followed by the pre-public check (below step 11). The other branches are fully contained
+in `main` and wait for the owner to delete them. GitHub Actions still starts no jobs (see "Blocked: needs the owner"), so step
 10 was validated locally before it went to `main` ("Merged to `main`" below step 11)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
@@ -745,8 +745,8 @@ visibility, so this is the check before the owner switches it (PUBLISHING.md §2
    uses the `noreply` address before switching. A rewrite changes every later commit id and
    needs a force push to `main`, so it wasn't done. Either way, turn on "Keep my email
    addresses private" (GitHub → Settings → Emails).
-2. **Branches**: done. Everything is on `main` and the other branches were deleted at the
-   owner's request ("Merged to `main`" below).
+2. **Branches**: everything is on `main`. The other three branches are safe to delete, and the
+   owner deletes them (a session can't; "Merged to `main`" below).
 
 ### Merged to `main` (2026-09-30)
 
@@ -770,8 +770,11 @@ The owner asked to keep everything on `main`, validate it, and delete the other 
     didn't change `install.sh`, `install.ps1`, the SDKs or the sandbox).
   - Playwright was pinned to 1.56.0 in the local venv only, to match this machine's Chromium
     (build 1194); the project's `playwright>=1.50` is unchanged.
-- Deleted branches: `claude/friendly-dirac-uzfo1y`, `claude/great-cerf-73arjx`,
-  `claude/happy-wozniak-ibsb6c` (each checked to be contained in `main` first).
+- **Branches to delete** (owner): `claude/friendly-dirac-uzfo1y` and `claude/great-cerf-73arjx`
+  are ancestors of `main`; every line of `claude/happy-wozniak-ibsb6c` is on `main` (its one
+  commit was re-applied as `dc6a047`). GitHub shows pull request #2 as merged. The session's
+  `git push --delete` was refused (HTTP 403, the environment's policy), so delete them at
+  github.com/narendrachampaneri/Tempo-server/branches.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -808,6 +811,8 @@ again.
 
 ## Blocked: needs the owner
 
+- **Delete the three merged branches** (the owner's request, 2026-09-30): the session can't
+  delete branches; see "Merged to `main`".
 - **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
   above). The owner decides about the email in `ec764cc`, turns on secret scanning, push
   protection and private vulnerability reporting, then switches the repository to public
