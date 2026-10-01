@@ -1,11 +1,9 @@
 # Status
 
-_Last updated 2026-09-30. Everything is on `main` (steps 10 and 11, the pre-public check, and
-the repo tidy below step 11). One workflow from now on: one step = one branch = one pull request
-into `main`, merged when CI is green on Linux, Windows and macOS (CLAUDE.md rules 11–14). The
-other branches hold nothing that isn't on `main` and wait for the owner to delete them. GitHub
-Actions starts no jobs until the Actions minutes reset on 1 October; then the full CI runs on
-`main` ("Next")._
+_Last updated 2026-10-01. Everything is on `main`, and `main` is the only branch. The full CI
+on `main` passed on 2026-10-01: all 20 jobs green on Linux, Windows and macOS ("CI on `main`"
+below step 11). One workflow: one step = one branch = one pull request into `main`, merged when
+CI is green on all three systems (CLAUDE.md rules 11–14)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
 
@@ -813,6 +811,24 @@ The owner asked for `main` as the only branch, one clear workflow, and a check o
 - **Merged without CI** (text files only, as the owner allowed for today), pull request #3:
   CLAUDE.md, CONTRIBUTING.md, ARCHITECTURE.md, this file, and the removed PR text. Tests and lint pass
   locally. Code changes wait for CI.
+- **Branches**: the owner deleted every branch but `main` on GitHub on 2026-09-30.
+
+### CI on `main` (2026-10-01)
+
+The Actions minutes reset on 1 October, and the full CI ran on `main` (`8ac4046`, a manual run:
+github.com/narendrachampaneri/Tempo-server/actions/runs/36799054522). **All 20 jobs passed**,
+including step 10's first run on GitHub. No fix was needed.
+
+| System | Jobs (all passed) |
+|---|---|
+| Linux | lint; tests on Python 3.11, 3.12, 3.13, 3.14; web-e2e (browser tests); train-dry-run; package; install; SDKs (Node 20 and 22) |
+| Windows | tests on Python 3.11, 3.12, 3.13, 3.14; install; SDKs |
+| macOS | tests (Python 3.13); install; SDKs |
+
+- **Email in merge commits**: the merge commit of pull request #3 (`8ac4046`) is authored with
+  the owner's personal email, like `ec764cc`. Every merge made on GitHub does this until the
+  owner turns on "Keep my email addresses private" (GitHub → Settings → Emails); see decision 1
+  of the pre-public check.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -844,22 +860,20 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Everything is on `main`; the full CI run on `main` waits for 1 October ("Next").
+Nothing. Everything is on `main`, and its full CI is green ("CI on `main`").
 
 ## Blocked: needs the owner
 
-- **Delete the branches other than `main`** (the owner's request, 2026-09-30); the session's
-  delete is refused (HTTP 403). None holds anything that isn't on `main` ("Repo tidy and one
-  workflow"): `claude/friendly-dirac-uzfo1y`, `claude/great-cerf-73arjx`,
-  `claude/happy-wozniak-ibsb6c`, and `claude/zealous-heisenberg-g1cf37` once pull request #3 is
-  merged. Delete them at github.com/narendrachampaneri/Tempo-server/branches. To make this
-  automatic: Settings → General → "Automatically delete head branches".
+- **Delete this pull request's branch** (`claude/zealous-heisenberg-g1cf37`) once it is
+  merged; the session's delete is refused (HTTP 403). To make this automatic: Settings →
+  General → "Automatically delete head branches".
 - **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
   above). The owner decides about the email in `ec764cc`, turns on secret scanning, push
   protection and private vulnerability reporting, then switches the repository to public
   (PUBLISHING.md §2).
-- **GitHub Actions starts no jobs** (since 2026-09-29 16:47 UTC, still on 2026-09-30 01:19
-  UTC). Every job ends in 3–10 seconds with no runner assigned (`runner_id` 0, no steps, no
+- ~~**GitHub Actions starts no jobs**~~: settled on 2026-10-01, when the Actions minutes reset
+  and the full CI on `main` passed. The notes below stay for next time (since 2026-09-29 16:47
+  UTC, still on 2026-09-30 01:19 UTC). Every job ends in 3–10 seconds with no runner assigned (`runner_id` 0, no steps, no
   logs), on Linux, Windows and macOS, for pushes and pull requests, including runs of commits
   that only changed Python. So it is not the code or the workflow file.
   - The usual cause is the account's included Actions minutes or its spending limit being used
@@ -974,10 +988,6 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
 
 ## Next
 
-- **1 October (the Actions minutes reset)**: the full CI on `main` (Actions → CI → Run workflow
-  on `main`: every job on Linux, Windows and macOS). Step 10 has never run on GitHub (it was
-  checked locally, on Linux only; "Merged to `main`"). Fix anything that fails, each fix in its
-  own branch and pull request, merged once its CI is green on all three systems.
 - Step 10 follow-ups (noted, not started): switch the shown stream to a parallel draft that
   finishes first when the streaming model is slow (today the first model to send a token keeps
   the stream); per-provider rate-limit waits in the time estimates; `bench` results in the
