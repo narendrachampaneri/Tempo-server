@@ -17,6 +17,9 @@ import pytest
 from tempo.sandbox import RUNTIMES, Limits, Sandbox, SandboxUnavailable, sandbox_home
 
 LIMITS = Limits(timeout_s=3, memory_mb=128, output_kb=16, disk_mb=4)
+# For tests that expect an error, not a stop: printing a traceback takes most of a second, and a
+# slow CI runner (macOS, 2026-10-09) took over 3 s, which turned "no processes" into a time stop.
+ROOMY = Limits(timeout_s=30, memory_mb=128, output_kb=16, disk_mb=4)
 
 
 @pytest.fixture(scope="module")
@@ -39,9 +42,13 @@ def js(sandbox, code, **kw):
 
 
 def test_runs_python_and_javascript(sandbox):
-    r = py(sandbox, "import json, math, fractions\nprint(json.dumps({'x': math.sqrt(16)}))")
+    r = py(
+        sandbox,
+        "import json, math, fractions\nprint(json.dumps({'x': math.sqrt(16)}))",
+        limits=ROOMY,
+    )
     assert r.ok and r.stdout.strip() == '{"x": 4.0}' and r.stopped is None
-    r = js(sandbox, "console.log([1,2,3].map(x => x * 2).join(','))")
+    r = js(sandbox, "console.log([1,2,3].map(x => x * 2).join(','))", limits=ROOMY)
     assert r.ok and r.stdout.strip() == "2,4,6"
 
 
@@ -105,6 +112,7 @@ def test_files_outside_its_folder_cannot_be_read(sandbox, path):
     r = py(
         sandbox,
         f"import os\np = {path!r}\nprint(open(p).read() if os.path.isfile(p) else os.listdir(p))",
+        limits=ROOMY,
     )
     assert not r.ok
     assert any(
@@ -115,14 +123,14 @@ def test_files_outside_its_folder_cannot_be_read(sandbox, path):
 def test_the_hosts_real_files_are_invisible(sandbox, tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("TOP SECRET", encoding="utf-8")
-    r = py(sandbox, f"print(open({str(secret)!r}).read())")
+    r = py(sandbox, f"print(open({str(secret)!r}).read())", limits=ROOMY)
     assert not r.ok and "TOP SECRET" not in r.stdout + r.stderr
-    r = js(sandbox, "console.log(typeof std, typeof os, typeof require)")
+    r = js(sandbox, "console.log(typeof std, typeof os, typeof require)", limits=ROOMY)
     assert r.stdout.strip() == "undefined undefined undefined"
 
 
 def test_the_standard_library_is_read_only(sandbox):
-    r = py(sandbox, "open('/lib/python3.14/os.py', 'a').write('# changed')")
+    r = py(sandbox, "open('/lib/python3.14/os.py', 'a').write('# changed')", limits=ROOMY)
     assert not r.ok and "PermissionError" in r.stderr
 
 
@@ -135,7 +143,7 @@ def test_the_standard_library_is_read_only(sandbox):
     ],
 )
 def test_no_network(sandbox, code):
-    r = py(sandbox, code)
+    r = py(sandbox, code, limits=ROOMY)
     assert not r.ok and r.stopped is None
     assert any(
         e in r.stderr
@@ -153,7 +161,7 @@ def test_no_network(sandbox, code):
     ],
 )
 def test_no_processes(sandbox, code):
-    r = py(sandbox, code)
+    r = py(sandbox, code, limits=ROOMY)
     assert not r.ok and r.stopped is None
     assert any(e in r.stderr for e in ("does not support processes", "AttributeError", "OSError"))
 
@@ -161,7 +169,7 @@ def test_no_processes(sandbox, code):
 def test_no_host_environment_variables(sandbox):
     os.environ["TEMPO_TEST_SECRET"] = "placeholder-secret"
     try:
-        r = py(sandbox, "import os\nprint(sorted(os.environ))")
+        r = py(sandbox, "import os\nprint(sorted(os.environ))", limits=ROOMY)
     finally:
         del os.environ["TEMPO_TEST_SECRET"]
     assert r.ok and "TEMPO_TEST_SECRET" not in r.stdout and "PATH" not in r.stdout
