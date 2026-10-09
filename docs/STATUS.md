@@ -892,6 +892,13 @@ at that commit; `git fsck` finds no unreachable objects):
   (`ROOMY`); the time-limit tests keep 3 s. Reproduced with the old test under a 0.5 s limit
   (7 failed, same signature); the new tests pass under it, and the whole file passes with the
   real limits (31 passed). The sandbox itself is unchanged.
+- **CI fix: the Laya compare test waits for shadow predictions.** On the next commit
+  `test-windows (3.13)` failed `test_compare_scores_laya_and_rules_on_held_out_rows`
+  (`should_stop` n=0). In shadow mode Laya's predictions run in the background and reach the log
+  when they finish, and `compare` counts only finished ones; the test's `logged_engine()` didn't
+  wait for them (`engine.laya.drain()`, which other tests and `tempo-server collect` use).
+  Reproduced with a fake Laya that takes 0.3 s per prediction (same failure); with the drain the
+  whole file passes under it. Only the test changed.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -924,7 +931,7 @@ Sante (OpenRouter, health).
 ## In progress
 
 Nothing. The pre-public changes are on `main` (pull request #5, merged with CI green on Linux,
-Windows and macOS on `fd23234`, the training dry run included). Going public waits for the owner
+Windows and macOS, the training dry run included). Going public waits for the owner
 ("Blocked: needs the owner").
 
 ## Blocked: needs the owner
