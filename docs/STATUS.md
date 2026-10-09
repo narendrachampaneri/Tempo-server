@@ -1,8 +1,9 @@
 # Status
 
-_Last updated 2026-10-01. Everything is on `main`, and `main` is the only branch. The full CI
-on `main` passed on 2026-10-01: all 20 jobs green on Linux, Windows and macOS ("CI on `main`"
-below step 11). One workflow: one step = one branch = one pull request into `main`, merged when
+_Last updated 2026-10-09. Everything is on `main`. The full CI on `main` passed on 2026-10-01:
+all 20 jobs green on Linux, Windows and macOS ("CI on `main`" below step 11). The repository is
+ready to go public; the switch and a few GitHub settings are the owner's ("Pre-public re-check
+(2026-10-09)"). One workflow: one step = one branch = one pull request into `main`, merged when
 CI is green on all three systems (CLAUDE.md rules 11–14)._
 
 Read [CLAUDE.md](../CLAUDE.md) first: it has the rules every session follows.
@@ -830,6 +831,49 @@ including step 10's first run on GitHub. No fix was needed.
   owner turns on "Keep my email addresses private" (GitHub → Settings → Emails); see decision 1
   of the pre-public check.
 
+### Pre-public re-check (2026-10-09)
+
+The owner asked for one more deep check, then every change a session can make, before they make
+the repository public themselves (a session can't change visibility: the GitHub tools have no
+such call, and this environment's `gh` token is not valid).
+
+**Checked** (`main` at `266c9c5`, 59 commits; the refs are `main` and this step's branch, both
+at that commit; `git fsck` finds no unreachable objects):
+
+- **No keys or secrets**: every added line in every commit searched for Anthropic, OpenAI, AWS,
+  GitHub, Slack, NVIDIA, Groq, Cerebras, Google, Hugging Face and OpenRouter key formats, JWTs,
+  private-key blocks, hard-coded passwords and bearer tokens: nothing. Only `.env.example` (empty
+  values) matches a secret-like file name. gitleaks wasn't installed here; its 2026-09-30 run
+  stands, and nothing but text files changed since.
+- **Large files**: only the vendored `mermaid.min.js` (5.5 MB); `.git` is 14 MB.
+- **Licences**: Apache-2.0, NOTICE, and `tempo/web/LICENSES.md` for the fonts (OFL), KaTeX and
+  Mermaid (MIT; elkjs inside is EPL-2.0, decision 2 of step 11).
+- **Workflows**: no `pull_request_target` or `workflow_run`, `contents: read` by default, only
+  `GITHUB_TOKEN`; PyPI and SDK publishing need named environments. CI switches Windows and
+  macOS on for pushes to `main` by itself once the repository is public.
+- **No personal paths or private hostnames** in the code or docs (only `localhost` and
+  `host.docker.internal` in setup examples). The links in `pyproject.toml`, the README and the
+  installers name `narendrachampaneri/Tempo-server`, the real repository.
+- **Email**: three merge commits on `main` (`ec764cc`, `8ac4046`, `266c9c5`), made on GitHub,
+  carry the owner's personal email; every other commit is by `noreply@anthropic.com`. A merge
+  made on GitHub (this step's included) adds another until "Keep my email addresses private" is
+  on. Not rewritten: that needs a force push to `main` (CLAUDE.md rule 12), so it stays the
+  owner's call.
+
+**Changed** (this step's pull request):
+
+- Community files GitHub looks for: `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1, the
+  official text; reports go to the maintainer through the private reporting form, so no email
+  is published), issue forms (`.github/ISSUE_TEMPLATE/`: bug report, idea, and a link to the
+  private security form; the bug form warns against pasting keys), a pull request checklist
+  (`.github/pull_request_template.md`), and `.github/dependabot.yml` (workflow actions only,
+  monthly, one grouped pull request; it will handle the Node 20 warning in "Next").
+- README: badges (CI, licence, Python 3.11–3.14, systems); the status note no longer says the
+  MCP server and SDKs "come next" (done in step 7) and lists steps 8–11.
+- SECURITY.md: the code sandbox is in scope as built (it said "once built").
+- CONTRIBUTING.md links the code of conduct and the forms.
+- PUBLISHING.md §2: this scan, and the owner's steps to go public, in order.
+
 ## Live catalog on 2026-09-28 (public data, no keys)
 
 | Provider | Listed | Chat-capable | Other types | Health |
@@ -860,17 +904,21 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-Nothing. Everything is on `main`, and its full CI is green ("CI on `main`").
+The pre-public changes (pull request from `claude/inspiring-cerf-i7zxam`), merged once CI is
+green on all three systems.
 
 ## Blocked: needs the owner
 
-- **Delete this pull request's branch** (`claude/zealous-heisenberg-g1cf37`) once it is
-  merged; the session's delete is refused (HTTP 403). To make this automatic: Settings →
+- **Delete this pull request's branch** (`claude/inspiring-cerf-i7zxam`) once it is merged, if
+  the session's delete is refused (HTTP 403 so far). To make this automatic: Settings →
   General → "Automatically delete head branches".
-- **Going public** (the owner's request, 2026-09-30): the check is done ("Pre-public check"
-  above). The owner decides about the email in `ec764cc`, turns on secret scanning, push
-  protection and private vulnerability reporting, then switches the repository to public
-  (PUBLISHING.md §2).
+- **Going public** (the owner's request, 2026-09-30 and 2026-10-09): checked twice ("Pre-public
+  check" and "Pre-public re-check (2026-10-09)"); nothing in the repository blocks it. The
+  owner's steps, in order, are in PUBLISHING.md §2 ("Going public: the owner's steps"): the
+  email setting (and the decision about the merge commits' email), auto-delete branches, code
+  security (private vulnerability reporting, Dependabot alerts, secret scanning, push
+  protection), a ruleset protecting `main`, the switch, the About box and topics, and a check
+  that CI and the installers work.
 - ~~**GitHub Actions starts no jobs**~~: settled on 2026-10-01, when the Actions minutes reset
   and the full CI on `main` passed. The notes below stay for next time (since 2026-09-29 16:47
   UTC, still on 2026-09-30 01:19 UTC). Every job ends in 3–10 seconds with no runner assigned (`runner_id` 0, no steps, no
@@ -1019,6 +1067,17 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
     the runtimes pre-installed.
 
 ## Decisions for the owner
+
+Going public (2026-10-09):
+
+1. **The email in the merge commits** (`ec764cc`, `8ac4046`, `266c9c5`, and this step's merge
+   if the setting isn't on yet): accept it, or have a session rewrite `main` before the switch
+   (a force push that changes every later commit id). After the switch, a rewrite can't take it
+   back from forks and caches.
+2. **Conduct reports** go through the private reporting form. Add a dedicated email address to
+   CODE_OF_CONDUCT.md if you'd rather.
+3. **Dependabot** opens at most one grouped pull request a month for the workflow actions. Keep,
+   or delete `.github/dependabot.yml`.
 
 Step 10: see the list at the end of the step 10 section above (CI runners first).
 
