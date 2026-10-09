@@ -78,7 +78,7 @@ LLAMA_CPP = {
 CORE_PACKAGES = [
     "transformers>=5,<6",
     "peft>=0.17",
-    "trl>=1.0,<2",
+    "trl>=1.0,<1.15",  # the version the CPU dry run tests (pyproject.toml, `train` extra)
     "datasets>=3",
     "accelerate>=1.0",
     "sentencepiece",

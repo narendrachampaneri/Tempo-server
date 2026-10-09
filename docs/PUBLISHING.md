@@ -68,15 +68,50 @@ Before going public:
       found (details in STATUS.md). Rotate any key if a later scan ever finds one.
 - [x] Scan again just before switching to public: done 2026-09-30 over every commit on every
       branch (106 after step 11); no keys (details in STATUS.md, "Pre-public check").
-- [ ] **owner**: the merge commit of pull request #1 (`ec764cc`, on `main`) was made in GitHub's
-      web page and carries the owner's personal email as its author. Once public, anyone can
-      read it. Either accept that, or rewrite `main` before switching (changes every later
-      commit id). Either way, turn on GitHub → Settings → Emails → "Keep my email addresses
-      private" so later web merges use the `noreply` address.
-- [ ] Turn on private vulnerability reporting (Settings → Code security): SECURITY.md sends
-      reporters to that button.
+- [x] Scan once more on 2026-10-09 (`main` after the tidy, 59 commits, every ref, no unreachable
+      objects): key formats for Anthropic, OpenAI, AWS, GitHub, Slack, NVIDIA, Groq, Cerebras,
+      Google, Hugging Face and OpenRouter, JWTs, private-key blocks, hard-coded passwords and
+      bearer tokens over every added line: nothing (details in STATUS.md, "Pre-public re-check").
+- [ ] **owner**: the merge commits made on GitHub (`ec764cc`, `8ac4046`, `266c9c5` and every
+      later one until the setting below is on) carry the owner's personal email as their
+      author. Once public, anyone can read it. Either accept that, or rewrite `main` before
+      switching (changes every later commit id and needs a force push). Either way, turn on
+      GitHub → Settings → Emails → "Keep my email addresses private" so later merges use the
+      `noreply` address.
+- [ ] Turn on private vulnerability reporting (Settings → Code security): SECURITY.md and
+      CODE_OF_CONDUCT.md send reporters to that button.
 - [ ] Switch: Settings → General → Danger Zone → Change visibility → Make public.
-- [ ] Keep the rule in CONTRIBUTING.md: no real keys in code, tests, issues or logs.
+- [x] Keep the rule in CONTRIBUTING.md: no real keys in code, tests, issues or logs (the bug
+      report form says it too).
+
+### Going public: the owner's steps, in order
+
+Nothing in the repository blocks the switch; these are GitHub settings a session can't change.
+
+1. **Email** (github.com → your profile → Settings → Emails): "Keep my email addresses private"
+   and "Block command line pushes that expose my email". Decide about the commits above first.
+2. **Branches** (repository → Settings → General): "Automatically delete head branches" on, and
+   delete any branch except `main` (repository → Branches).
+3. **Code security** (repository → Settings → Code security): private vulnerability reporting,
+   Dependabot alerts, secret scanning and push protection on (the last two are free for public
+   repositories; turn them on right after the switch if they aren't offered before it).
+4. **Protect `main`** (repository → Settings → Rules → Rulesets → New branch ruleset, target the
+   default branch): require a pull request, require status checks (the CI jobs, once they have
+   run on a pull request), block force pushes and deletions. This makes CLAUDE.md rule 12 hold
+   for everyone, not just sessions.
+5. **Switch**: Settings → General → Danger Zone → Change visibility → Make public.
+6. **About box** (the gear next to "About" on the repository page): the description "Open models
+   plus the system that runs and trains them: routes each question to the best free or open
+   model, checks the answer, runs on CPU." and topics `llm`, `llm-router`, `openai-compatible`,
+   `litellm`, `mcp`, `free-llm`, `ollama`, `python`.
+7. **Check**: the Actions tab runs CI (Windows and macOS now also run on pushes to `main`), the
+   README's CI badge turns green, and the one-line installers work from a computer that isn't
+   signed in to GitHub.
+
+Already in the repository (2026-10-09): LICENSE, NOTICE, README, CONTRIBUTING.md,
+CODE_OF_CONDUCT.md (Contributor Covenant 2.1), SECURITY.md, issue forms (bug, idea, and a link
+to the private security form), a pull request checklist, and Dependabot for the workflow actions
+(monthly, one grouped pull request).
 
 ## 3. The `tempo-server terms` table in the README
 
@@ -119,17 +154,23 @@ without an account.
   provider (live list, limits with source and date, terms quote), and what is never accepted
   (keyless tricks, working around rate limits, pooled accounts, GPU-only features).
 - [SECURITY.md](../SECURITY.md): how to report a vulnerability privately, what is in scope (the
-  key vault, auth, the API, the sandbox once built, prompt injection between stages), and the
+  key vault, auth, the API, the code sandbox, prompt injection between stages), and the
   response time.
+- [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md): Contributor Covenant 2.1, with reports going
+  to the maintainer through the private reporting form (no email address published).
+- `.github/ISSUE_TEMPLATE/` (bug report and idea forms; security goes to the private form)
+  and `.github/pull_request_template.md` (the CONTRIBUTING checklist).
 
 ## 7. Before the first public release
 
 - [x] Licence: Apache-2.0, `LICENSE` and `NOTICE` added (step 4).
-- [ ] Secret scanning on; history scanned.
-- [ ] README: the one-line description, quick start, the terms table, links to USE_CASES.md and
-      TEMPO_MODELS.md.
+- [x] History scanned (2026-09-29, 2026-09-30 and 2026-10-09).
+- [ ] Secret scanning and push protection on (owner, §2).
+- [x] README: the one-line description, quick start, the terms table, links to USE_CASES.md and
+      TEMPO_MODELS.md, and badges (CI, licence, Python, systems) (2026-10-09).
 - [ ] `tempo-server terms --check` clean; STATUS.md current.
-- [ ] Tests and lint green on a clean checkout (`pip install -e ".[dev]" && pytest -q`).
+- [x] Tests and lint green on a clean checkout (`pip install -e ".[dev]" && pytest -q`): 482
+      passed, 51 skipped (the sandbox and browser extras, which CI runs), 2026-10-09.
 - [ ] Tag `v0.x` and write release notes (what works, what needs keys, what is planned).
 - [ ] Docker image: publishing the GitHub release runs `.github/workflows/docker-publish.yml`
       (tests first, then `ghcr.io/<owner>/tempo-server:<version>` and `latest`, amd64 and

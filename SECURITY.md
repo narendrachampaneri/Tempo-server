@@ -22,7 +22,9 @@ within 7 days and to fix confirmed problems within 30 days, and we will credit y
 - Provider rules: anything that would make Tempo use an owner-only provider for other users,
   use a server key for a provider that takes only users' own keys, or send a private request to
   a model flagged as logging or training on prompts.
-- The code sandbox, once built (Phase 3).
+- The code sandbox that runs code and maths answers ([docs/SANDBOX.md](docs/SANDBOX.md)): a
+  program reaching the network, files outside its folder or the host, or running past its
+  time, memory, output or disk limits.
 
 ## Out of scope
 

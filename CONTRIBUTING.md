@@ -2,6 +2,7 @@
 
 Thank you for helping. Tempo is open models plus the system that runs and trains them, built
 under a few firm rules. Please read them first; a change that breaks one is not accepted.
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## The rules
 
@@ -93,5 +94,6 @@ macOS (3.13) for pull requests and releases, plus an install test with `install.
 
 ## Reporting problems
 
-Bugs and ideas: open an issue. Security problems: see [SECURITY.md](SECURITY.md); please do not
+Bugs and ideas: open an issue (the forms ask for what we need). Pull requests get a short
+checklist. Security problems: see [SECURITY.md](SECURITY.md); please do not
 open a public issue for them.

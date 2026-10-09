@@ -58,6 +58,9 @@ async def logged_engine(tmp_path=None):
         result = await engine.complete(user(question), engine.options(**options))
         assert result.error is None
         ids.append(result.question_id)
+    # Shadow predictions run in the background and reach the log when they finish; a slow CI
+    # runner (Windows, 2026-10-09) had none of the should_stop ones logged yet.
+    await engine.laya.drain()
     engine.store.set_feedback(ids[1], -1)
     return engine, ids
 

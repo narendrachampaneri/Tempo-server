@@ -1,0 +1,14 @@
+# Keeps the actions in .github/workflows up to date (for example the Node 20 deprecation noted in
+# docs/STATUS.md). Python and npm dependencies are not bumped automatically; Dependabot security
+# alerts still cover them once they are turned on (Settings → Code security).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: CI
