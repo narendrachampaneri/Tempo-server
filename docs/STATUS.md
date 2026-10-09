@@ -923,8 +923,9 @@ Sante (OpenRouter, health).
 
 ## In progress
 
-The pre-public changes (pull request from `claude/inspiring-cerf-i7zxam`), merged once CI is
-green on all three systems.
+Nothing. The pre-public changes are on `main` (pull request #5, merged with CI green on Linux,
+Windows and macOS on `fd23234`, the training dry run included). Going public waits for the owner
+("Blocked: needs the owner").
 
 ## Blocked: needs the owner
 
