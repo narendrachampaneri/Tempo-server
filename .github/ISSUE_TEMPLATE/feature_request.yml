@@ -1,0 +1,28 @@
+name: Idea or feature request
+description: Suggest a feature, a provider or an improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tempo-server has a few firm rules (CONTRIBUTING.md): software only (no GPU at run time), free tiers and
+        open models only, live model lists and limits, each user's own keys, and every provider's terms respected
+        (no working around rate limits, no pooled accounts, no keyless tricks). Ideas that break one can't be accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: How it could work. For a new provider, link its free tier, its limits and its terms page.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you considered
