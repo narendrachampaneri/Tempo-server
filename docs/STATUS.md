@@ -873,6 +873,25 @@ at that commit; `git fsck` finds no unreachable objects):
 - SECURITY.md: the code sandbox is in scope as built (it said "once built").
 - CONTRIBUTING.md links the code of conduct and the forms.
 - PUBLISHING.md §2: this scan, and the owner's steps to go public, in order.
+- **CI fix: TRL below 1.15.** The pull request's `train-dry-run` failed with
+  `AttributeError: 'NoneType' object has no attribute 'apply'` inside TRL. TRL 1.15.0
+  (released 2026-10-08, after `main`'s green run on 2026-10-01) moved its chunked log-prob
+  function to a Triton kernel that is `None` without Triton, yet SFT and DPO now always call
+  it; PyTorch's CPU builds have no Triton, so training on a CPU breaks. In 1.14.2 it is plain
+  PyTorch. Reproduced here with 1.15.0, then the dry run passed with 1.14.2. The `train` extra
+  and the Kaggle notebooks' packages (`tempo/trainkit.py`) now say `trl>=1.0,<1.15`, so Kaggle
+  trains with the version the dry run tests. It belongs in its own step (CLAUDE.md rule 11),
+  but `main` fails the same way and this session can push only this branch, so it rides here
+  as its own commit.
+- **CI fix: sandbox escape tests no longer race the clock.** `test-macos` failed once on
+  `test_no_processes[subprocess.run]`: the run was stopped at the tests' 3 s limit
+  (`stopped='time'`, no output) instead of failing with "wasi does not support processes".
+  Printing a traceback in the sandbox takes most of a second here; a slow macOS runner took
+  over 3 s. The tests that expect an error (no network, no processes, no files outside, no host
+  variables, read-only standard library, the first smoke test) now run with a 30 s limit
+  (`ROOMY`); the time-limit tests keep 3 s. Reproduced with the old test under a 0.5 s limit
+  (7 failed, same signature); the new tests pass under it, and the whole file passes with the
+  real limits (31 passed). The sandbox itself is unchanged.
 
 ## Live catalog on 2026-09-28 (public data, no keys)
 
@@ -1047,6 +1066,8 @@ update the limits (`tempo-server models --free` shows them), and that Mistral's 
   3); the probe set (`evalset.yaml`) in `models compare`; a judge that sees both answers in
   random order; Tempo-Core on both T4s; `models promote --rollback`; Granite 3.3 2B as the second
   family.
+- Lift the TRL cap (`trl>=1.0,<1.15` in `pyproject.toml` and `tempo/trainkit.py`) once a TRL
+  release trains on CPU again (SFT and DPO without Triton); the dry run in CI shows it.
 - Later tasks (noted, not started):
   - A slimmer Docker image (owner's decision: 627 MB is fine for 0.1).
   - Drop the `tempo` alias before 1.0.
