@@ -1,12 +1,17 @@
 # Tempo-server
 
+[![CI](https://github.com/narendrachampaneri/Tempo-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/narendrachampaneri/Tempo-server/actions/workflows/ci.yml)
+[![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+![Python 3.11 to 3.14](https://img.shields.io/badge/python-3.11%20to%203.14-blue.svg)
+![Windows, macOS, Linux](https://img.shields.io/badge/runs%20on-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
+
 **Tempo-server is open models plus the system that runs and trains them.** It routes every question to the best free or open model, checks the answer, fixes it when it is weak, shows every step, and trains its own small open models (Tempo-Router, Tempo-Judge, Tempo-Core) from the answers that passed, all on an ordinary CPU ([plan](docs/TEMPO_MODELS.md); the training kit and its dry run are ready, no real run yet: [docs/TRAINING.md](docs/TRAINING.md)).
 
 Tempo is a **self-routing AI platform**. You ask a question from the web app, the CLI or the API. Tempo works out what kind of question it is and picks the best free or open-source model that is available. It checks the answer, and when the answer is weak it brings in more models to fix it, merge several drafts, or split the job into parts. A small **thinking window** shows every stage live: its job, the model, the reason, the time taken and the free quota left.
 
 Tempo is also meant to be **used by other tools**: it exposes itself as an OpenAI-compatible model (`tempo/auto`), so any OpenAI client can use it by changing the base URL.
 
-> **Status: Phase 2 (Smart) is done.** The staged engine (draft → check → fix → merge/polish, with early stop and budgets), the quota manager, answer checking, cascade, mixture and decompose strategies, the embedding classifier, the semantic cache, measured skill scores, registry sync and health checks, users with their own provider keys, and the usage dashboard all work. Laya runs as the fast decision-maker in shadow mode, and every question is logged for tuning. The learned router, the MCP server and the SDK come next (see the [roadmap](docs/ARCHITECTURE.md#11-roadmap)).
+> **Status: Phase 2 (Smart) is done.** The staged engine (draft → check → fix → merge/polish, with early stop and budgets), the quota manager, answer checking, cascade, mixture and decompose strategies, the embedding classifier, the semantic cache, measured skill scores, registry sync and health checks, users with their own provider keys, and the usage dashboard all work. Laya runs as the fast decision-maker in shadow mode, and every question is logged for tuning. Since then: the MCP server and the Python and JavaScript SDKs ([docs/MCP.md](docs/MCP.md), [sdk/](sdk/)), code and maths answers checked by running them in a sandbox ([docs/SANDBOX.md](docs/SANDBOX.md)), the training kit with a passing dry run, faster answers ([docs/SPEED.md](docs/SPEED.md)) and the new web app. The first real training run and the learned router come next (see the [roadmap](docs/ARCHITECTURE.md#11-roadmap)).
 >
 > **Software only.** Everything Tempo runs works on an ordinary CPU computer or a free cloud service; nothing needs a GPU. Free notebooks (Kaggle) are used only for offline training jobs, such as fine-tuning Laya ([the rule](docs/ARCHITECTURE.md#1-design-principles)).
 
@@ -415,7 +420,7 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 - [docs/TRAINING.md](docs/TRAINING.md): the training path step by step: collect, prepare, Kaggle, import, compare, promote; the dry run.
 - [docs/TEMPO_MODELS.md](docs/TEMPO_MODELS.md): Tempo's own open models (Tempo-Router, Tempo-Judge, Tempo-Core, Tempo Tune add-ons): data, training plan, promotion gate, collapse protection, release.
 - [docs/USE_CASES.md](docs/USE_CASES.md): 20 scenarios Tempo is for, what each still needs, and its roadmap phase.
-- [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).
+- [docs/PUBLISHING.md](docs/PUBLISHING.md): licence options, keys, the demo, and the checklist before going public. See also [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md) and [examples/](examples/).
 - [docs/COLLECT_ANYWHERE.md](docs/COLLECT_ANYWHERE.md): step-by-step `tempo-server collect` on a Windows computer (local open-licence models), and as a scheduled GitHub Actions job that resumes across runs.
 - [docs/RESEARCH.md](docs/RESEARCH.md): existing GitHub projects (routers, gateways, model-mixing methods), the free LLM API providers and their limits, and what to avoid.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the full design: components, request lifecycle, the staged engine, Laya, thinking-window events, the neural router, using Tempo as a skill (API / MCP / CLI), security, tech stack, the roadmap and the planned **Tempo Tune** phase.
