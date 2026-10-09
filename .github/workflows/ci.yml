@@ -35,8 +35,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install "ruff>=0.16,<0.17"
@@ -52,15 +52,15 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: "**/pyproject.toml"
       - run: pip install -e ".[dev]"
       - name: Sandbox runtimes (cached between runs)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/tempo-sandbox
           key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
@@ -81,15 +81,15 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: "**/pyproject.toml"
       - run: pip install -e ".[dev]"
       - name: Sandbox runtimes (cached between runs)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/tempo-sandbox
           key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
@@ -106,15 +106,15 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: "**/pyproject.toml"
       - run: pip install -e ".[dev]"
       - name: Sandbox runtimes (cached between runs)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/tempo-sandbox
           key: sandbox-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tempo/sandbox.py') }}
@@ -134,8 +134,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -145,7 +145,7 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[train]"
       - name: Downloads (tokenizers, Laya's configs, llama.cpp) cached between runs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/huggingface/hub
@@ -157,7 +157,7 @@ jobs:
             tempo-server train dry-run --work "$RUNNER_TEMP/dry-run"
       - name: Keep the reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: train-dry-run-reports
           path: |
@@ -173,8 +173,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -185,7 +185,7 @@ jobs:
         run: echo "version=$(python -c 'import playwright; print(playwright.__version__)')" >> "$GITHUB_OUTPUT"
       - name: Chromium for Playwright (cached between runs)
         id: browser
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
@@ -200,7 +200,7 @@ jobs:
         run: TEMPO_REQUIRE_E2E=1 TEMPO_SCREENSHOTS=1 pytest tests/test_web_e2e.py -q
       - name: Keep the screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: web-screenshots
           path: docs/screenshots
@@ -209,14 +209,14 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - run: pip install build twine
       - run: python -m build
       - run: twine check --strict dist/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist/
@@ -236,12 +236,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Download caches for uv and pip (pipx) in the runner's temp folder
@@ -249,7 +249,7 @@ jobs:
           echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache" >> "$GITHUB_ENV"
           echo "PIP_CACHE_DIR=$RUNNER_TEMP/pip-cache" >> "$GITHUB_ENV"
       - name: uv and pip downloads (cached between runs)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ${{ runner.temp }}/uv-cache
@@ -351,13 +351,13 @@ jobs:
     env:
       TEMPO_PYTHON: python
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: "**/pyproject.toml"
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
